@@ -40,8 +40,10 @@ function anchorsIn(path: string): Set<string> {
   return new Set(headings);
 }
 
+// Payload is matched as the CMS name only: "payloads" of HTTP requests are not a leftover.
 const LEFTOVERS =
-  /colonia|children|pnpm|godot|gdscript|payload|drizzle|fastify|docs\/superpowers|docs\/research|\bprd\b/i;
+  /colonia|children|pnpm|godot|gdscript|drizzle|fastify|docs\/superpowers|docs\/research|\bprd\b/i;
+const CASE_SENSITIVE_LEFTOVERS = /\bPayload\b/;
 
 describe("anchorOf", () => {
   it("follows GitHub's rule", () => {
@@ -57,7 +59,9 @@ describe.each(files.map((path) => [relative(repoRoot, path), path]))("%s", (_nam
   const text = readFileSync(path, "utf8");
 
   it("carries no learn-play project rule", () => {
-    const hits = text.split("\n").filter((line) => LEFTOVERS.test(line));
+    const hits = text
+      .split("\n")
+      .filter((line) => LEFTOVERS.test(line) || CASE_SENSITIVE_LEFTOVERS.test(line));
     expect(hits).toEqual([]);
   });
 
