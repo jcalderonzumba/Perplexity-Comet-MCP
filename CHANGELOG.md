@@ -8,6 +8,7 @@ All notable changes to this project will be documented in this file.
 
 - **Local gates** - Git hooks under `.githooks/` refuse commits and pushes to `main`, and refuse to push a branch until its last commit passed the phase review and preflight
 - **Claude Code hooks** - `.claude/settings.json` runs `protect-main.sh` on git commands and `pr-gate.sh` on `gh pr create` and `gh pr merge`, refusing writes to `main` and pull requests whose last commit lacks either stamp
+- **`AGENTS.md`** - the project's instructions for people and coding agents: where the design lives, the workflow and its gates, how code is written and tested
 
 ## [2.6.2] - 2026-01-11
 
