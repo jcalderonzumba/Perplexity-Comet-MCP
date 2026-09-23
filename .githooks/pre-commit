@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+# Refuse commits on main. Activate with: git config core.hooksPath .githooks
+branch=$(git rev-parse --abbrev-ref HEAD 2>/dev/null)
+if [ "$branch" = "main" ]; then
+  echo "pre-commit: commits on main are forbidden. Create a branch and open a PR (see AGENTS.md)." >&2
+  exit 1
+fi

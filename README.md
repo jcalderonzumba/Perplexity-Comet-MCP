@@ -442,6 +442,16 @@ wsl --shutdown
 
 ## Development
 
+Working on this repository needs Node 18 or later, `jq` and `git`. The project's instructions for people and agents are in [`AGENTS.md`](AGENTS.md).
+
+Activate the git hooks once per clone:
+
+```bash
+git config core.hooksPath .githooks
+```
+
+The hooks refuse commits and pushes to `main`, and refuse to push a branch until the phase review and preflight have both passed on its last commit.
+
 ### Build from Source
 
 ```bash
