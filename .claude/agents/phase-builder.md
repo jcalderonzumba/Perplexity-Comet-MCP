@@ -42,7 +42,7 @@ The brief names your task; it never pastes the task's text. The plan is the cont
 4. **Write clean code.** The `uncle-bob-craft` skill is loaded; follow it and AGENTS.md's *Writing code*, the three boundaries of spec §4.2 above all: small single-purpose functions, names that carry the meaning, dependencies pointing inward, no abstraction before duplication justifies it.
 5. **Fetch the docs.** Before using a specific API of the MCP SDK, `chrome-remote-interface`, Vitest or Biome, fetch its current documentation with Context7 and read it against the installed version, as the plan's header tells you. CodeGraph (`codegraph_explore`, or `codegraph explore` in Bash) answers structural questions before you grep. Library documentation is yours to fetch, from Context7 and then the web; an outside fact a decision rests on is not, and stops you (*When you stop*).
 6. **Commit as you go.** Run `npm run check` before every commit, and commit only when it passes. Commit messages are conventional (`feat(ask): …`, `test(cdp): …`, `docs(readme): …`), in English, and end with the attribution lines the session's reminder gives you. Plan ticks and research notes are committed in the notebook, `git -C .work add … && git -C .work commit …`, in the same style; never commit them in the public repository.
-7. **Keep the records the task names.** A task's acceptance often names `README.md`, `CHANGELOG.md` or the AGENTS.md Commands table: update them in the same commit as the code, written as the description of a finished project. A follow-up you discover goes where AGENTS.md workflow step 10 places it, committed in `.work/` with your task's tick (the plan lives in the notebook, so it can never share a commit with the code), and your report lists it.
+7. **Keep the records the task names.** A task's acceptance often names `README.md`, `CHANGELOG.md` or the AGENTS.md Commands table: update them in the same commit as the code, written as the description of a finished project. A follow-up you discover goes where AGENTS.md workflow step 10 places it, committed in `.work/` with your task's tick, or in a `.work` commit of its own when your unit ticks nothing (the plan lives in the notebook, so it can never share a commit with the code), and your report lists it.
 8. **Tick your box.** When your unit is a whole task and it is complete, tick its checkbox in the plan (`- [ ]` to `- [x]`) and commit the tick in `.work/` after your last code commit. When your unit is a slice, tick nothing, unless the brief carries *last slice of the task: tick it*, in which case you tick the task. Never touch the phase heading.
 9. **End with the report.** Your final message is the report below, and nothing after it.
 
@@ -84,7 +84,7 @@ Your final message, in this shape and order, with these headings verbatim: the r
 <each change outside the unit's text, with its reason; "none">
 
 ### Follow-ups filed
-<each follow-up written, with the plan phase or spec §12.1 entry it went under; "none">
+<each follow-up written, with the plan phase or spec §12.3 entry it went under; "none">
 
 ### Blocked on
 <the question, with what was tried and what the builder recommends; only when blocked>
