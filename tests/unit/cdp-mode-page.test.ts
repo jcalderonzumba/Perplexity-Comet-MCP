@@ -60,6 +60,36 @@ describe("cdpModePage", () => {
     expect(client.clicks).toEqual([{ x: 612, y: 388.5 }]);
   });
 
+  it("reads the tab's origin before each click", async () => {
+    const client = new FakePageClient();
+    const page = cdpModePage(client);
+
+    await page.clickAt({ x: 1, y: 2 });
+    await page.clickAt({ x: 3, y: 4 });
+
+    expect(client.originReads).toBe(2);
+  });
+
+  it.each([
+    "https://example.com",
+    "https://www.perplexity.ai.example",
+    "http://www.perplexity.ai",
+    "null",
+  ])(
+    "refuses to click, and clicks nothing, when the tab's origin is %s",
+    async (origin) => {
+      const client = new FakePageClient();
+      client.origin = origin;
+
+      const click = cdpModePage(client).clickAt({ x: 612, y: 388.5 });
+
+      await expect(click).rejects.toThrow(
+        `refused to click: the tab is on ${origin}, not https://www.perplexity.ai`,
+      );
+      expect(client.clicks).toEqual([]);
+    },
+  );
+
   it("presses Escape with the client's key press", async () => {
     const client = new FakePageClient();
 
@@ -89,7 +119,7 @@ describe("cdpModePage", () => {
 describe("openPerplexityIfElsewhere", () => {
   it("navigates to Perplexity, waiting for the load, when the tab is elsewhere", async () => {
     const client = new FakePageClient();
-    client.currentState = { currentUrl: "https://example.com/" };
+    client.origin = "https://example.com";
 
     await openPerplexityIfElsewhere(client);
 
@@ -98,8 +128,35 @@ describe("openPerplexityIfElsewhere", () => {
     ]);
   });
 
-  it("navigates when the tab's address is not known", async () => {
+  it("navigates when the tab has no origin yet", async () => {
     const client = new FakePageClient();
+    client.origin = "null";
+
+    await openPerplexityIfElsewhere(client);
+
+    expect(client.navigations).toHaveLength(1);
+  });
+
+  it.each([
+    "https://www.perplexity.ai.example",
+    "https://perplexity.ai.evil.test",
+    "http://www.perplexity.ai",
+  ])(
+    "navigates from %s, whose origin only resembles Perplexity's",
+    async (origin) => {
+      const client = new FakePageClient();
+      client.origin = origin;
+
+      await openPerplexityIfElsewhere(client);
+
+      expect(client.navigations).toHaveLength(1);
+    },
+  );
+
+  it("reads the tab's origin afresh rather than trusting the last known address", async () => {
+    const client = new FakePageClient();
+    client.currentState = { currentUrl: "https://www.perplexity.ai/" };
+    client.origin = "https://example.com";
 
     await openPerplexityIfElsewhere(client);
 
@@ -108,9 +165,7 @@ describe("openPerplexityIfElsewhere", () => {
 
   it("stays when the tab is on Perplexity already", async () => {
     const client = new FakePageClient();
-    client.currentState = {
-      currentUrl: "https://www.perplexity.ai/search/some-thread",
-    };
+    client.origin = "https://www.perplexity.ai";
 
     await openPerplexityIfElsewhere(client);
 
@@ -140,13 +195,36 @@ describe("createCdpModeTool", () => {
 
   it("opens Perplexity through the client", async () => {
     const client = new FakePageClient();
-    client.currentState = { currentUrl: "https://example.com/" };
+    client.origin = "https://example.com";
 
     await createCdpModeTool(client, quote).openPerplexity();
 
     expect(client.navigations).toEqual([
       "https://www.perplexity.ai/ wait=true",
     ]);
+  });
+
+  it("fails a switch without a click when the tab is not on Perplexity", async () => {
+    document.body.innerHTML = readFileSync(
+      join(
+        dirname(fileURLToPath(import.meta.url)),
+        "fixtures",
+        "mode-menu.html",
+      ),
+      "utf8",
+    );
+    const client = new FakePageClient();
+    client.origin = "https://perplexity.ai.example";
+
+    const result = await createCdpModeTool(client, quote).core.switchMode(
+      "research",
+    );
+
+    expect(result).toMatchObject({
+      ok: false,
+      failure: { kind: "page-error" },
+    });
+    expect(client.clicks).toEqual([]);
   });
 
   it("quotes page text with the wrapper it is given", () => {

@@ -223,6 +223,21 @@ export async function clickAtPoint(
   await input.dispatchMouseEvent({ type: "mouseReleased", ...press });
 }
 
+/** The slice of the CDP Page domain that `readTopFrameOrigin` uses. */
+export interface FrameTreeAPI {
+  getFrameTree(): Promise<{ frameTree: { frame: { securityOrigin: string } } }>;
+}
+
+/**
+ * The security origin of the tab's top frame, as the browser reports it.
+ * Read through CDP rather than page script, so a page cannot answer for
+ * itself, and read afresh, since the tab can move without this client.
+ */
+export async function readTopFrameOrigin(page: FrameTreeAPI): Promise<string> {
+  const { frameTree } = await page.getFrameTree();
+  return frameTree.frame.securityOrigin;
+}
+
 // Detect if running in WSL (must be before windowsFetch)
 function isWSL(): boolean {
   if (platform() !== "linux") return false;
@@ -1792,6 +1807,12 @@ export class CometCDPClient {
   async clickAt(point: PagePoint): Promise<void> {
     this.ensureConnected();
     await clickAtPoint(this.client!.Input, point);
+  }
+
+  /** The security origin of the connected tab's top frame, read now. */
+  async pageOrigin(): Promise<string> {
+    this.ensureConnected();
+    return readTopFrameOrigin(this.client!.Page);
   }
 
   /**

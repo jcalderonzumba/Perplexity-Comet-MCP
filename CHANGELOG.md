@@ -25,6 +25,7 @@ All notable changes to this project will be documented in this file.
 
 ### Fixed
 
+- **Mode clicks land only on Perplexity** - before each pointer click of a mode switch, the server asks the browser for the tab's origin and clicks only when it is exactly `https://www.perplexity.ai`; on any other site, including one whose address merely contains `perplexity.ai`, the switch fails and nothing is clicked. `comet_mode` likewise decides whether to open Perplexity first from the tab's origin read at that moment, rather than from the last address the server navigated to
 - **A forged close marker in page text is neutralised** - text read from the page that imitates the `[END UNTRUSTED PAGE CONTENT nonce=…]` marker the server writes is now defused like a forged opening marker, before it is wrapped
 
 ### Removed
