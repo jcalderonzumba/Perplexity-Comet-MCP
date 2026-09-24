@@ -1,12 +1,12 @@
 ---
 name: review-phase
-description: Run the phase review gate on the current PR branch — after the phase is complete (code, tests, README, CHANGELOG, plan ticks, PR draft) and before npm run preflight, on every branch that will become a PR, docs-only included. Prepares the brief, dispatches the phase-reviewer subagent with fresh context, runs the fix loop for up to three rounds, records the Code-review verdict in the PR description draft, and writes the plan's DONE marker once the PR exists.
+description: Run the phase review gate on the current PR branch — after the phase is complete (code, tests, README, CHANGELOG, plan ticks, PR draft) and before npm run preflight, on every branch that will become a PR, docs-only included. Prepares the brief, dispatches the phase-reviewer subagent with fresh context, runs the fix loop for up to three rounds, records the Code-review verdict in the PR description draft, runs npm run preflight, opens the PR after one owner confirmation, and writes the plan's DONE marker once the PR exists. /run-phase invokes it when a phase's last unit is done; on a branch /run-phase built, a fresh phase-builder fixes each round's findings.
 
 ---
 
 # Phase Review Gate
 
-The sibling of `/review-plan`: that gate checks a plan before code exists, this one checks the code afterwards against the same contract. You are the **clerk**: you prepare the brief, dispatch the reviewer, fix what it finds and keep the record. The `phase-reviewer` subagent is the **judge**: it reviews with fresh context and is the only party that adds an approval to `.git/review-ok`.
+The sibling of `/review-plan`: that gate checks a plan before code exists, this one checks the code afterwards against the same contract. You are the **clerk**: you prepare the brief, dispatch the reviewer, get what it finds fixed and keep the record. The `phase-reviewer` subagent is the **judge**: it reviews with fresh context and is the only party that adds an approval to `.git/review-ok`.
 
 The order of the gates on every PR: `/review-phase`, then `npm run preflight`, then `gh pr create --body-file`, then the DONE marker (§9). The hooks refuse `gh pr create`, `gh pr merge` and `git push` until HEAD is listed in both `.git/review-ok` and `.git/preflight-ok`. Each stamp lists every commit its gate passed in this clone, one sha per line, so reviewing one branch never costs a parallel branch its approval.
 
@@ -15,6 +15,8 @@ Throughout, `<branch>` is `git branch --show-current` with every `/` replaced by
 - `pr-body.md` — the PR description draft;
 - `round-N.md` — each reviewer report, saved verbatim;
 - `rulings.md` — the owner's rulings on disputed findings.
+
+`/run-phase` invokes this skill when a phase's last unit is done ([§7 of that skill](../run-phase/SKILL.md#7-finishing-the-phase)), and the owner may invoke it directly on any branch. A branch that holds a **run state**, `.git/run/<branch>/work-list.md`, was built by `/run-phase`: its rounds are fixed by a builder (§5), whoever invoked this skill.
 
 ## 1. Preconditions
 
@@ -106,7 +108,9 @@ Write one "what changed" line for every finding of the previous round, fixed, de
 
 ## 4. Dispatch
 
-First withdraw any earlier approval of HEAD, so that after this dispatch HEAD is listed only if this review approves it:
+Before anything else, run `.githooks/review-check.sh "$(git rev-parse --show-toplevel)"` (§7). When it passes, `phase-reviewer` already approved this very HEAD with clean trees in an earlier dispatch: do not withdraw or dispatch, go to §8. This is how a re-invoked `/run-phase` picks up a finish that stopped after the review.
+
+Otherwise, first withdraw any earlier approval of HEAD, so that after this dispatch HEAD is listed only if this review approves it:
 
 ```sh
 .githooks/review-withdraw.sh "$(git rev-parse --show-toplevel)"
@@ -114,7 +118,7 @@ First withdraw any earlier approval of HEAD, so that after this dispatch HEAD is
 
 It removes HEAD's line and keeps every other branch's. Without it, an approval of the same commit from an earlier dispatch would still read as approval after this one reports Not approved, stops early or comes back malformed.
 
-Then dispatch with the Agent tool: `subagent_type: phase-reviewer`, in the foreground, with the brief as the prompt. Never a fork, never `general-purpose`, never in the background. Save the returned report verbatim to `.git/review/<branch>/round-<round>.md`, then check the stamp (§7).
+Then dispatch with the Agent tool: `subagent_type: phase-reviewer`, with the brief as the prompt, and do nothing else until its report arrives (in an interactive session it arrives as a task notification). Never a fork, never `general-purpose`. Save the returned report verbatim to `.git/review/<branch>/round-<round>.md`, then check the stamp (§7).
 
 ## 5. The loop
 
@@ -123,7 +127,18 @@ Then dispatch with the Agent tool: `subagent_type: phase-reviewer`, in the foreg
 - **Consider:** fix, defer or leave; list them in the verdict section either way.
 - **A deferral that leaves work for later**, whether from a Should Fix or a Consider, is also written as a follow-up in the same round, where AGENTS.md workflow step 10 places it. The PR draft says where it was filed.
 - Then return to §1: the preconditions, a new brief with the next round number, and a new dispatch.
+- **On a branch with a run state, a builder fixes the round**, not you: see *Fixing through a builder* below. The rules above are then the builder's, and you keep the record.
 - **Three rounds.** If round three still reports Must Fix, stop. Bring the owner the open findings, what was tried for each, and any disagreement with the reviewer. Do not dispatch a fourth round without the owner's word.
+
+### Fixing through a builder
+
+On a branch with a run state, the session that runs this skill is `/run-phase`'s runner or stands in for it, and it never reads the diff. When this skill starts and the work list holds a round unit `r<N>` that is not `done`, that round is still being fixed: continue it before §1, as the bullets of [§8 of `/run-phase`](../run-phase/SKILL.md#8-re-invocation) continue a unit of its status, with the brief of step 2 below. For round `N` reported Not approved:
+
+1. Add a unit `r<N>` to the work list, titled `Review round <N>`, depending on every other unit, `pending`.
+2. Write its brief to `$run/r<N>.brief.md` as [§3 of `/run-phase`](../run-phase/SKILL.md#3-the-brief) sets out, with two fields changed. **Unit** reads `Review round <N>: the findings of .git/review/<branch>/round-<N>.md`, followed by `Rulings: .git/review/<branch>/rulings.md` when that file exists. In **Rules**, the first sentence becomes *Read the reviewer's report and the rulings, and work the findings as the "A review-round unit" section of `.claude/agents/phase-builder.md` says; do not run `executing-plans`.* The sentence about ticking becomes *Fix every Must Fix; fix each Should Fix or defer it with its reason; fix, defer or leave each Consider; file the follow-up for any deferral that leaves work for later. A finding you believe is wrong is a stop: report `blocked` with the finding, the reviewer's reasoning and yours. Tick nothing.* The hand-off notes are every `done` unit's, earlier rounds included.
+3. Dispatch it and handle its report as [§4 to §6 of `/run-phase`](../run-phase/SKILL.md#4-dispatch) do, with these differences. Check 3 of §5 there becomes: the report's `### Findings` names every finding id of `round-<N>.md`. The report's *Task coverage* row is not written. Its *Findings* lines that defer go into this skill's `### Deferred`, one line per finding id with the reason.
+4. A builder `blocked` on a disputed finding is a dispute: take it through §6 below, with the builder's reasoning as yours. Then resume the builder with the ruling as its answer, as [§6 of `/run-phase`](../run-phase/SKILL.md#6-a-blocked-builder) resumes one.
+5. Once `r<N>` is `done`, write the next brief's *What changed since round N* lines from its `### Findings`, and return to §1.
 
 ## 6. Disputes
 
@@ -158,9 +173,10 @@ After every dispatch run:
    - plan issues the reviewer raised;
    - disputes and the owner's rulings;
    - skills invoked, skills skipped with reasons, Context7 docs fetched, research notes read (by date and topic), whether CodeGraph ran.
-2. Run `npm run preflight` (plan 1 phase 1 only, where no `preflight` script exists yet: skip it; `preflight-check.sh` passes). It needs the same clean HEAD the reviewer stamped.
-3. Push the branch with `git push -u origin <branch name>`, then open the PR: `gh pr create --title "<conventional commit title>" --body-file .git/review/<branch>/pr-body.md`.
-4. On a phase branch, write the DONE marker (§9).
+2. Run `npm run preflight`, unless `.githooks/preflight-check.sh "$(git rev-parse --show-toplevel)"` already passes for HEAD. It needs the same clean HEAD the reviewer stamped and drives the owner's local Comet for up to ten minutes, so run it in the background and wait for it to finish. Record its result in the draft's *Verification* section. **A failing preflight stops the finish.** Show the owner the failing step and its output, and fix nothing: a code failure there is a new commit, which needs a new review round, and the remaining failures are usually about the environment (Comet not running or not signed in).
+3. **Ask the owner once** before anything is published, with AskUserQuestion. Show the PR title (a conventional commit title) and the draft's full text. The first option, recommended, pushes the branch and opens the PR; the second is *not yet*, which leaves both stamps in place for a later invocation.
+4. On the owner's yes, push the branch with `git push -u origin <branch name>`, then open the PR: `gh pr create --title "<conventional commit title>" --body-file .git/review/<branch>/pr-body.md`.
+5. On a phase branch, write the DONE marker (§9).
 
 Merge with the `land-pr` skill.
 
