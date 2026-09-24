@@ -1,7 +1,8 @@
 /**
  * MCP Test Runner
- * Spawns the MCP server and runs the test battery from docs/testing.md.
- * Usage: node test-runner.mjs
+ * Spawns the built MCP server (dist/index.js) and runs the live Pro battery
+ * against the local Comet (README, Development). Spends Perplexity Pro queries.
+ * Usage: npm run test:live:pro
  */
 
 import { dirname, resolve } from "node:path";

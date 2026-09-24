@@ -16,6 +16,7 @@
     "prepare": "npm run build",
     "prepublishOnly": "npm run build",
     "check": "node scripts/check.mjs",
+    "preflight": "node scripts/preflight.mjs",
     "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.tools.json",
     "test": "vitest run",
     "test:watch": "vitest",
