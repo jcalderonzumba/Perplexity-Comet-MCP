@@ -145,6 +145,10 @@ Parameters:
 Returns: Complete response text
 ```
 
+The answer is page content, so it comes back wrapped in UNTRUSTED markers carrying a fresh nonce, over stdio and the HTTP bridge alike.
+
+The mode `comet_mode` last set carries over to every ask. Perplexity puts the mode back to Search whenever the page navigates, so after its own navigation (a new chat, a reconnect) and before it types the prompt, `comet_ask` reads the page's mode and switches it back when it differs. Without a mode set by `comet_mode`, or with the page already in it, nothing is clicked and the result is just the answer. When the mode cannot be put back, the ask still runs, and its result starts with a line beginning `Mode not applied:` that says which mode and why, followed by a blank line and the answer.
+
 **Examples:**
 
 ```
@@ -268,7 +272,7 @@ Without a mode, `comet_mode` reads the mode from the mode button in Perplexity's
 
 With a mode, it opens the mode menu with real pointer clicks, selects the mode's item, and opens the menu again to read which item is checked. It says `Switched to <mode> mode` only when the menu and the button both show the new mode. Otherwise it returns an error naming what the page showed. Either way it closes the menu. If the tab is not on Perplexity, it opens Perplexity's home page first. Before every click it asks the browser which site the tab shows, and it clicks only on Perplexity's own site, `https://www.perplexity.ai`: on any other site the switch fails and nothing is clicked.
 
-Text read from the page is wrapped in the same UNTRUSTED markers as answers. Perplexity puts the mode back to Search when the page navigates, for example for a new chat.
+Text read from the page is wrapped in the same UNTRUSTED markers as answers. Perplexity puts the mode back to Search when the page navigates, for example for a new chat; the server remembers the mode `comet_mode` last set, and `comet_ask` switches back to it before each ask (see `comet_ask`).
 
 ---
 

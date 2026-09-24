@@ -90,11 +90,15 @@ export class FakeModePage implements ModePage {
     return this.checkedLabel;
   }
 
-  /** What a navigation does: the page back in `label`, the menu closed. */
-  navigateTo(label: string): void {
+  /**
+   * What a navigation does: the page back in `label`, the menu closed, and
+   * the button back after `buttonAppearsAfterMs` more virtual milliseconds.
+   */
+  navigateTo(label: string, buttonAppearsAfterMs = 0): void {
     this.checkedLabel = label;
     this.buttonText = label;
     this.menuOpen = false;
+    this.buttonAppearsAt = this.waitedMs + buttonAppearsAfterMs;
   }
 
   /** What a navigation to a page without the input bar does. */
