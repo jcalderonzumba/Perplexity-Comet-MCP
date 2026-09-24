@@ -467,6 +467,21 @@ Both batteries start the built server (`npm run build` first) and drive your loc
 - **No-pro** (`tests/run-no-pro.mjs`): needs Comet installed and signed in; spends no Perplexity Pro queries. `npm run preflight` runs it on every pull request, with a ten-minute ceiling.
 - **Pro** (`tests/run-all.mjs`): needs Comet signed in to Perplexity Pro and **spends Pro queries**. It is run by hand when a change touches asking, polling, modes or agentic browsing, and the pull request records the result.
 
+The no-pro battery prints one line per check: its verdict, its id, and what the tool replied.
+
+- `PASS`: the check's condition held.
+- `FAIL`: it did not, or the call threw or timed out. This fails the battery.
+- `KNOWN`: it failed, and it is on the known-failures list in `tests/lib/battery-score.mjs`, which gives the reason and the plan that owns the fix. It does not fail the battery. The line still shows the actual reply, so a change in why it fails stays visible.
+- `UNEXPECTED PASS`: it passed although it is listed. This fails the battery until the entry is removed.
+
+If connect fails, the other checks are not run and count as failed. The battery ends with a summary, in which an unexpected pass counts as failed, and exits non-zero on any failure:
+
+```
+Results: 8 passed, 0 failed, 2 known
+```
+
+Today the list holds the switches to the `labs` and `learn` modes, which Perplexity moved out of its mode dropdown.
+
 ### Gates
 
 There is no hosted CI. The git hooks refuse commits and pushes to `main`, and refuse to push a branch until its last commit is listed in both `.git/review-ok` (the phase review approved it) and `.git/preflight-ok` (`npm run preflight` passed on it). Changes follow the workflow in [`AGENTS.md`](AGENTS.md): a reviewed plan, one branch per plan phase built test-first, a phase review by a fresh-context reviewer, then preflight before the pull request. Claude Code users get the steps as the `/review-plan`, `/run-phase` and `/review-phase` skills.
