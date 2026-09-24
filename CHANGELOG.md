@@ -19,6 +19,7 @@ All notable changes to this project will be documented in this file.
 
 - `npm test` runs the Vitest suite; the live batteries are `npm run test:live` (no Pro queries) and `npm run test:live:pro` (spends Pro queries)
 - **The live no-pro battery scores every check** - each check has a condition that can fail and prints `PASS`, `FAIL`, `KNOWN` or `UNEXPECTED PASS`; a known-failures list gives the reason and the owning plan for each check that fails for a known cause (today the `labs` and `learn` mode switches), and the battery fails on any failure or unexpected pass. It needs Comet already running with its debug port on the server's port (`COMET_PORT`, 9223 by default), and fails at connect without calling a tool when nothing answers there
+- **`npm run preflight` fails closed on a `git` read it cannot make** - a failed `git status` (of the working tree, or of a `.work/` directory that is not a git repository of its own) or `git rev-parse HEAD` stops it with the failing command, and it records no approval, instead of reading the failure as a clean tree
 
 ### Removed
 

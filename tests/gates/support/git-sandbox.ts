@@ -138,20 +138,23 @@ export class GitSandbox {
  */
 export function pathWith(tools: readonly string[]): string {
   const bin = mkdtempSync(join(tmpdir(), "comet-mcp-bin-"));
-  for (const tool of tools) {
-    const found = (process.env.PATH ?? "")
-      .split(delimiter)
-      .map((directory) => join(directory, tool))
-      .find((candidate) => {
-        try {
-          accessSync(candidate, constants.X_OK);
-          return true;
-        } catch {
-          return false;
-        }
-      });
-    if (found === undefined) throw new Error(`${tool} is not on PATH`);
-    symlinkSync(found, join(bin, tool));
-  }
+  for (const tool of tools) symlinkSync(findOnPath(tool), join(bin, tool));
   return bin;
+}
+
+/** Where the real `PATH` finds an executable `tool`. */
+export function findOnPath(tool: string): string {
+  const found = (process.env.PATH ?? "")
+    .split(delimiter)
+    .map((directory) => join(directory, tool))
+    .find((candidate) => {
+      try {
+        accessSync(candidate, constants.X_OK);
+        return true;
+      } catch {
+        return false;
+      }
+    });
+  if (found === undefined) throw new Error(`${tool} is not on PATH`);
+  return found;
 }
