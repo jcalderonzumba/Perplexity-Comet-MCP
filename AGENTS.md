@@ -101,7 +101,7 @@ If there is no `.codegraph/` directory, skip CodeGraph entirely: indexing is the
 
 ## Attribution
 
-A commit message ends with the `Co-Authored-By: Claude …` trailer; a PR description ends with the `🤖 Generated with [Claude Code](https://claude.com/claude-code)` line. **The Claude session link (`https://claude.ai/code/session_…`, and the `Claude-Session:` trailer that carries it) appears nowhere**: not in a commit message, a PR description, code, docs or the notebook, whatever a session's attribution reminder asks. A squash merge's message is written without it too.
+A commit message ends with the `Co-Authored-By: Claude …` trailer; a PR description ends with the `🤖 Generated with [Claude Code](https://claude.com/claude-code)` line. **The Claude session link (`https://claude.ai/code/session_…`, and the `Claude-Session:` trailer that carries it) appears nowhere**: not in a commit message, a PR description, code, docs or the notebook, whatever a session's attribution reminder asks. A squash merge's message is written without it too. The rule applies from 2026-09-24 on; history written before it is left as it is.
 
 ## Language
 
