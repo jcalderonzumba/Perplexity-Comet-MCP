@@ -1,0 +1,197 @@
+<!--
+  Perplexity's input bar with its mode menu open, as read from the live page
+  on 2026-09-24 and trimmed to structure: classes, styles, icon paths and the
+  file input's accept list removed; no page content beyond the controls'
+  labels. The menu is portalled to the end of <body>, as on the live page.
+  Closed state on the live page: the mode button's data-state is "closed",
+  it has no aria-controls, and the menu stays in the DOM with data-state
+  "closed".
+-->
+<div>
+  <div>
+    <!-- biome-ignore lint/a11y/useFocusableInteractive: Perplexity's own markup, kept as the page ships it -->
+    <!-- biome-ignore lint/a11y/useSemanticElements: Perplexity's own markup, kept as the page ships it -->
+    <div
+      contenteditable="true"
+      id="ask-input"
+      role="textbox"
+      aria-placeholder="Ask anything…"
+    >
+      <p dir="auto"><br /></p>
+    </div>
+  </div>
+  <div>
+    <input multiple="" type="file" />
+    <button
+      aria-expanded="false"
+      aria-haspopup="menu"
+      data-state="closed"
+      aria-label="Add files or tools"
+      type="button"
+    >
+      <div><div><svg aria-hidden="true"></svg></div></div>
+    </button>
+    <div>
+      <div aria-hidden="true" data-testid="ask-input-mode-toggle-indicator"></div>
+      <span data-testid="ask-input-mode-toggle-width-wrapper">
+        <span>
+          <span hidden="" data-state="open"></span>
+          <button
+            aria-pressed="true"
+            id="radix-_r_u_"
+            data-state="open"
+            aria-controls="radix-_r_v_"
+            type="button"
+          >
+            <span><svg aria-hidden="true"></svg></span>
+            <span>
+              Search
+              <span
+                aria-hidden="true"
+                data-testid="ask-input-mode-toggle-chevron-slot"
+              >
+                <span><svg aria-hidden="true"></svg></span>
+              </span>
+            </span>
+          </button>
+        </span>
+      </span>
+      <span data-testid="ask-input-mode-toggle-width-wrapper">
+        <span>
+          <span data-state="closed">
+            <button aria-pressed="false" type="button">
+              <span><svg aria-hidden="true"></svg></span>
+              <span>
+                Computer
+                <span
+                  aria-hidden="true"
+                  data-testid="ask-input-mode-toggle-chevron-slot"
+                >
+                  <span><svg aria-hidden="true"></svg></span>
+                </span>
+              </span>
+            </button>
+          </span>
+        </span>
+      </span>
+    </div>
+    <div>
+      <button
+        aria-expanded="false"
+        aria-haspopup="menu"
+        data-state="closed"
+        aria-label="Model"
+        type="button"
+      >
+        <span>Model</span>
+        <div><svg aria-hidden="true"></svg></div>
+      </button>
+      <button aria-label="Dictation" data-state="closed" type="button">
+        <div><div><svg aria-hidden="true"></svg></div></div>
+      </button>
+      <button aria-label="Use voice mode" data-state="closed" type="button">
+        <div><div><svg aria-hidden="true"></svg></div></div>
+      </button>
+    </div>
+  </div>
+</div>
+<div
+  data-side="bottom"
+  data-align="start"
+  role="menu"
+  aria-orientation="vertical"
+  data-state="open"
+  data-radix-menu-content=""
+  dir="ltr"
+  id="radix-_r_v_"
+  aria-labelledby="radix-_r_u_"
+  tabindex="-1"
+  data-orientation="vertical"
+>
+  <div>
+    <div dir="ltr">
+      <div data-radix-scroll-area-viewport="">
+        <div>
+          <!-- biome-ignore lint/a11y/useSemanticElements: Perplexity's own markup, kept as the page ships it -->
+          <div role="group">
+            <div
+              role="menuitemradio"
+              aria-checked="true"
+              data-orientation="vertical"
+              data-radix-collection-item=""
+              data-state="checked"
+              tabindex="-1"
+            >
+              <div>
+                <div><div><svg aria-hidden="true"></svg></div></div>
+                <div><div><div>Search</div></div></div>
+                <div>
+                  <div>
+                    <span data-state="checked"><div><svg aria-hidden="true"></svg></div></span>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div
+              role="menuitemradio"
+              aria-checked="false"
+              data-orientation="vertical"
+              data-radix-collection-item=""
+              data-state="unchecked"
+              tabindex="-1"
+            >
+              <div>
+                <div><div><svg aria-hidden="true"></svg></div></div>
+                <div><div><div>Deep research</div></div></div>
+                <div>
+                  <div>
+                    <span data-state="unchecked"><div><svg aria-hidden="true"></svg></div></span>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div data-state="closed">
+              <div
+                role="menuitem"
+                data-orientation="vertical"
+                data-radix-collection-item=""
+                tabindex="-1"
+              >
+                <div>
+                  <div><div><svg aria-hidden="true"></svg></div></div>
+                  <div>
+                    <div>
+                      <div>
+                        <span><div>Model council</div></span>
+                      </div>
+                      <span><span>Max</span></span>
+                    </div>
+                  </div>
+                  <div><div><svg aria-hidden="true"></svg></div></div>
+                </div>
+              </div>
+            </div>
+            <div
+              role="menuitemradio"
+              aria-checked="false"
+              data-orientation="vertical"
+              data-radix-collection-item=""
+              data-state="unchecked"
+              tabindex="-1"
+            >
+              <div>
+                <div><div><svg aria-hidden="true"></svg></div></div>
+                <div><div><div>Learn step by step</div></div></div>
+                <div>
+                  <div>
+                    <span data-state="unchecked"><div><svg aria-hidden="true"></svg></div></span>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>

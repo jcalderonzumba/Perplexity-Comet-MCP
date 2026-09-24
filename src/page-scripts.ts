@@ -3,13 +3,38 @@
 // Each function uses only browser globals (document, etc.) — never Node
 // imports — so the same function body can run in two contexts:
 //
-//   - production: `cometClient.evaluate(\`(${fn.toString()})()\`)` ships the
-//     function body into the page and returns its result through CDP
-//   - tests: imported and called natively in vitest's jsdom env
+//   - production: `cometClient.evaluate(pageScriptExpression(fn, ...args))`
+//     ships the function body into the page, calls it with its arguments,
+//     and returns its result through CDP
+//   - tests: imported and called natively in vitest's jsdom env, or run
+//     through `pageScriptExpression` exactly as production runs them
 //
 // One source of truth, type-checked by TypeScript, exercised by unit tests.
 // Do not add closure references or imports beyond DOM APIs — the
-// stringified form would break.
+// stringified form would break. A helper two scripts share is therefore
+// written inside each of them.
+
+/** A value a page script can receive: anything JSON can carry. */
+export type PageArgument =
+  | string
+  | number
+  | boolean
+  | null
+  | PageArgument[]
+  | { [key: string]: PageArgument };
+
+/**
+ * The expression `evaluate` runs to call `script` in the page with `args`.
+ * Each argument is JSON-serialised, so input reaches the page as data and
+ * never as script text.
+ */
+export function pageScriptExpression<A extends PageArgument[]>(
+  script: (...args: A) => unknown,
+  ...args: A
+): string {
+  const serialisedArgs = args.map((arg) => JSON.stringify(arg)).join(", ");
+  return `(${script.toString()})(${serialisedArgs})`;
+}
 
 export interface ProseState {
   count: number;
@@ -313,4 +338,105 @@ export function extractAgentStatus(): AgentStatusResult {
     response: response.substring(0, 8000),
     hasStopButton: hasActiveStopButton,
   };
+}
+
+// The mode control: Perplexity's input bar shows the current mode on a
+// button ("Search", "Deep research") that opens the mode menu, a
+// `role="menu"` of `menuitemradio` items. As read from the live page on
+// 2026-09-24: the button sits in the input bar's mode-toggle wrapper beside
+// the "Computer" toggle, and is the one of the two that controls a menu
+// (`data-state` open or closed; `aria-expanded` as Radix sets it elsewhere).
+// While the menu is open the button's `aria-controls` names it; once closed
+// the menu can stay in the DOM marked `data-state="closed"`, so it is only
+// ever reached through an open button. Labels are read with `textContent`
+// and compared exactly after trimming and collapsing whitespace.
+
+/** A point in the page's viewport, in CSS pixels. */
+export interface PagePoint {
+  x: number;
+  y: number;
+}
+
+export interface ModeButton {
+  /** The current mode's label as the button shows it. */
+  text: string;
+  /** Whether the mode menu is open. */
+  open: boolean;
+  point: PagePoint;
+}
+
+export interface ModeMenuItem {
+  label: string;
+  checked: boolean;
+}
+
+/** The mode button, or null when the page shows none. */
+export function locateModeButton(): ModeButton | null {
+  const wrapper = '[data-testid="ask-input-mode-toggle-width-wrapper"]';
+  const button = document.querySelector(
+    `${wrapper} button[data-state], ${wrapper} button[aria-expanded]`,
+  );
+  if (!button) return null;
+  const rect = button.getBoundingClientRect();
+  return {
+    text: (button.textContent ?? "").replace(/\s+/g, " ").trim(),
+    open:
+      button.getAttribute("data-state") === "open" ||
+      button.getAttribute("aria-expanded") === "true",
+    point: { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 },
+  };
+}
+
+/** The open mode menu's radio items, or null when the menu is not open. */
+export function readModeMenuItems(): ModeMenuItem[] | null {
+  const openModeMenu = (): Element | null => {
+    const wrapper = '[data-testid="ask-input-mode-toggle-width-wrapper"]';
+    const button = document.querySelector(
+      `${wrapper} button[data-state], ${wrapper} button[aria-expanded]`,
+    );
+    const menuId = button?.getAttribute("aria-controls");
+    const menu = menuId ? document.getElementById(menuId) : null;
+    const isOpenMenu =
+      menu?.getAttribute("role") === "menu" &&
+      menu.getAttribute("data-state") !== "closed";
+    return isOpenMenu ? menu : null;
+  };
+
+  const menu = openModeMenu();
+  if (!menu) return null;
+  return [...menu.querySelectorAll('[role="menuitemradio"]')].map((item) => ({
+    label: (item.textContent ?? "").replace(/\s+/g, " ").trim(),
+    checked: item.getAttribute("aria-checked") === "true",
+  }));
+}
+
+/**
+ * The centre of the open mode menu's radio item labelled exactly `label`,
+ * or null when the menu is not open or holds no such item.
+ */
+export function locateModeMenuItem(label: string): PagePoint | null {
+  const openModeMenu = (): Element | null => {
+    const wrapper = '[data-testid="ask-input-mode-toggle-width-wrapper"]';
+    const button = document.querySelector(
+      `${wrapper} button[data-state], ${wrapper} button[aria-expanded]`,
+    );
+    const menuId = button?.getAttribute("aria-controls");
+    const menu = menuId ? document.getElementById(menuId) : null;
+    const isOpenMenu =
+      menu?.getAttribute("role") === "menu" &&
+      menu.getAttribute("data-state") !== "closed";
+    return isOpenMenu ? menu : null;
+  };
+  const normalise = (text: string | null): string =>
+    (text ?? "").replace(/\s+/g, " ").trim();
+
+  const menu = openModeMenu();
+  if (!menu) return null;
+  const wanted = normalise(label);
+  const item = [...menu.querySelectorAll('[role="menuitemradio"]')].find(
+    (candidate) => normalise(candidate.textContent) === wanted,
+  );
+  if (!item) return null;
+  const rect = item.getBoundingClientRect();
+  return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
 }
