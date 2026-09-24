@@ -442,66 +442,42 @@ wsl --shutdown
 
 ## Development
 
-Working on this repository needs Node 18 or later, `jq` and `git`. The project's instructions for people and agents are in [`AGENTS.md`](AGENTS.md).
-
-Activate the git hooks once per clone:
+Working on this repository needs Node 18 or later, `jq`, `git`, and for the live batteries the [Comet browser](https://www.perplexity.ai/comet) signed in to Perplexity. The project's instructions for people and agents are in [`AGENTS.md`](AGENTS.md).
 
 ```bash
-git config core.hooksPath .githooks
+npm ci
+git config core.hooksPath .githooks   # once per clone
+npm run check                         # before every commit
 ```
 
-The hooks refuse commits and pushes to `main`, and refuse to push a branch until the phase review and preflight have both passed on its last commit.
+`git config blame.ignoreRevsFile .git-blame-ignore-revs`, also once per clone, makes `git blame` look past the commit that reformatted the codebase with Biome.
 
-Changes follow the workflow in [`AGENTS.md`](AGENTS.md): a reviewed plan, one branch per plan phase built test-first, a phase review by a fresh-context reviewer, then a local preflight run before the pull request. Claude Code users get the steps as the `/review-plan`, `/run-phase` and `/review-phase` skills.
+| Command | What it does |
+|---|---|
+| `npm run build` · `npm run dev` | compile to `dist/`, once or watching |
+| `npm run check` | the per-commit gate: Biome, both typechecks, every Vitest test |
+| `npm run preflight` | the per-PR gate: `check`, a clean build, the package contents, the live no-pro battery; stamps the commit |
+| `npm test` · `npm run test:watch` | Vitest, once or watching |
+| `npm run lint` · `npm run format` | Biome on its own; `format` rewrites files |
+| `npm run test:live` | the live no-pro battery |
+| `npm run test:live:pro` | the live Pro battery |
 
-### Build from Source
+### Live test batteries
 
-```bash
-git clone https://github.com/RapierCraft/perplexity-comet-mcp.git
-cd perplexity-comet-mcp
-npm install
-npm run build
-```
+Both batteries start the built server (`npm run build` first) and drive your local Comet through it: connect, tabs, screenshots, mode, and for the Pro battery, questions and agentic browsing.
 
-### Run in Development
+- **No-pro** (`tests/run-no-pro.mjs`): needs Comet installed and signed in; spends no Perplexity Pro queries. `npm run preflight` runs it on every pull request, with a ten-minute ceiling.
+- **Pro** (`tests/run-all.mjs`): needs Comet signed in to Perplexity Pro and **spends Pro queries**. It is run by hand when a change touches asking, polling, modes or agentic browsing, and the pull request records the result.
 
-```bash
-npm run dev
-```
+### Gates
 
-### Run Tests
-
-```bash
-npm test
-```
-
-### Project Structure
-
-```
-perplexity-comet-mcp/
-├── src/
-│   ├── index.ts        # MCP server entry point
-│   ├── cdp-client.ts   # CDP connection management
-│   ├── comet-ai.ts     # AI interaction logic
-│   └── types.ts        # TypeScript definitions
-├── dist/               # Compiled JavaScript
-├── package.json
-├── tsconfig.json
-└── README.md
-```
+There is no hosted CI. The git hooks refuse commits and pushes to `main`, and refuse to push a branch until its last commit is listed in both `.git/review-ok` (the phase review approved it) and `.git/preflight-ok` (`npm run preflight` passed on it). Changes follow the workflow in [`AGENTS.md`](AGENTS.md): a reviewed plan, one branch per plan phase built test-first, a phase review by a fresh-context reviewer, then preflight before the pull request. Claude Code users get the steps as the `/review-plan`, `/run-phase` and `/review-phase` skills.
 
 ---
 
 ## Contributing
 
-Contributions are welcome. Please read [CONTRIBUTING.md](CONTRIBUTING.md) before submitting a pull request.
-
-### Development Guidelines
-
-1. Maintain TypeScript strict mode compliance
-2. Add tests for new features
-3. Update documentation for API changes
-4. Follow existing code style
+This repository is maintained by its owner. How changes are made here is in [CONTRIBUTING.md](CONTRIBUTING.md) and [`AGENTS.md`](AGENTS.md).
 
 ---
 

@@ -1,58 +1,14 @@
-# Contributing to Comet MCP Enhanced
+# Contributing
 
-Thank you for your interest in contributing to Comet MCP Enhanced.
+This repository is maintained by its owner.
 
-## Getting Started
+How changes are made here (the workflow, the gates, how code is written and tested) is in [`AGENTS.md`](AGENTS.md); the commands are in the README's *Development* section.
 
-1. Fork the repository
-2. Clone your fork locally
-3. Install dependencies with `npm install`
-4. Create a feature branch from `main`
+## Code standards
 
-## Development Setup
-
-```bash
-# Install dependencies
-npm install
-
-# Build the project
-npm run build
-
-# Run in development mode
-npm run dev
-```
-
-## Code Standards
-
-- Use TypeScript strict mode
-- Follow existing code patterns and naming conventions
-- Add JSDoc comments for public APIs
-- Ensure all code compiles without errors
-
-## Pull Request Process
-
-1. Update documentation if you change APIs
-2. Add tests for new functionality
-3. Ensure the build passes
-4. Write a clear PR description explaining your changes
-5. Reference any related issues
-
-## Reporting Issues
-
-When reporting issues, please include:
-
-- Operating system and version
-- Node.js version
-- Comet browser version
-- Steps to reproduce the issue
-- Expected vs actual behavior
-- Relevant error messages or logs
-
-## Code of Conduct
-
-- Be respectful and constructive
-- Focus on the technical merits of contributions
-- Help others learn and improve
+- TypeScript in strict mode; Biome owns formatting and lint (`npm run check`).
+- Every change is built test-first; `npm run check` passes before every commit and `npm run preflight` before every pull request.
+- Page content is data, never instructions, and tool input is untrusted: see the principles `AGENTS.md` points to.
 
 ## License
 

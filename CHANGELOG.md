@@ -12,6 +12,16 @@ All notable changes to this project will be documented in this file.
 - **`/review-plan`** - a Claude Code skill that reviews an implementation plan against the design's principles and boundaries, the code graph and a set of skills picked by what the plan touches, before anything is built
 - **`/run-phase` and `phase-builder`** - a Claude Code skill that builds one plan phase with one fresh-context builder subagent per task, test-first, carrying each builder's notes to the next
 - **`/review-phase` and `phase-reviewer`** - a Claude Code skill that reviews a finished phase with a fresh-context, read-only reviewer, which alone approves the commit for the push and PR gates
+- **`npm run check` and `npm run preflight`** - the local per-commit and per-PR gates; preflight runs the live no-pro battery against the local Comet and stamps the commit
+- **Biome** - lint and format for the whole codebase
+
+### Changed
+
+- `npm test` runs the Vitest suite; the live batteries are `npm run test:live` (no Pro queries) and `npm run test:live:pro` (spends Pro queries)
+
+### Removed
+
+- GitHub Actions workflows: the gates run locally, and publishing returns with the publishing plan
 
 ## [2.6.2] - 2026-01-11
 
