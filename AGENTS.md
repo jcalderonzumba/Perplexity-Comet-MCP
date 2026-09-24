@@ -112,8 +112,10 @@ First run: `npm ci`, then `git config core.hooksPath .githooks`, plus `codegraph
 | `npm run build` | `tsc` to `dist/` |
 | `npm run dev` | `tsc --watch` |
 | `npm start` | runs `dist/index.js`, the stdio MCP server |
-| `npm run test:unit` | Vitest: the unit tests and the gate scripts' integration tests |
-| `npm test` | the live Pro battery, `tests/run-all.mjs`: needs Comet signed in to Perplexity Pro, and spends Pro queries |
-| `npm run test:no-pro` | the live no-pro battery, `tests/run-no-pro.mjs`: needs Comet signed in |
+| `npm run check` | the per-commit gate (`scripts/check.mjs`): Biome lint and format, `tsc` over `src/` and over the tests and scripts (`tsconfig.tools.json`), and every Vitest test, unit and integration |
+| `npm test` · `test:watch` | Vitest once, or watching |
+| `npm run typecheck` · `lint` · `format` | the check's parts on their own; `format` rewrites files |
+| `npm run test:live` | the live no-pro battery, `tests/run-no-pro.mjs`: needs Comet signed in; spends no Pro queries |
+| `npm run test:live:pro` | the live Pro battery, `tests/run-all.mjs`: needs Comet signed in to Perplexity Pro, and spends Pro queries |
 
-`npm run check` and `npm run preflight` arrive with plan 1 phase 2. Until then the per-commit gate is `npm run build && npm run test:unit`, and `.githooks/preflight-check.sh` passes because `package.json` has no `preflight` script.
+`npm run preflight` arrives with plan 1 phase 2's task 2.4; until then `.githooks/preflight-check.sh` passes because `package.json` has no `preflight` script.

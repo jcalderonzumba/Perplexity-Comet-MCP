@@ -22,7 +22,7 @@ Check these in order. At the first one that fails, stop and tell the user which 
 
 1. **Not on `main`.** `git branch --show-current` is not `main`.
 2. **Clean trees.** `git status --porcelain` prints nothing, and, when `.work/` exists, neither does `git -C .work status --porcelain`.
-3. **`npm run check` passes on HEAD.** Run it (while `package.json` has no `check` script, plan 1 phase 1 only: `npm run build && npm run test:unit`). A review round spent on a lint failure is a wasted round.
+3. **`npm run check` passes on HEAD.** Run it. A review round spent on a lint failure is a wasted round.
 4. **On a phase branch, the plan phase's tasks are ticked.** A branch named `feat/<plan>-p<phase>-<slug>` is a phase branch. `<plan>` is everything between `feat/` and the first `-p<digits>-`, so `feat/working-model-p1-rules-and-gates` gives plan `working-model`, phase `1`:
 
    ```sh
