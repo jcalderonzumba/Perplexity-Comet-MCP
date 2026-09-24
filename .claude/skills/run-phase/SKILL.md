@@ -1,6 +1,6 @@
 ---
 name: run-phase
-description: Build one plan phase of Perplexity Comet MCP on its phase branch, one fresh-context phase-builder subagent per task, before /review-phase — the owner confirms the work list once, each builder's hand-off notes reach the next, a blocked builder's question comes to the owner and the same builder resumes with the answer. Arguments — <plan> the plan-name fragment the branch convention uses (core-extraction), <phase> the phase number.
+description: Build one plan phase of Perplexity Comet MCP on its phase branch, one fresh-context phase-builder subagent per task, then hand it to /review-phase, which reviews it, runs the preflight and opens the PR after one owner confirmation — the owner confirms the work list once, each builder's hand-off notes reach the next, a blocked builder's question comes to the owner and the same builder resumes with the answer. Arguments — <plan> the plan-name fragment the branch convention uses (core-extraction), <phase> the phase number.
 
 arguments: [plan, phase]
 argument-hint: <plan> <phase>
@@ -9,7 +9,7 @@ disable-model-invocation: true
 
 # Phase Runner
 
-`/run-phase <plan> <phase>` builds one phase of an implementation plan. You are the **runner**: you resolve the phase, agree the work list with the owner once, and hand every unit of it to a fresh `phase-builder`, one builder per unit, each running `executing-plans` on its unit alone. You read the plan and the builders' reports, never the diff, so your context stays small across the whole phase. The builder does the building; `/review-phase` does the reviewing, once, when the phase is complete. This skill ends where that one begins.
+`/run-phase <plan> <phase>` builds one phase of an implementation plan. You are the **runner**: you resolve the phase, agree the work list with the owner once, and hand every unit of it to a fresh `phase-builder`, one builder per unit, each running `executing-plans` on its unit alone. You read the plan and the builders' reports, never the diff, so your context stays small across the whole phase. The builder does the building; `/review-phase` does the reviewing, once, when the phase is complete. When the last unit is done, you invoke it and follow it through: it reviews the phase, gets its findings fixed by fresh builders, runs the preflight and, after one confirmation from the owner, opens the PR (§7).
 
 The arguments are bound by name: `$plan` is the plan-name fragment the branch convention uses (`core-extraction` for `.work/plans/2026-10-01-core-extraction.md`), `$phase` the phase number, and both are substituted into this text and its shell before you read it. `/run-phase core-extraction 1` builds phase 1 of that plan. Only the owner invokes this skill; it is never started because a plan looks ready.
 
@@ -45,7 +45,7 @@ Check these in order. At the first one that fails, stop and tell the owner which
    - On `main` with a clean tree: the phase branch is the one match of `git branch --list "feat/$plan-p$phase-*"`. One match: `git switch` to it. Several: ask which. None: propose `feat/<plan>-p<phase>-<slug>`, the slug two to four lower-case words from the phase name (`## Phase 1: Tool core and thin adapters` gives `feat/core-extraction-p1-tool-core`), and create it with `git switch -c` after the confirmation of §2, so the owner sees the name before the branch exists.
    - On the phase branch already (`feat/<plan>-p<phase>-<anything>`): continue.
    - On any other branch, or on `main` with a dirty tree: stop. The owner's tree is never touched without asking. Name the remedy: a tagged stash the owner agrees to (`git stash push -m "before run-phase"`), or finishing the other branch first.
-3. **The notebook is there and clean.** `git -C .work rev-parse --git-dir` succeeds and `git -C .work status --porcelain` prints nothing. The one exception is a re-invocation (§7) with a `blocked` unit whose research note and index row, left for its builder by §6, are the only uncommitted paths: they belong to that unit, and its builder commits them. If not, stop: the owner commits or restores the notebook; the runner never touches it.
+3. **The notebook is there and clean.** `git -C .work rev-parse --git-dir` succeeds and `git -C .work status --porcelain` prints nothing. The one exception is a re-invocation (§8) with a `blocked` unit whose research note and index row, left for its builder by §6, are the only uncommitted paths: they belong to that unit, and its builder commits them. If not, stop: the owner commits or restores the notebook; the runner never touches it.
 4. **The git hooks are active.** `git config core.hooksPath` prints a path ending in `.githooks`, so a builder's commit meets the same refusals a human's does. If not: `git config core.hooksPath .githooks`, once per clone.
 5. **The phase's outside facts are researched.** Read the phase's unticked tasks and unticked follow-ups for a claim that passes the test of [Check 3, *Outside facts*](../review-plan/spec-and-safety.md#check-3-outside-facts) and that neither a note under `.work/research/` nor a primary source the plan cites backs, as that check defines backing. Check 3 makes `/review-plan` refuse such a claim, but a plan whose phase was approved before a fact changed never met it again, which is why the runner looks. For each claim it finds, in turn:
 
@@ -59,7 +59,7 @@ Check these in order. At the first one that fails, stop and tell the owner which
 
    Only then does §2 build the work list. This is a precondition and not a step of the run for two reasons. The runner asks one question at the start and nothing more until a builder blocks (§2), so the owner's answers to research come before that question. And a commit made here lands before the work list's *Start*, so before any unit's range begins, and §5's check of a unit's commits against its report still holds.
 
-   Unlike the other four, this precondition does not stop at what it finds: it resolves each claim and goes on. It stops, saying why, in two cases: when it can reach no source at all, as any precondition stops at a failure; and when the owner's answer means the plan must change beyond a link, where the remedy is a plan revision: before stopping it commits the notes and their index rows in `.work/` (a note records a fact, whatever the plan becomes), so the revision links committed notes and the next invocation finds the notebook clean (precondition 3). On a re-invocation (§7) it runs again and finds the notes it wrote. It commits only while the branch has no work list: once one exists, a commit here would land inside a unit's range in the notebook (§5), so a claim found then without a note stops the runner, and the owner decides where its note is committed.
+   Unlike the other four, this precondition does not stop at what it finds: it resolves each claim and goes on. It stops, saying why, in two cases: when it can reach no source at all, as any precondition stops at a failure; and when the owner's answer means the plan must change beyond a link, where the remedy is a plan revision: before stopping it commits the notes and their index rows in `.work/` (a note records a fact, whatever the plan becomes), so the revision links committed notes and the next invocation finds the notebook clean (precondition 3). On a re-invocation (§8) it runs again and finds the notes it wrote. It commits only while the branch has no work list: once one exists, a commit here would land inside a unit's range in the notebook (§5), so a claim found then without a note stops the runner, and the owner decides where its note is committed.
 
 ## 2. The work list and its confirmation
 
@@ -71,7 +71,7 @@ Read the phase's section. Build the work list from it with three rules:
 
 Then read the phase's text for which unit depends on which: a task that consumes another's core function or adapter, a follow-up "for task 1.2", a test fake a later task reuses. This reading is shown, not silently applied: in this phase units run one at a time in list order, and the dependencies exist so the owner can check the order and so the runner of phase 2 can form waves from them.
 
-When the run state already holds a `work-list.md` for this branch (`$gitdir/run/<phase branch with slashes as dashes>/`, the branch §1.2 switched to; in the create arm the branch does not exist yet, so neither does its run state, and `main`'s directory is never consulted), this is a re-invocation: go to §7.
+When the run state already holds a `work-list.md` for this branch (`$gitdir/run/<phase branch with slashes as dashes>/`, the branch §1.2 switched to; in the create arm the branch does not exist yet, so neither does its run state, and `main`'s directory is never consulted), this is a re-invocation: go to §8.
 
 Show the owner, in one message:
 
@@ -108,7 +108,7 @@ Start: public <`git rev-parse --short HEAD`> · work <`git -C .work rev-parse --
 | 1.2a | <task title> — <slice text> | … | 1.1 | pending | — |
 ```
 
-After this one question you ask nothing more until a builder blocks or the phase ends.
+After this one question you ask nothing more until a builder blocks, a finding is disputed, the preflight fails, or `/review-phase` asks before publishing (§7).
 
 ## 3. The brief
 
@@ -170,7 +170,7 @@ Save the report verbatim to `$run/<unit>.md` (a resumed builder's report is appe
 
 A mismatch is a block: tell the owner what the report says and what the tree shows, and ask how to proceed with AskUserQuestion. Never repair the tree yourself: no commit, no revert, no tick, no stash.
 
-A report without the *Status* line, or missing a heading the agent file requires for its status (every `###` heading of the report; `### Blocked on` only when blocked), is **malformed**, as `/review-phase` §7 treats a round without a verdict. Save it as `$run/<unit>.malformed.md` instead of `<unit>.md`, and resume the same builder once with `SendMessage`:
+A report without the *Status* line, or missing a heading the agent file requires for its status (every `###` heading of the report; `### Findings` only for a round unit, `### Blocked on` only when blocked), is **malformed**, as `/review-phase` §7 treats a round without a verdict. Save it as `$run/<unit>.malformed.md` instead of `<unit>.md`, and resume the same builder once with `SendMessage`:
 
 > Your final message must be the report of `.claude/agents/phase-builder.md`, headings verbatim, with a Status line. Send it now.
 
@@ -204,17 +204,24 @@ When the builder can no longer be reached (the send fails, the session that disp
 
 A builder blocked **twice on the same unit** is stopped: bring the owner the unit, both questions and both reports, and do not dispatch it again without the owner's word. The remedy is usually the owner's: a plan fix, a decision-log row, or a slice.
 
-## 7. Completion and re-invocation
+## 7. Finishing the phase
 
-When every unit is `done`, print the phase summary and stop:
+When every unit is `done`:
 
-- the units, each with its commits;
-- the executor-level decisions gathered in the PR draft;
-- the follow-ups filed, and where;
-- the units dropped in §2, if any, because the phase is not finished while one is open;
-- what remains for the owner: `/review-phase`, which dispatches the reviewer and records its verdict; then `npm run preflight`, then the PR from `$review/pr-body.md`, after which `/review-phase` writes the DONE marker with the real PR number.
+1. **Units dropped in §2 stop the finish.** A phase is not finished while the plan shows a task open, so print the summary of step 4 and stop; the owner builds them in a later run.
+2. **Complete the PR draft** `$review/pr-body.md` from the saved reports, never from the diff. Write *What lands*: what exists after the PR that did not before, by area, from each report's *For later tasks* and the *Task coverage* rows. Write *Verification*: the `npm run check` result each report quotes for its last commit, and the checks the phase's acceptance names as the reports record them. When the phase touches ask, poll, mode or agentic behaviour, add `Pro battery: pending, the owner runs it`: it spends Pro queries, so it stays the owner's, and the owner sees the line when asked to publish.
+3. **Invoke `/review-phase`** with the Skill tool and follow it through: the rounds, each fixed by a fresh builder as its *Fixing through a builder* says ([§5 of that skill](../review-phase/SKILL.md#5-the-loop)), the preflight, the one question before publishing, the PR and the DONE marker. Its stops are the finish's stops: a third round that still reports Must Fix, a dispute, a failing preflight, and the owner answering *not yet*.
+4. **Print the summary and stop:**
+   - the units, round units included, each with its commits;
+   - the executor-level decisions gathered in the PR draft;
+   - the follow-ups filed, and where;
+   - the units dropped in §2, if any;
+   - the review verdict and the rounds it took, the preflight result, and the PR's URL. Otherwise, the step that stopped the finish, why, and what the owner does next;
+   - with a PR open, what remains for the owner: merging with the `land-pr` skill.
 
-The runner writes no DONE marker, never runs `/review-phase` itself, and never runs `npm run preflight`.
+The runner never adds an approval to `.git/review-ok` and never writes the DONE marker itself: the reviewer writes the one, and `/review-phase` §9 the other.
+
+## 8. Re-invocation
 
 `/run-phase` invoked again on the same plan and phase, once §1 passes, reads `$run/work-list.md` instead of building a new list:
 
@@ -224,3 +231,5 @@ The runner writes no DONE marker, never runs `/review-phase` itself, and never r
 - a `running` unit whose builder is gone is treated as `blocked` with its last report when `$run/<unit>.md` exists, and as `pending` when it does not.
 
 Before the first dispatch of the re-invocation, show the work list with its statuses and ask the one question of §2 over it; the owner may reorder, drop or slice what is still pending.
+
+When every task and follow-up unit is `done`, ask nothing and go to §7: `/review-phase` picks up where the finish stopped. A round unit `r<N>` that is not `done` is continued first, an approved HEAD is not reviewed again, and a passed preflight is not run again. When the branch already has an open PR (`gh pr view` succeeds), print its URL and stop; if the plan lacks the DONE marker, write it first as `/review-phase` §9 does.
