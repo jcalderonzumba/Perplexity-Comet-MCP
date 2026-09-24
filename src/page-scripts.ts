@@ -50,7 +50,11 @@ export function extractAgentStatus(): AgentStatusResult {
       ariaLabel.includes("cancel") ||
       btnText === "stop";
 
-    if (isStopButton && (btn as HTMLButtonElement).offsetParent !== null && !(btn as HTMLButtonElement).disabled) {
+    if (
+      isStopButton &&
+      (btn as HTMLButtonElement).offsetParent !== null &&
+      !(btn as HTMLButtonElement).disabled
+    ) {
       hasActiveStopButton = true;
       break;
     }
@@ -59,49 +63,73 @@ export function extractAgentStatus(): AgentStatusResult {
   // More comprehensive loading detection
   const hasLoadingSpinner =
     document.querySelector(
-      '[class*="animate-spin"], [class*="animate-pulse"], [class*="loading"], [class*="thinking"]'
+      '[class*="animate-spin"], [class*="animate-pulse"], [class*="loading"], [class*="thinking"]',
     ) !== null;
 
   // Check for "Thinking" indicator specifically
-  const hasThinkingIndicator = body.includes("Thinking") && !body.includes("Thinking about");
+  const hasThinkingIndicator =
+    body.includes("Thinking") && !body.includes("Thinking about");
 
   // Completion markers — multilingual.
   // Perplexity localizes its UI (ru, de, es, fr, etc). English-only patterns
   // miss completion on non-English accounts and force fallback to slow
   // response-stability polling (~90s). See PR #9 notes for marker source.
-  const hasStepsCompleted = /\d+ steps? completed/i.test(body)
-                         // Russian agrees the verb with grammatical number:
-                         //   "Выполнен 1 шаг" (sg), "Выполнено 2/3/4 шага",
-                         //   "Выполнено 5+ шагов". The previous regex matched
-                         //   only "Выполнено …" and missed the singular case.
-                         || /Выполнен(?:о|ы)?\s+\d+\s+шаг(?:а|ов)?/iu.test(body); // ru
+  const hasStepsCompleted =
+    /\d+ steps? completed/i.test(body) ||
+    // Russian agrees the verb with grammatical number:
+    //   "Выполнен 1 шаг" (sg), "Выполнено 2/3/4 шага",
+    //   "Выполнено 5+ шагов". The previous regex matched
+    //   only "Выполнено …" and missed the singular case.
+    /Выполнен(?:о|ы)?\s+\d+\s+шаг(?:а|ов)?/iu.test(body); // ru
   // Word-boundary the English marker and exclude "Finished reading|analyzing|…",
   // which is an *intermediate* step Perplexity renders while the agent is
   // still running. Without this, the agent flips to "completed" the moment
   // the first source is processed.
-  const hasFinishedMarker = /\bFinished\b(?!\s+(?:reading|analyzing|browsing|searching|loading))/i.test(body)
-                          && !hasActiveStopButton;
+  const hasFinishedMarker =
+    /\bFinished\b(?!\s+(?:reading|analyzing|browsing|searching|loading))/i.test(
+      body,
+    ) && !hasActiveStopButton;
   const hasReviewedSources = /Reviewed \d+ sources?/i.test(body);
-  const hasSourcesIndicator = /\d+\s*sources?/i.test(body)              // en
-                           || /\d+\s*источник(?:а|ов)?/iu.test(body);    // ru
-  const hasAskFollowUp = body.includes("Ask a follow-up")
-                      || body.includes("Ask follow-up")
-                      || body.includes("Задайте уточняющий вопрос")         // ru: input placeholder
-                      || body.includes("Последующие вопросы");              // ru: section heading
+  const hasSourcesIndicator =
+    /\d+\s*sources?/i.test(body) || // en
+    /\d+\s*источник(?:а|ов)?/iu.test(body); // ru
+  const hasAskFollowUp =
+    body.includes("Ask a follow-up") ||
+    body.includes("Ask follow-up") ||
+    body.includes("Задайте уточняющий вопрос") || // ru: input placeholder
+    body.includes("Последующие вопросы"); // ru: section heading
 
   // Check for prose content (actual response) - lowered threshold for short answers
-  const proseEls = [...document.querySelectorAll('[class*="prose"]')] as HTMLElement[];
+  const proseEls = [
+    ...document.querySelectorAll('[class*="prose"]'),
+  ] as HTMLElement[];
   const hasProseContent = proseEls.some((el) => {
     const text = el.innerText.trim();
     // Must have some content, not just UI text (lowered from 50 to 15 for short answers)
-    return text.length > 15 && !text.startsWith("Library") && !text.startsWith("Discover");
+    return (
+      text.length > 15 &&
+      !text.startsWith("Library") &&
+      !text.startsWith("Discover")
+    );
   });
 
   const workingPatterns = [
-    "Working", "Searching", "Reviewing sources", "Preparing to assist",
-    "Clicking", "Typing:", "Navigating to", "Reading", "Analyzing",
-    "Browsing", "Looking at", "Checking", "Opening", "Scrolling",
-    "Waiting", "Processing",
+    "Working",
+    "Searching",
+    "Reviewing sources",
+    "Preparing to assist",
+    "Clicking",
+    "Typing:",
+    "Navigating to",
+    "Reading",
+    "Analyzing",
+    "Browsing",
+    "Looking at",
+    "Checking",
+    "Opening",
+    "Scrolling",
+    "Waiting",
+    "Processing",
   ];
   const hasWorkingText = workingPatterns.some((p) => body.includes(p));
 
@@ -133,8 +161,13 @@ export function extractAgentStatus(): AgentStatusResult {
   // Extract steps
   const steps: string[] = [];
   const stepPatterns = [
-    /Preparing to assist[^\n]*/g, /Clicking[^\n]*/g, /Typing:[^\n]*/g,
-    /Navigating[^\n]*/g, /Reading[^\n]*/g, /Searching[^\n]*/g, /Found[^\n]*/g,
+    /Preparing to assist[^\n]*/g,
+    /Clicking[^\n]*/g,
+    /Typing:[^\n]*/g,
+    /Navigating[^\n]*/g,
+    /Reading[^\n]*/g,
+    /Searching[^\n]*/g,
+    /Found[^\n]*/g,
   ];
   for (const pattern of stepPatterns) {
     const matches = body.match(pattern);
@@ -144,7 +177,8 @@ export function extractAgentStatus(): AgentStatusResult {
   // Extract response - get the FULL FINAL response after agent completes
   let response = "";
   if (status === "completed") {
-    const mainContent = (document.querySelector("main") || document.body) as HTMLElement;
+    const mainContent = (document.querySelector("main") ||
+      document.body) as HTMLElement;
     const bodyText = mainContent.innerText;
 
     // Strategy 1: Find content after "X steps completed" marker (agent's final response).
@@ -155,20 +189,27 @@ export function extractAgentStatus(): AgentStatusResult {
     // `lastIndexOf` of that exact string — lands on the OLDEST turn.
     // Walk every match with the /g flag and take the last one.
     const stepsMatches = [...bodyText.matchAll(/(\d+)\s*steps?\s*completed/gi)];
-    const stepsMatch = stepsMatches.length > 0 ? stepsMatches[stepsMatches.length - 1] : null;
+    const stepsMatch =
+      stepsMatches.length > 0 ? stepsMatches[stepsMatches.length - 1] : null;
     if (stepsMatch) {
       const markerIndex = stepsMatch.index ?? -1;
       if (markerIndex !== -1) {
         // Get everything after the marker
-        let afterMarker = bodyText.substring(markerIndex + stepsMatch[0].length).trim();
+        let afterMarker = bodyText
+          .substring(markerIndex + stepsMatch[0].length)
+          .trim();
 
         // Remove the ">" or arrow that often follows
         afterMarker = afterMarker.replace(/^[>›→\s]+/, "").trim();
 
         // Find where the response ends (before input area or UI elements)
         const endMarkers = [
-          "Ask anything", "Ask a follow-up", "Add details", "Type a message",
-          "Задайте уточняющий вопрос", "Последующие вопросы", // ru
+          "Ask anything",
+          "Ask a follow-up",
+          "Add details",
+          "Type a message",
+          "Задайте уточняющий вопрос",
+          "Последующие вопросы", // ru
         ];
         let endIndex = afterMarker.length;
         for (const marker of endMarkers) {
@@ -185,15 +226,25 @@ export function extractAgentStatus(): AgentStatusResult {
     // Strategy 2: If no steps marker, look for content after source citations
     if (!response || response.length < 50) {
       // Same rationale as Strategy 1: walk every match and take the last.
-      const sourcesMatches = [...bodyText.matchAll(/Reviewed\s+\d+\s+sources?/gi)];
-      const sourcesMatch = sourcesMatches.length > 0 ? sourcesMatches[sourcesMatches.length - 1] : null;
+      const sourcesMatches = [
+        ...bodyText.matchAll(/Reviewed\s+\d+\s+sources?/gi),
+      ];
+      const sourcesMatch =
+        sourcesMatches.length > 0
+          ? sourcesMatches[sourcesMatches.length - 1]
+          : null;
       if (sourcesMatch) {
         const markerIndex = sourcesMatch.index ?? -1;
         if (markerIndex !== -1) {
-          let afterMarker = bodyText.substring(markerIndex + sourcesMatch[0].length).trim();
+          const afterMarker = bodyText
+            .substring(markerIndex + sourcesMatch[0].length)
+            .trim();
           const endMarkers = [
-            "Ask anything", "Ask a follow-up", "Add details",
-            "Задайте уточняющий вопрос", "Последующие вопросы", // ru
+            "Ask anything",
+            "Ask a follow-up",
+            "Add details",
+            "Задайте уточняющий вопрос",
+            "Последующие вопросы", // ru
           ];
           let endIndex = afterMarker.length;
           for (const marker of endMarkers) {
@@ -207,13 +258,24 @@ export function extractAgentStatus(): AgentStatusResult {
 
     // Strategy 3: Fallback - get all prose content combined
     if (!response || response.length < 50) {
-      const allProseEls = [...mainContent.querySelectorAll('[class*="prose"]')] as HTMLElement[];
+      const allProseEls = [
+        ...mainContent.querySelectorAll('[class*="prose"]'),
+      ] as HTMLElement[];
       const validTexts = allProseEls
         .filter((el) => {
-          if (el.closest("nav, aside, header, footer, form, [contenteditable]")) return false;
+          if (el.closest("nav, aside, header, footer, form, [contenteditable]"))
+            return false;
           const text = el.innerText.trim();
-          const isUIText = ["Library", "Discover", "Spaces", "Finance", "Account",
-                            "Upgrade", "Home", "Search"].some((ui) => text.startsWith(ui));
+          const isUIText = [
+            "Library",
+            "Discover",
+            "Spaces",
+            "Finance",
+            "Account",
+            "Upgrade",
+            "Home",
+            "Search",
+          ].some((ui) => text.startsWith(ui));
           return !isUIText && text.length > 30;
         })
         .map((el) => el.innerText.trim());
@@ -233,10 +295,10 @@ export function extractAgentStatus(): AgentStatusResult {
         .replace(/Ask a follow-up/gi, "")
         .replace(/Ask anything\.*/gi, "")
         .replace(/Add details to this task\.*/gi, "")
-        .replace(/Задайте уточняющий вопрос/giu, "")        // ru
-        .replace(/Последующие вопросы/giu, "")              // ru
+        .replace(/Задайте уточняющий вопрос/giu, "") // ru
+        .replace(/Последующие вопросы/giu, "") // ru
         .replace(/\d+\s*sources?\s*$/gi, "")
-        .replace(/\d+\s*источник(?:а|ов)?\s*$/giu, "")   // ru
+        .replace(/\d+\s*источник(?:а|ов)?\s*$/giu, "") // ru
         .replace(/[\u{1F300}-\u{1F9FF}]/gu, "") // Remove most emojis from UI
         .replace(/^[>›→\s]+/gm, "") // Remove leading arrows
         .replace(/\n{3,}/g, "\n\n") // Collapse multiple newlines

@@ -1,10 +1,10 @@
-import { describe, it, expect, beforeEach, vi, afterEach } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  completeTask,
+  generateTaskId,
+  isSessionStale,
   sessionState,
   startNewTask,
-  completeTask,
-  isSessionStale,
-  generateTaskId,
 } from "../../src/session-state.js";
 
 function resetSessionState(): void {
@@ -24,7 +24,9 @@ beforeEach(() => {
 describe("generateTaskId", () => {
   it("returns a string in the form task_<unix-ms>_<uuid v4>", () => {
     const id = generateTaskId();
-    expect(id).toMatch(/^task_\d+_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
+    expect(id).toMatch(
+      /^task_\d+_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
+    );
   });
 
   it("returns unique ids across rapid successive calls", () => {
@@ -64,7 +66,9 @@ describe("startNewTask", () => {
 
   it("returns a task id that matches the format from generateTaskId", () => {
     const taskId = startNewTask("any");
-    expect(taskId).toMatch(/^task_\d+_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/);
+    expect(taskId).toMatch(
+      /^task_\d+_[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/,
+    );
   });
 });
 

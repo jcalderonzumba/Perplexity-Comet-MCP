@@ -28,7 +28,9 @@ afterEach(() => {
 });
 
 const biome = () =>
-  runProcess(join(repoRoot, "node_modules", ".bin", "biome"), ["check", "."], { cwd: root });
+  runProcess(join(repoRoot, "node_modules", ".bin", "biome"), ["check", "."], {
+    cwd: root,
+  });
 
 describe("biome check", () => {
   it("passes on formatted code", () => {
@@ -47,7 +49,10 @@ describe("biome check", () => {
   });
 
   it("leaves package-lock.json to npm", () => {
-    writeFileSync(join(root, "package-lock.json"), '{"lockfileVersion":3,   "packages":{}}\n');
+    writeFileSync(
+      join(root, "package-lock.json"),
+      '{"lockfileVersion":3,   "packages":{}}\n',
+    );
     expect(biome().status).toBe(0);
   });
 });

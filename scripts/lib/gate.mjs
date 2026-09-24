@@ -3,24 +3,34 @@ import { spawnSync } from "node:child_process";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-export const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../..");
+export const repoRoot = resolve(
+  dirname(fileURLToPath(import.meta.url)),
+  "../..",
+);
 
-const useColor = process.stdout.isTTY === true && process.env.NO_COLOR === undefined;
+const useColor =
+  process.stdout.isTTY === true && process.env.NO_COLOR === undefined;
 // Built at runtime so no raw control character ever lands in the source file.
 const ESC = String.fromCharCode(27);
 /** @param {string} code @param {string} text */
-const paint = (code, text) => (useColor ? `${ESC}[${code}m${text}${ESC}[0m` : text);
+const paint = (code, text) =>
+  useColor ? `${ESC}[${code}m${text}${ESC}[0m` : text;
 
 /** @param {string} text */
-export const heading = (text) => process.stdout.write(`\n${paint("1", `> ${text}`)}\n`);
+export const heading = (text) =>
+  process.stdout.write(`\n${paint("1", `> ${text}`)}\n`);
 /** @param {string} text */
-export const note = (text) => process.stdout.write(`${paint("2", `  ${text}`)}\n`);
+export const note = (text) =>
+  process.stdout.write(`${paint("2", `  ${text}`)}\n`);
 /** @param {string} text */
-export const ok = (text) => process.stdout.write(`${paint("32", `  PASS ${text}`)}\n`);
+export const ok = (text) =>
+  process.stdout.write(`${paint("32", `  PASS ${text}`)}\n`);
 /** @param {string} text */
-export const warn = (text) => process.stdout.write(`${paint("33", `  SKIP ${text}`)}\n`);
+export const warn = (text) =>
+  process.stdout.write(`${paint("33", `  SKIP ${text}`)}\n`);
 /** @param {string} text */
-export const fail = (text) => process.stdout.write(`${paint("31", `  FAIL ${text}`)}\n`);
+export const fail = (text) =>
+  process.stdout.write(`${paint("31", `  FAIL ${text}`)}\n`);
 
 /**
  * Runs a command, streaming its output. Returns the exit code. Never throws:
@@ -41,7 +51,8 @@ export function run(command, args, options = {}) {
     killSignal: "SIGKILL",
   });
   if (result.error) {
-    const timedOut = /** @type {NodeJS.ErrnoException} */ (result.error).code === "ETIMEDOUT";
+    const timedOut =
+      /** @type {NodeJS.ErrnoException} */ (result.error).code === "ETIMEDOUT";
     fail(
       timedOut
         ? `${command} timed out after ${Math.round((options.timeoutMs ?? 0) / 1000)}s`
@@ -98,7 +109,9 @@ export class Gate {
     try {
       outcome = body();
     } catch (error) {
-      fail(`${title} threw: ${error instanceof Error ? error.message : String(error)}`);
+      fail(
+        `${title} threw: ${error instanceof Error ? error.message : String(error)}`,
+      );
       this.#failures.push(title);
       return;
     }
@@ -134,7 +147,9 @@ export class Gate {
     }
     onSuccess?.();
     if (this.#skipped.length > 0) note(`skipped: ${this.#skipped.join(", ")}`);
-    process.stdout.write(`\n${paint("32;1", `${this.#name} passed`)} in ${seconds}s\n`);
+    process.stdout.write(
+      `\n${paint("32;1", `${this.#name} passed`)} in ${seconds}s\n`,
+    );
     process.exit(0);
   }
 }

@@ -18,7 +18,10 @@ import { tmpdir } from "node:os";
 import { delimiter, dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-export const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "../../..");
+export const repoRoot = resolve(
+  dirname(fileURLToPath(import.meta.url)),
+  "../../..",
+);
 
 export type Outcome = {
   readonly status: number | null;
@@ -58,7 +61,11 @@ export function runProcess(
     env,
   });
   if (result.error) throw result.error;
-  return { status: result.status, stdout: result.stdout, stderr: result.stderr };
+  return {
+    status: result.status,
+    stdout: result.stdout,
+    stderr: result.stderr,
+  };
 }
 
 export class GitSandbox {
@@ -69,10 +76,14 @@ export class GitSandbox {
     this.git("init", "--quiet", "--initial-branch=main");
     for (const hooks of [".githooks", ".claude/hooks"]) {
       const source = join(repoRoot, hooks);
-      if (existsSync(source)) cpSync(source, join(this.root, hooks), { recursive: true });
+      if (existsSync(source))
+        cpSync(source, join(this.root, hooks), { recursive: true });
     }
     // preflight-check.sh gates only a repository that has a preflight script.
-    writeFileSync(join(this.root, "package.json"), '{ "scripts": { "preflight": "true" } }\n');
+    writeFileSync(
+      join(this.root, "package.json"),
+      '{ "scripts": { "preflight": "true" } }\n',
+    );
     this.commit("initial");
   }
 
@@ -98,12 +109,22 @@ export class GitSandbox {
 
   /** Writes a stamp file under `.git/` listing exactly these shas. */
   stamp(name: "review-ok" | "preflight-ok", shas: readonly string[]): void {
-    writeFileSync(join(this.root, ".git", name), shas.map((sha) => `${sha}\n`).join(""));
+    writeFileSync(
+      join(this.root, ".git", name),
+      shas.map((sha) => `${sha}\n`).join(""),
+    );
   }
 
   /** Runs one of the copied hook scripts, relative to the sandbox root. */
-  run(script: string, args: readonly string[] = [], options: RunOptions = {}): Outcome {
-    return runProcess(join(this.root, script), args, { cwd: this.root, ...options });
+  run(
+    script: string,
+    args: readonly string[] = [],
+    options: RunOptions = {},
+  ): Outcome {
+    return runProcess(join(this.root, script), args, {
+      cwd: this.root,
+      ...options,
+    });
   }
 
   remove(): void {

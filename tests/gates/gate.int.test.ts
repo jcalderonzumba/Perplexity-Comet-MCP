@@ -6,7 +6,9 @@ import { describe, expect, it } from "vitest";
 import { run } from "../../scripts/lib/gate.mjs";
 import { repoRoot, runProcess } from "./support/git-sandbox.ts";
 
-const gateModule = pathToFileURL(join(repoRoot, "scripts", "lib", "gate.mjs")).href;
+const gateModule = pathToFileURL(
+  join(repoRoot, "scripts", "lib", "gate.mjs"),
+).href;
 
 /** Runs a tiny gate script through node and returns its outcome. */
 function gateWith(steps: string) {
@@ -16,7 +18,9 @@ function gateWith(steps: string) {
     ${steps}
     gate.finish(() => console.log("on success"));
   `;
-  return runProcess("node", ["--input-type=module", "-e", script], { env: { NO_COLOR: "1" } });
+  return runProcess("node", ["--input-type=module", "-e", script], {
+    env: { NO_COLOR: "1" },
+  });
 }
 
 describe("run", () => {
@@ -30,14 +34,18 @@ describe("run", () => {
 
   it("stops a command at its timeout and returns 1", () => {
     const started = Date.now();
-    expect(run("node", ["-e", "setTimeout(() => {}, 20000)"], { timeoutMs: 300 })).toBe(1);
+    expect(
+      run("node", ["-e", "setTimeout(() => {}, 20000)"], { timeoutMs: 300 }),
+    ).toBe(1);
     expect(Date.now() - started).toBeLessThan(10000);
   });
 });
 
 describe("Gate", () => {
   it("passes when every step passes, and runs the success hook", () => {
-    const outcome = gateWith('gate.step("one", () => 0); gate.step("two", () => "skipped");');
+    const outcome = gateWith(
+      'gate.step("one", () => 0); gate.step("two", () => "skipped");',
+    );
     expect(outcome.status).toBe(0);
     expect(outcome.stdout).toContain("test gate passed");
     expect(outcome.stdout).toContain("on success");

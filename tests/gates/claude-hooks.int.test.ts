@@ -4,7 +4,15 @@
  */
 import { rmSync } from "node:fs";
 
-import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, it } from "vitest";
+import {
+  afterAll,
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+} from "vitest";
 
 import { GitSandbox, type Outcome, pathWith } from "./support/git-sandbox.ts";
 
@@ -12,7 +20,16 @@ let sandbox: GitSandbox;
 let pathWithoutJq: string;
 
 beforeAll(() => {
-  pathWithoutJq = pathWith(["bash", "git", "grep", "tr", "cat", "head", "mv", "sed"]);
+  pathWithoutJq = pathWith([
+    "bash",
+    "git",
+    "grep",
+    "tr",
+    "cat",
+    "head",
+    "mv",
+    "sed",
+  ]);
 });
 
 afterAll(() => {
@@ -27,7 +44,8 @@ afterEach(() => {
   sandbox.remove();
 });
 
-const toolInput = (command: string) => JSON.stringify({ tool_input: { command } });
+const toolInput = (command: string) =>
+  JSON.stringify({ tool_input: { command } });
 
 function hook(
   script: string,
@@ -42,51 +60,71 @@ function hook(
   });
 }
 
-
 /** The hook's decision: `allow` when it printed nothing, else its deny reason. */
-function decision(outcome: Outcome): { allowed: true } | { allowed: false; reason: string } {
+function decision(
+  outcome: Outcome,
+): { allowed: true } | { allowed: false; reason: string } {
   expect(outcome.status).toBe(0);
   if (outcome.stdout.trim() === "") return { allowed: true };
   const parsed = JSON.parse(outcome.stdout) as {
-    hookSpecificOutput: { permissionDecision: string; permissionDecisionReason: string };
+    hookSpecificOutput: {
+      permissionDecision: string;
+      permissionDecisionReason: string;
+    };
   };
   expect(parsed.hookSpecificOutput.permissionDecision).toBe("deny");
-  return { allowed: false, reason: parsed.hookSpecificOutput.permissionDecisionReason };
+  return {
+    allowed: false,
+    reason: parsed.hookSpecificOutput.permissionDecisionReason,
+  };
 }
 
-describe.each(["pr-gate.sh", "protect-main.sh"])("%s fails closed", (script) => {
-  const command = script === "pr-gate.sh" ? "gh pr list" : "git status";
+describe.each(["pr-gate.sh", "protect-main.sh"])(
+  "%s fails closed",
+  (script) => {
+    const command = script === "pr-gate.sh" ? "gh pr list" : "git status";
 
-  it("allows a harmless command when jq reads it", () => {
-    sandbox.git("switch", "--quiet", "--create", "feat/x");
-    expect(decision(hook(script, toolInput(command)))).toEqual({ allowed: true });
-  });
+    it("allows a harmless command when jq reads it", () => {
+      sandbox.git("switch", "--quiet", "--create", "feat/x");
+      expect(decision(hook(script, toolInput(command)))).toEqual({
+        allowed: true,
+      });
+    });
 
-  it("denies every command when jq is not installed", () => {
-    const result = decision(hook(script, toolInput(command), { PATH: pathWithoutJq }));
-    expect(result).toMatchObject({ allowed: false, reason: expect.stringContaining("jq") });
-  });
+    it("denies every command when jq is not installed", () => {
+      const result = decision(
+        hook(script, toolInput(command), { PATH: pathWithoutJq }),
+      );
+      expect(result).toMatchObject({
+        allowed: false,
+        reason: expect.stringContaining("jq"),
+      });
+    });
 
-  it("denies a tool input jq cannot read", () => {
-    expect(decision(hook(script, '{"tool_input": '))).toMatchObject({ allowed: false });
-  });
-});
+    it("denies a tool input jq cannot read", () => {
+      expect(decision(hook(script, '{"tool_input": '))).toMatchObject({
+        allowed: false,
+      });
+    });
+  },
+);
 
 describe("pr-gate.sh", () => {
   beforeEach(() => {
     sandbox.git("switch", "--quiet", "--create", "feat/working-model-p9-x");
   });
 
-  it.each(["gh pr create --fill", "gh pr merge 31 --squash", "cd x && gh pr create"])(
-    'denies "%s" without either stamp, naming both',
-    (command) => {
-      const result = decision(hook("pr-gate.sh", toolInput(command)));
-      expect(result).toMatchObject({ allowed: false });
-      if (result.allowed) return;
-      expect(result.reason).toContain("the phase review has not approved HEAD");
-      expect(result.reason).toContain("preflight has not passed on HEAD");
-    },
-  );
+  it.each([
+    "gh pr create --fill",
+    "gh pr merge 31 --squash",
+    "cd x && gh pr create",
+  ])('denies "%s" without either stamp, naming both', (command) => {
+    const result = decision(hook("pr-gate.sh", toolInput(command)));
+    expect(result).toMatchObject({ allowed: false });
+    if (result.allowed) return;
+    expect(result.reason).toContain("the phase review has not approved HEAD");
+    expect(result.reason).toContain("preflight has not passed on HEAD");
+  });
 
   it("denies with the review stamp only, naming preflight alone", () => {
     sandbox.stamp("review-ok", [sandbox.head()]);
@@ -110,7 +148,9 @@ describe("pr-gate.sh", () => {
     sandbox.stamp("review-ok", [sandbox.head()]);
     sandbox.stamp("preflight-ok", [sandbox.head()]);
     sandbox.commit("after the stamps");
-    expect(decision(hook("pr-gate.sh", toolInput("gh pr create")))).toMatchObject({
+    expect(
+      decision(hook("pr-gate.sh", toolInput("gh pr create"))),
+    ).toMatchObject({
       allowed: false,
     });
   });
@@ -118,39 +158,52 @@ describe("pr-gate.sh", () => {
   it("allows when HEAD is in both stamps", () => {
     sandbox.stamp("review-ok", [sandbox.head()]);
     sandbox.stamp("preflight-ok", ["a".repeat(40), sandbox.head()]);
-    expect(decision(hook("pr-gate.sh", toolInput("gh pr create")))).toEqual({ allowed: true });
+    expect(decision(hook("pr-gate.sh", toolInput("gh pr create")))).toEqual({
+      allowed: true,
+    });
   });
 
   it("ignores a gh command that opens or merges no PR", () => {
-    expect(decision(hook("pr-gate.sh", toolInput("gh pr view 31")))).toEqual({ allowed: true });
+    expect(decision(hook("pr-gate.sh", toolInput("gh pr view 31")))).toEqual({
+      allowed: true,
+    });
   });
 
   it("denies a command that only mentions gh pr create, rather than parse the shell", () => {
-    expect(decision(hook("pr-gate.sh", toolInput("echo gh pr create")))).toMatchObject({
+    expect(
+      decision(hook("pr-gate.sh", toolInput("echo gh pr create"))),
+    ).toMatchObject({
       allowed: false,
     });
   });
 });
 
 describe("protect-main.sh", () => {
-  it.each(["git commit -m x", "git merge feat/x", "git -C . rebase main", "git push"])(
-    'denies "%s" on main',
-    (command) => {
-      expect(decision(hook("protect-main.sh", toolInput(command)))).toMatchObject({
+  it.each([
+    "git commit -m x",
+    "git merge feat/x",
+    "git -C . rebase main",
+    "git push",
+  ])('denies "%s" on main', (command) => {
+    expect(decision(hook("protect-main.sh", toolInput(command)))).toMatchObject(
+      {
         allowed: false,
-      });
-    },
-  );
+      },
+    );
+  });
 
-  it.each(["git push origin main", "git push origin HEAD:main", "git push -u origin main"])(
-    'denies "%s" from a branch',
-    (command) => {
-      sandbox.git("switch", "--quiet", "--create", "feat/x");
-      expect(decision(hook("protect-main.sh", toolInput(command)))).toMatchObject({
+  it.each([
+    "git push origin main",
+    "git push origin HEAD:main",
+    "git push -u origin main",
+  ])('denies "%s" from a branch', (command) => {
+    sandbox.git("switch", "--quiet", "--create", "feat/x");
+    expect(decision(hook("protect-main.sh", toolInput(command)))).toMatchObject(
+      {
         allowed: false,
-      });
-    },
-  );
+      },
+    );
+  });
 
   it.each([
     'git commit -m "merge main into the plan"',
@@ -158,7 +211,9 @@ describe("protect-main.sh", () => {
     "git log main..HEAD && git push origin feat/x",
   ])('allows "%s" on a branch', (command) => {
     sandbox.git("switch", "--quiet", "--create", "feat/x");
-    expect(decision(hook("protect-main.sh", toolInput(command)))).toEqual({ allowed: true });
+    expect(decision(hook("protect-main.sh", toolInput(command)))).toEqual({
+      allowed: true,
+    });
   });
 });
 
@@ -169,7 +224,9 @@ describe("protect-main.sh and the private notebook", () => {
     "git -C .work/ commit -am x",
     "git -C /Users/someone/code/repo/.work push -u origin main",
   ])('allows "%s" on main', (command) => {
-    expect(decision(hook("protect-main.sh", toolInput(command)))).toEqual({ allowed: true });
+    expect(decision(hook("protect-main.sh", toolInput(command)))).toEqual({
+      allowed: true,
+    });
   });
 
   it.each([
@@ -182,9 +239,11 @@ describe("protect-main.sh and the private notebook", () => {
     "git -C .work -C .. push origin main",
     "git -C .work --git-dir=../.git --work-tree=.. commit -m x",
   ])('denies "%s" on main', (command) => {
-    expect(decision(hook("protect-main.sh", toolInput(command)))).toMatchObject({
-      allowed: false,
-    });
+    expect(decision(hook("protect-main.sh", toolInput(command)))).toMatchObject(
+      {
+        allowed: false,
+      },
+    );
   });
 });
 
@@ -201,9 +260,11 @@ describe("protect-main.sh and git's global options", () => {
     'git -c "user.name=a b" commit -m x',
     "git -c 'user.name=a b' commit -m x",
   ])('denies "%s" on main', (command) => {
-    expect(decision(hook("protect-main.sh", toolInput(command)))).toMatchObject({
-      allowed: false,
-    });
+    expect(decision(hook("protect-main.sh", toolInput(command)))).toMatchObject(
+      {
+        allowed: false,
+      },
+    );
   });
 
   it.each([
@@ -213,15 +274,14 @@ describe("protect-main.sh and git's global options", () => {
     "git push origin feat/x && git push origin main",
     "git -c k=v push origin +main",
     "git push origin +HEAD:main",
-  ])(
-    'denies "%s" from a branch',
-    (command) => {
-      sandbox.git("switch", "--quiet", "--create", "feat/x");
-      expect(decision(hook("protect-main.sh", toolInput(command)))).toMatchObject({
+  ])('denies "%s" from a branch', (command) => {
+    sandbox.git("switch", "--quiet", "--create", "feat/x");
+    expect(decision(hook("protect-main.sh", toolInput(command)))).toMatchObject(
+      {
         allowed: false,
-      });
-    },
-  );
+      },
+    );
+  });
 
   it.each([
     "git -c user.name=x commit -m x",
@@ -229,7 +289,9 @@ describe("protect-main.sh and git's global options", () => {
     'git -c k=v commit -m "push to main later"',
   ])('allows "%s" on a branch', (command) => {
     sandbox.git("switch", "--quiet", "--create", "feat/x");
-    expect(decision(hook("protect-main.sh", toolInput(command)))).toEqual({ allowed: true });
+    expect(decision(hook("protect-main.sh", toolInput(command)))).toEqual({
+      allowed: true,
+    });
   });
 });
 

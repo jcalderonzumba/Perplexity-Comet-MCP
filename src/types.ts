@@ -55,11 +55,17 @@ export interface TabContext {
   id: string;
   url: string;
   title: string;
-  purpose: 'main' | 'agent-browsing' | 'data-read' | 'data-write' | 'reference' | 'unknown';
+  purpose:
+    | "main"
+    | "agent-browsing"
+    | "data-read"
+    | "data-write"
+    | "reference"
+    | "unknown";
   domain: string;
   lastActivity: number;
-  contentSummary?: string;  // Brief description of what's on the page
-  taskId?: string;          // ID of the task using this tab
+  contentSummary?: string; // Brief description of what's on the page
+  taskId?: string; // ID of the task using this tab
 }
 
 export interface TabRegistry {

@@ -10,15 +10,19 @@ import type { ScreenshotResult } from "../../../src/types.js";
 // chrome-remote-interface@^0.34.0 exposes ProtocolError but @types doesn't
 // declare it; mirror the cast pattern used in src/cdp-client.ts so tests can
 // construct one for the discriminator check.
-const ProtocolError = (CDP as unknown as {
-  ProtocolError: new (
-    request: { method: string },
-    response: { code: number; message: string; data?: string },
-  ) => Error;
-}).ProtocolError;
+const ProtocolError = (
+  CDP as unknown as {
+    ProtocolError: new (
+      request: { method: string },
+      response: { code: number; message: string; data?: string },
+    ) => Error;
+  }
+).ProtocolError;
 
 type LayoutMetrics = Awaited<ReturnType<ScreenshotPageAPI["getLayoutMetrics"]>>;
-type CaptureScreenshotArgs = Parameters<ScreenshotPageAPI["captureScreenshot"]>[0];
+type CaptureScreenshotArgs = Parameters<
+  ScreenshotPageAPI["captureScreenshot"]
+>[0];
 
 type ThrowMode = "none" | "protocol-error" | "generic";
 
@@ -78,7 +82,9 @@ export class FakeScreenshotPage implements ScreenshotPageAPI {
     return this.metricsResponse;
   }
 
-  async captureScreenshot(opts: CaptureScreenshotArgs): Promise<ScreenshotResult> {
+  async captureScreenshot(
+    opts: CaptureScreenshotArgs,
+  ): Promise<ScreenshotResult> {
     this.captureScreenshotCalls.push(opts);
     return { data: this.screenshotData } as ScreenshotResult;
   }

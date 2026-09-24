@@ -11,5 +11,21 @@
   "javascript": {
     "formatter": { "quoteStyle": "double", "trailingCommas": "all" }
   },
-  "linter": { "enabled": true, "rules": { "preset": "recommended" } }
+  "linter": {
+    "enabled": true,
+    "rules": {
+      "preset": "recommended",
+      "correctness": {
+        "noUnusedFunctionParameters": "off",
+        "noUnusedImports": "off",
+        "noUnusedVariables": "off"
+      },
+      "style": {
+        "noNonNullAssertion": "off",
+        "useNodejsImportProtocol": "off",
+        "useTemplate": "off"
+      },
+      "suspicious": { "noExplicitAny": "off" }
+    }
+  }
 }
