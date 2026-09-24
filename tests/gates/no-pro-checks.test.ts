@@ -9,7 +9,6 @@ import {
   type CallTool,
   connected,
   type DebugPort,
-  debugPortFromEnv,
   hasScreenshot,
   invalidModeHandled,
   reportsMode,
@@ -359,21 +358,5 @@ describe("runNoProBattery", () => {
         note: "probe failed",
       });
     });
-  });
-});
-
-describe("debugPortFromEnv", () => {
-  it("defaults to the server's port, 9223", () => {
-    expect(debugPortFromEnv({})).toBe(9223);
-  });
-
-  it("reads COMET_PORT, as the server does", () => {
-    expect(debugPortFromEnv({ COMET_PORT: "9222" })).toBe(9222);
-  });
-
-  it("falls back to 9223 on a value the server rejects", () => {
-    expect(debugPortFromEnv({ COMET_PORT: "not-a-port" })).toBe(9223);
-    expect(debugPortFromEnv({ COMET_PORT: "70000" })).toBe(9223);
-    expect(debugPortFromEnv({ COMET_PORT: "0" })).toBe(9223);
   });
 });

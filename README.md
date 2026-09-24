@@ -464,7 +464,7 @@ npm run check                         # before every commit
 
 Both batteries start the built server (`npm run build` first) and drive your local Comet through it: connect, tabs, screenshots, mode, and for the Pro battery, questions and agentic browsing.
 
-- **No-pro** (`tests/run-no-pro.mjs`): needs Comet signed in and already running with its debug port on the server's port (`COMET_PORT`, 9223 by default); spends no Perplexity Pro queries. `npm run preflight` runs it on every pull request, with a ten-minute ceiling. If your Comet listens on another port, point both at it, for example `COMET_PORT=9222 npm run preflight`.
+- **No-pro** (`tests/run-no-pro.mjs`): needs Comet signed in and already running with its debug port on the server's port (`COMET_PORT`, 9223 by default); spends no Perplexity Pro queries. `npm run preflight` runs it on every pull request, with a ten-minute ceiling. If your Comet listens on another port, set `COMET_PORT` to it, for example `COMET_PORT=9222 npm run preflight`: the battery checks that port and starts the server on it.
 - **Pro** (`tests/run-all.mjs`): needs Comet signed in to Perplexity Pro and **spends Pro queries**. It is run by hand when a change touches asking, polling, modes or agentic browsing, and the pull request records the result.
 
 The no-pro battery prints one line per check: its verdict, its id, and what the tool replied.

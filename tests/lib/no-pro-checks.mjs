@@ -26,22 +26,7 @@ import { runCheck, scoreCheck } from "./battery-score.mjs";
  * @typedef {{ port: number, answers: () => Promise<boolean> }} DebugPort
  */
 
-const SERVER_DEFAULT_PORT = 9223;
-
 const INVALID_MODE = "invalid_mode_xyz";
-
-/**
- * The server's debug port: `COMET_PORT` when it is a valid port, otherwise
- * 9223, the same rule the server applies.
- * @param {Record<string, string | undefined>} env
- * @returns {number}
- */
-export function debugPortFromEnv(env) {
-  const port = Number.parseInt(env.COMET_PORT ?? "", 10);
-  return Number.isInteger(port) && port >= 1 && port <= 65535
-    ? port
-    : SERVER_DEFAULT_PORT;
-}
 
 /** @param {ToolReply} reply */
 function replyText(reply) {

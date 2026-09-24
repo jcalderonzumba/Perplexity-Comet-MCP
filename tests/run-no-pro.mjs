@@ -13,7 +13,8 @@ import {
   reportLine,
   summaryLine,
 } from "./lib/battery-score.mjs";
-import { debugPortFromEnv, runNoProBattery } from "./lib/no-pro-checks.mjs";
+import { runNoProBattery } from "./lib/no-pro-checks.mjs";
+import { serverUnderTest } from "./lib/server-under-test.mjs";
 
 const DIST_ENTRY = resolve(
   dirname(fileURLToPath(import.meta.url)),
@@ -51,10 +52,8 @@ function callWithin(client) {
 }
 
 async function main() {
-  const transport = new StdioClientTransport({
-    command: "node",
-    args: [DIST_ENTRY],
-  });
+  const server = serverUnderTest(DIST_ENTRY, process.env);
+  const transport = new StdioClientTransport(server.parameters);
 
   const client = new Client({ name: "no-pro-battery", version: "1.0.0" });
   await client.connect(transport);
@@ -62,7 +61,7 @@ async function main() {
 
   const checks = await runNoProBattery(
     callWithin(client),
-    debugPort(debugPortFromEnv(process.env)),
+    debugPort(server.port),
     (check) => console.log(reportLine(check)),
   );
 
