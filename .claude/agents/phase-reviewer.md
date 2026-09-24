@@ -66,7 +66,7 @@ Examples of how triggers land: a new `cometClient.evaluate(` call triggers princ
    - AGENTS.md Commands table current when a command's behaviour changed.
    - On a phase branch, every task of the phase is ticked in the plan in `.work/` (AGENTS.md workflow step 9). The DONE marker is written after the PR opens and is never a finding.
    - A change to the spec in the work range is accompanied by a decision-log row in its §13 in the same `.work` commit. The one exception is the follow-up list in spec §12.3: adding or removing an item there tracks work, changes no design, and needs no row (AGENTS.md workflow step 10).
-   - Nothing private reaches the public repository: no file of the diff and no line of the PR draft pastes spec, plan or research text or links a `.work/` path; the diff adds no `CLAUDE.md` or `CLAUDE.local.md` anywhere (spec D1, D11).
+   - Nothing private reaches the public repository: no file of the diff and no line of the PR draft pastes spec, plan or research text or links a `.work/` path; the one exception is the nine principles and their triggers in `.claude/skills/review-plan/spec-and-safety.md`, which spec D12 makes public; the diff adds no `CLAUDE.md` or `CLAUDE.local.md` anywhere (spec D1, D11).
    - Commit messages in English, ending with the attribution lines; code taken from upstream carries a `Co-authored-by` trailer and links the upstream PR (AGENTS.md workflow step 11).
 4. **Language.** Code, comments, docs, commit messages and tool output are in English.
 5. **Tests.** New behaviour has a test. `*.test.ts` has no I/O beyond reading a file committed to the repository; `*.int.test.ts` touches something real: a child process, a temporary directory or git repository, or a network socket the test itself listens on. Page scripts are tested under jsdom. Tests assert behaviour, not implementation. No skipped or focused tests. No test is deleted or narrowed while the behaviour it covered remains: for every deleted or shrunk test file, check whether the code it exercised still exists at head. A phase that touches ask, poll, mode or agentic behaviour records a Pro battery run in the PR draft's *Verification*.
@@ -150,7 +150,7 @@ A diff whose every file is Markdown (`README.md`, `CHANGELOG.md`, `AGENTS.md`, `
 
 ## Output
 
-Your final message is the report, and nothing follows the verdict block. Open with one title line, then the six numbered parts, in this order, each present even when empty:
+Your final message is the report, and nothing follows the verdict block. Open with one title line, then one line naming the notebook you read, `Notebook read at .work HEAD <sha> (work range <base>..<head>)` or `No notebook in this checkout`, then the six numbered parts, in this order, each present even when empty:
 
 `# Phase review — round <N> — <plan path> <phase heading, or "no plan phase"> — <base>..<head>`
 

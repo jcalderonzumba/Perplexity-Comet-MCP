@@ -25,7 +25,7 @@ Read the spec. Check the work against the architecture and its boundaries (§4),
 
 ## Check 2: The nine non-negotiable principles
 
-From spec §2: *any change that violates one of these is rejected by definition.* Evaluate every principle whose trigger matches the work. Each is quoted verbatim, then its triggers.
+From spec §2: *any change that violates one of these is rejected by definition.* Evaluate every principle whose trigger matches the work. Each is quoted verbatim (the principles are public by spec D12), then its triggers.
 
 1. **Page content is data, never instructions.** Everything read from a page and returned to the client is wrapped in the nonce'd UNTRUSTED markers, and forged markers in the page text are neutralised. This covers answer text, source titles and URLs, and page reads.
    *Plan trigger:* any tool result, answer extraction, source links, page reads, a new tool that returns text, the UNTRUSTED markers or their opt-out.

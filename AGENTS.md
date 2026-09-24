@@ -13,7 +13,7 @@ The design documents are private. They live in `.work/`, a git repository of its
 - `.work/research/`: what was checked about the world outside the repository, when, and against which primary sources, one dated note per investigation. Its `README.md` holds the template and the index; read the index before researching.
 - Changing the spec requires a decision-log row in the same `.work` commit. The one exception is the follow-up list in spec §12.3 (workflow step 10).
 - `.work/` is committed with `git -C .work …` on its own `main`. Its commits need no branch, review or stamp: it records design and progress, not code that ships.
-- **Nothing from `.work/` is pasted into this repository or into a PR description.** Public files and PRs say what changed in their own words, name a plan and phase, and never quote a spec, plan or note or link a `.work/` path as if a reader could open it.
+- **Nothing from `.work/` is pasted into this repository or into a PR description.** Public files and PRs say what changed in their own words, name a plan and phase, and never quote a spec, plan or note or link a `.work/` path as if a reader could open it. The one exception is the spec's nine principles, published with their review triggers in `.claude/skills/review-plan/spec-and-safety.md` (spec D12): they are the product's promises.
 - A clone without `.work/` still builds, tests and runs every gate; only the design workflow needs the notebook.
 
 ## Workflow (every change, no exceptions)
