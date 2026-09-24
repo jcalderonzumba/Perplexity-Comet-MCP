@@ -2,7 +2,8 @@
  * The no-pro battery's checks: which tool each calls, and the condition over
  * the tool's reply that decides whether it held. Every condition can fail.
  * The battery script supplies the server connection, each call's timeout and
- * the printing; scoring is `battery-score.mjs`'s.
+ * the printing; scoring is `battery-score.mjs`'s. The Pro battery shares the
+ * connect check and the reading of replies (`pro-checks.mjs`).
  */
 
 import { runCheck, scoreCheck } from "./battery-score.mjs";
@@ -35,15 +36,21 @@ const MODE_READ = /^Current mode: (search|research|labs|learn)$/m;
 const LABS_NOT_OFFERED =
   "Cannot switch to labs mode: not offered by Perplexity's current input bar";
 
-/** @param {ToolReply} reply */
-function replyText(reply) {
+/**
+ * The reply's text items, joined by newlines.
+ * @param {ToolReply} reply
+ */
+export function replyText(reply) {
   return (reply.content ?? [])
     .map((item) => (item.type === "text" ? item.text : ""))
     .join("\n");
 }
 
-/** @param {ToolReply} reply */
-function succeeded(reply) {
+/**
+ * The reply is not an error result.
+ * @param {ToolReply} reply
+ */
+export function succeeded(reply) {
   return reply.isError !== true;
 }
 
@@ -78,12 +85,23 @@ export function tabsListed(reply) {
 }
 
 /**
+ * The mode `comet_mode` read from the page, from its `Current mode:` line;
+ * undefined when it read none. The reply lists every mode, so naming one is
+ * not enough.
+ * @param {ToolReply} reply
+ * @returns {string | undefined}
+ */
+export function currentMode(reply) {
+  return MODE_READ.exec(replyText(reply))?.[1];
+}
+
+/**
  * [7.1], [7.3-reconnect]: no error, and the current mode is one read from the
- * page, not `unknown`. The reply lists every mode, so naming one is not enough.
+ * page, not `unknown`.
  * @param {ToolReply} reply
  */
 export function reportsMode(reply) {
-  return succeeded(reply) && MODE_READ.test(replyText(reply));
+  return succeeded(reply) && currentMode(reply) !== undefined;
 }
 
 /**
@@ -164,11 +182,12 @@ function modeSwitch(mode) {
 /**
  * [1.2]: Comet already answers on the server's debug port, and connect
  * succeeds. Without the port, no tool is called: connect would launch Comet,
- * or kill and relaunch one running on another port.
+ * or kill and relaunch one running on another port. Both batteries start
+ * with it.
  * @param {DebugPort} debugPort
  * @returns {NoProCheck}
  */
-function connectCheck(debugPort) {
+export function connectCheck(debugPort) {
   const connect = singleCall("1.2", "comet_connect", {}, 30000, (reply) => ({
     held: connected(reply),
     note: excerpt(reply, 80),

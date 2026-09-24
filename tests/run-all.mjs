@@ -1,7 +1,9 @@
 /**
  * MCP Test Runner
- * Spawns the built MCP server (dist/index.js) and runs the live Pro battery
- * against the local Comet (README, Development). Spends Perplexity Pro queries.
+ * Spawns the built MCP server (dist/index.js) on the debug port it checks and
+ * runs the live Pro battery against the local Comet (README, Development).
+ * Spends Perplexity Pro queries. Comet must already answer on the server's
+ * port (COMET_PORT, 9223 by default): otherwise no tool is called.
  * Usage: npm run test:live:pro
  */
 
@@ -11,6 +13,10 @@ import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
 import { spawn } from "child_process";
 import { existsSync, writeFileSync } from "fs";
+import { runCheck } from "./lib/battery-score.mjs";
+import { connectCheck } from "./lib/no-pro-checks.mjs";
+import { RESEARCH_WORKFLOW } from "./lib/pro-checks.mjs";
+import { debugPort, serverUnderTest } from "./lib/server-under-test.mjs";
 
 const DIST_ENTRY = resolve(
   dirname(fileURLToPath(import.meta.url)),
@@ -58,28 +64,30 @@ async function main() {
   // Create test upload file
   writeFileSync(COMET_TEST_FILE, "comet-mcp-test\n");
 
-  const transport = new StdioClientTransport({
-    command: "node",
-    args: [DIST_ENTRY],
-  });
+  const server = serverUnderTest(DIST_ENTRY, process.env);
+  const transport = new StdioClientTransport(server.parameters);
 
   const client = new Client({ name: "test-runner", version: "1.0.0" });
   await client.connect(transport);
   console.log("Connected to MCP server.\n");
+  const callTool = (name, args, timeoutMs) =>
+    call(client, name, args, timeoutMs);
 
   // ─────────────────────────────────────────────
   // GROUP 1: Connection & Lifecycle
   // ─────────────────────────────────────────────
   console.log("── Group 1: Connection & Lifecycle ──");
 
-  // 1.2 — Already-connected idempotency (Comet should already be running from previous session)
-  try {
-    const r = await call(client, "comet_connect", {}, 30000);
-    const t = text(r);
-    if (t.match(/connected|started|running/i)) log("1.2", PASS, t.slice(0, 80));
-    else log("1.2", FAIL, t.slice(0, 120));
-  } catch (e) {
-    log("1.2", FAIL, e.message);
+  // 1.2 — Comet already answers on the server's debug port, and connect
+  // succeeds. Nothing else runs without it: any tool call would make the
+  // server launch Comet, or kill and relaunch one on another port.
+  const connect = await runCheck("1.2", () =>
+    connectCheck(debugPort(server.port)).probe(callTool),
+  );
+  log("1.2", connect.held ? PASS : FAIL, connect.note);
+  if (!connect.held) {
+    console.log("\nNo other check is run: [1.2] connect failed.");
+    return finish(client);
   }
 
   // 1.5 — Session persistence: ask a simple question to confirm we're logged in
@@ -444,6 +452,11 @@ async function main() {
     }
   }
 
+  // 7.4 — The owner's workflow: research set with comet_mode survives the
+  // new chat comet_ask opens. Spends one Deep research query.
+  const workflow = await RESEARCH_WORKFLOW.probe(callTool);
+  log(RESEARCH_WORKFLOW.id, workflow.held ? PASS : FAIL, workflow.note);
+
   // ─────────────────────────────────────────────
   // GROUP 8: comet_upload
   // ─────────────────────────────────────────────
@@ -515,6 +528,10 @@ async function main() {
     log("9.4", PASS, `graceful error: ${e.message.slice(0, 60)}`);
   }
 
+  return finish(client);
+}
+
+async function finish(client) {
   // ─────────────────────────────────────────────
   // Summary
   // ─────────────────────────────────────────────
