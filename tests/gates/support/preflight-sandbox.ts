@@ -1,8 +1,9 @@
 /**
- * A throwaway repository holding a copy of `scripts/preflight.mjs` and its
- * library, for tests that run preflight itself. The commands its steps run
- * (`npm`, `npx`, `node`) are stand-ins on `PATH` that pass without doing any
- * work, so a test decides what fails.
+ * A throwaway repository holding a copy of `scripts/` (`preflight.mjs`,
+ * `check.mjs` and their library), for tests that run the gates themselves. The
+ * commands their steps run (`npm`, `npx`, `node`) are stand-ins on `PATH` that
+ * pass without doing any work and log how they were called, so a test decides
+ * what fails and sees what ran.
  */
 import {
   chmodSync,
@@ -11,11 +12,12 @@ import {
   mkdirSync,
   mkdtempSync,
   readFileSync,
+  renameSync,
   rmSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { delimiter, join } from "node:path";
+import { delimiter, dirname, join } from "node:path";
 
 import {
   findOnPath,
@@ -40,9 +42,12 @@ const STAND_INS: Readonly<Record<string, string>> = {
   node: "exit 0",
 };
 
+const RULES = join("scripts", "lib", "preflight-rules.mjs");
+
 export class PreflightSandbox {
   readonly repository = new GitSandbox();
   readonly #bin = mkdtempSync(join(tmpdir(), "comet-mcp-stand-ins-"));
+  readonly #log = join(this.#bin, "commands.log");
 
   constructor() {
     cpSync(join(repoRoot, "scripts"), join(this.root, "scripts"), {
@@ -50,7 +55,7 @@ export class PreflightSandbox {
     });
     writeFileSync(join(this.root, ".gitignore"), ".work/\ndist/\n");
     for (const [tool, body] of Object.entries(STAND_INS))
-      this.standIn(tool, body);
+      this.standIn(tool, `echo "${tool} $*" >> '${this.#log}'\n${body}`);
     this.repository.commit("preflight scripts");
   }
 
@@ -99,21 +104,54 @@ export class PreflightSandbox {
     chmodSync(file, 0o755);
   }
 
+  /**
+   * Commits a copy of the preflight rules whose live battery limit is `ms`,
+   * the rest of the rules unchanged, so a test can show preflight applying
+   * the limit without waiting ten minutes.
+   */
+  limitLiveBatteryTo(ms: number): void {
+    const original = "preflight-rules.original.mjs";
+    renameSync(
+      join(this.root, RULES),
+      join(this.root, dirname(RULES), original),
+    );
+    writeFileSync(
+      join(this.root, RULES),
+      `export * from "./${original}";\nexport const LIVE_BATTERY_TIMEOUT_MS = ${ms};\n`,
+    );
+    this.repository.commit(`live battery limited to ${ms} ms`);
+  }
+
   /** Runs `scripts/preflight.mjs` with the real node and the stand-ins first on `PATH`. */
   preflight(args: readonly string[] = []): Outcome {
-    return runProcess(process.execPath, ["scripts/preflight.mjs", ...args], {
-      cwd: this.root,
-      env: {
-        NO_COLOR: "1",
-        PATH: `${this.#bin}${delimiter}${process.env.PATH ?? ""}`,
-      },
-    });
+    return this.#runScript("scripts/preflight.mjs", args);
+  }
+
+  /** Runs `scripts/check.mjs` the same way. */
+  check(): Outcome {
+    return this.#runScript("scripts/check.mjs", []);
+  }
+
+  /** Each stand-in call so far, as `<tool> <args…>`, in the order they ran. */
+  commandsRun(): string[] {
+    if (!existsSync(this.#log)) return [];
+    return readFileSync(this.#log, "utf8").trimEnd().split("\n");
   }
 
   /** The approval file's raw content, or null when preflight never wrote it. */
   approvals(): string | null {
     const file = join(this.root, ".git", "preflight-ok");
     return existsSync(file) ? readFileSync(file, "utf8") : null;
+  }
+
+  #runScript(script: string, args: readonly string[]): Outcome {
+    return runProcess(process.execPath, [script, ...args], {
+      cwd: this.root,
+      env: {
+        NO_COLOR: "1",
+        PATH: `${this.#bin}${delimiter}${process.env.PATH ?? ""}`,
+      },
+    });
   }
 
   remove(): void {

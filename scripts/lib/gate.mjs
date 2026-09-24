@@ -27,7 +27,7 @@ export const ok = (text) =>
   process.stdout.write(`${paint("32", `  PASS ${text}`)}\n`);
 /** @param {string} text */
 export const warn = (text) =>
-  process.stdout.write(`${paint("33", `  SKIP ${text}`)}\n`);
+  process.stdout.write(`${paint("33", `  WARN ${text}`)}\n`);
 /** @param {string} text */
 export const fail = (text) =>
   process.stdout.write(`${paint("31", `  FAIL ${text}`)}\n`);

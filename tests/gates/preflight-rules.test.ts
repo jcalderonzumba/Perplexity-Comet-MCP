@@ -2,7 +2,6 @@ import { describe, expect, it } from "vitest";
 
 import {
   dirtyTrees,
-  LIVE_BATTERY_TIMEOUT_MS,
   packProblems,
 } from "../../scripts/lib/preflight-rules.mjs";
 
@@ -59,11 +58,5 @@ describe("dirtyTrees", () => {
     expect(dirtyTrees({ public: "", work: " M plans/x.md\n" })).toEqual([
       ".work/:\n M plans/x.md",
     ]);
-  });
-});
-
-describe("the live battery", () => {
-  it("is bounded, so a missing Comet cannot hang the gate", () => {
-    expect(LIVE_BATTERY_TIMEOUT_MS).toBe(600_000);
   });
 });
