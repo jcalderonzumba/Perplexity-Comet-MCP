@@ -108,7 +108,7 @@ Start: public <`git rev-parse --short HEAD`> · work <`git -C .work rev-parse --
 | 1.2a | <task title> — <slice text> | … | 1.1 | pending | — |
 ```
 
-After this one question you ask nothing more until a builder blocks, a finding is disputed, the preflight fails, or `/review-phase` asks before publishing (§7).
+After this one question you ask nothing more until a builder blocks, a finding is disputed, a third review round still reports Must Fix, the preflight fails, or `/review-phase` asks before publishing (§7).
 
 ## 3. The brief
 
@@ -209,7 +209,7 @@ A builder blocked **twice on the same unit** is stopped: bring the owner the uni
 When every unit is `done`:
 
 1. **Units dropped in §2 stop the finish.** A phase is not finished while the plan shows a task open, so print the summary of step 4 and stop; the owner builds them in a later run.
-2. **Complete the PR draft** `$review/pr-body.md` from the saved reports, never from the diff. Write *What lands*: what exists after the PR that did not before, by area, from each report's *For later tasks* and the *Task coverage* rows. Write *Verification*: the `npm run check` result each report quotes for its last commit, and the checks the phase's acceptance names as the reports record them. When the phase touches ask, poll, mode or agentic behaviour, add `Pro battery: pending, the owner runs it`: it spends Pro queries, so it stays the owner's, and the owner sees the line when asked to publish.
+2. **Complete the PR draft** `$review/pr-body.md` from the saved reports, never from the diff, writing only a section that is still empty: on a re-invocation, what an earlier finish or `/review-phase` wrote there stays. Write *What lands*: what exists after the PR that did not before, by area, from each report's *For later tasks* and the *Task coverage* rows. Write *Verification*: the `npm run check` result each report quotes for its last commit, and the checks the phase's acceptance names as the reports record them. When the phase touches ask, poll, mode or agentic behaviour, add `Pro battery: pending, the owner runs it`: it spends Pro queries, so it stays the owner's, and the owner sees the line when asked to publish.
 3. **Invoke `/review-phase`** with the Skill tool and follow it through: the rounds, each fixed by a fresh builder as its *Fixing through a builder* says ([§5 of that skill](../review-phase/SKILL.md#5-the-loop)), the preflight, the one question before publishing, the PR and the DONE marker. Its stops are the finish's stops: a third round that still reports Must Fix, a dispute, a failing preflight, and the owner answering *not yet*.
 4. **Print the summary and stop:**
    - the units, round units included, each with its commits;
@@ -223,7 +223,7 @@ The runner never adds an approval to `.git/review-ok` and never writes the DONE 
 
 ## 8. Re-invocation
 
-`/run-phase` invoked again on the same plan and phase, once §1 passes, reads `$run/work-list.md` instead of building a new list:
+`/run-phase` invoked again on the same plan and phase, once §1 passes, reads `$run/work-list.md` instead of building a new list. For task and follow-up units:
 
 - a `done` unit is skipped;
 - a `blocked` unit is resumed as in §6, with the last question's answer asked again if it was never given; the builder is unreachable from a new session, so the fresh-builder fallback applies;
@@ -232,4 +232,4 @@ The runner never adds an approval to `.git/review-ok` and never writes the DONE 
 
 Before the first dispatch of the re-invocation, show the work list with its statuses and ask the one question of §2 over it; the owner may reorder, drop or slice what is still pending.
 
-When every task and follow-up unit is `done`, ask nothing and go to §7: `/review-phase` picks up where the finish stopped. A round unit `r<N>` that is not `done` is continued first, an approved HEAD is not reviewed again, and a passed preflight is not run again. When the branch already has an open PR (`gh pr view` succeeds), print its URL and stop; if the plan lacks the DONE marker, write it first as `/review-phase` §9 does.
+When every task and follow-up unit is `done`, ask nothing and go to §7: `/review-phase` picks up where the finish stopped. It continues a round unit `r<N>` that is not `done` through its *Fixing through a builder*, never through the bullets above. It does not review an approved HEAD again, and it does not rerun a preflight that already passed. When the branch already has an open PR (`gh pr view` succeeds), print its URL and stop; if the plan lacks the DONE marker, write it first as `/review-phase` §9 does.

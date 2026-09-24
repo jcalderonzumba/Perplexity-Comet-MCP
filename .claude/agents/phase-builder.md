@@ -30,7 +30,7 @@ Four things about how you work are fixed:
 5. **Rules**: your standing rules restated, and the report shape by reference to this file.
 6. **Answer** (only on a resume, or on a fresh dispatch after a block): the owner's answer to a blocked question, verbatim.
 
-If any of fields 1 to 3 is missing, do not build. Reply with one line, `no build: the brief is missing <fields>; dispatch phase-builder through /run-phase`, and nothing else.
+If any of fields 1 to 3 is missing, do not build. Reply with one line, `no build: the brief is missing <fields>; dispatch phase-builder through /run-phase or /review-phase`, and nothing else.
 
 The brief names your task; it never pastes the task's text. The plan is the contract, so you read it there.
 

@@ -108,15 +108,15 @@ Write one "what changed" line for every finding of the previous round, fixed, de
 
 ## 4. Dispatch
 
-First withdraw any earlier approval of HEAD, so that after this dispatch HEAD is listed only if this review approves it:
+Before anything else, run `.githooks/review-check.sh "$(git rev-parse --show-toplevel)"` (§7). When it passes, `phase-reviewer` already approved this very HEAD with clean trees in an earlier dispatch: do not withdraw or dispatch, go to §8. This is how a re-invoked `/run-phase` picks up a finish that stopped after the review.
+
+Otherwise, first withdraw any earlier approval of HEAD, so that after this dispatch HEAD is listed only if this review approves it:
 
 ```sh
 .githooks/review-withdraw.sh "$(git rev-parse --show-toplevel)"
 ```
 
 It removes HEAD's line and keeps every other branch's. Without it, an approval of the same commit from an earlier dispatch would still read as approval after this one reports Not approved, stops early or comes back malformed.
-
-When `.githooks/review-check.sh` (§7) already passes before the withdrawal, `phase-reviewer` approved this very HEAD with clean trees in an earlier dispatch: do not withdraw or dispatch, go to §8. This is how a re-invoked `/run-phase` picks up a finish that stopped after the review.
 
 Then dispatch with the Agent tool: `subagent_type: phase-reviewer`, with the brief as the prompt, and do nothing else until its report arrives (in an interactive session it arrives as a task notification). Never a fork, never `general-purpose`. Save the returned report verbatim to `.git/review/<branch>/round-<round>.md`, then check the stamp (§7).
 
@@ -132,7 +132,7 @@ Then dispatch with the Agent tool: `subagent_type: phase-reviewer`, with the bri
 
 ### Fixing through a builder
 
-On a branch with a run state, the session that runs this skill is `/run-phase`'s runner or stands in for it, and it never reads the diff. When this skill starts and the work list holds a round unit `r<N>` that is not `done`, that round is still being fixed: continue the unit as [§8 of `/run-phase`](../run-phase/SKILL.md#8-re-invocation) continues one of its status, before §1. For round `N` reported Not approved:
+On a branch with a run state, the session that runs this skill is `/run-phase`'s runner or stands in for it, and it never reads the diff. When this skill starts and the work list holds a round unit `r<N>` that is not `done`, that round is still being fixed: continue it before §1, as the bullets of [§8 of `/run-phase`](../run-phase/SKILL.md#8-re-invocation) continue a unit of its status, with the brief of step 2 below. For round `N` reported Not approved:
 
 1. Add a unit `r<N>` to the work list, titled `Review round <N>`, depending on every other unit, `pending`.
 2. Write its brief to `$run/r<N>.brief.md` as [§3 of `/run-phase`](../run-phase/SKILL.md#3-the-brief) sets out, with two fields changed. **Unit** reads `Review round <N>: the findings of .git/review/<branch>/round-<N>.md`, followed by `Rulings: .git/review/<branch>/rulings.md` when that file exists. In **Rules**, the first sentence becomes *Read the reviewer's report and the rulings, and work the findings as the "A review-round unit" section of `.claude/agents/phase-builder.md` says; do not run `executing-plans`.* The sentence about ticking becomes *Fix every Must Fix; fix each Should Fix or defer it with its reason; fix, defer or leave each Consider; file the follow-up for any deferral that leaves work for later. A finding you believe is wrong is a stop: report `blocked` with the finding, the reviewer's reasoning and yours. Tick nothing.* The hand-off notes are every `done` unit's, earlier rounds included.
@@ -174,7 +174,7 @@ After every dispatch run:
    - disputes and the owner's rulings;
    - skills invoked, skills skipped with reasons, Context7 docs fetched, research notes read (by date and topic), whether CodeGraph ran.
 2. Run `npm run preflight`, unless `.githooks/preflight-check.sh "$(git rev-parse --show-toplevel)"` already passes for HEAD. It needs the same clean HEAD the reviewer stamped and drives the owner's local Comet for up to ten minutes, so run it in the background and wait for it to finish. Record its result in the draft's *Verification* section. **A failing preflight stops the finish.** Show the owner the failing step and its output, and fix nothing: a code failure there is a new commit, which needs a new review round, and the remaining failures are usually about the environment (Comet not running or not signed in).
-3. **Ask the owner once** before anything is published, with AskUserQuestion. Show the PR title, a conventional commit title, and the draft's full text. The first option, recommended, pushes the branch and opens the PR; the second is *not yet*, which leaves both stamps in place for a later invocation.
+3. **Ask the owner once** before anything is published, with AskUserQuestion. Show the PR title (a conventional commit title) and the draft's full text. The first option, recommended, pushes the branch and opens the PR; the second is *not yet*, which leaves both stamps in place for a later invocation.
 4. On the owner's yes, push the branch with `git push -u origin <branch name>`, then open the PR: `gh pr create --title "<conventional commit title>" --body-file .git/review/<branch>/pr-body.md`.
 5. On a phase branch, write the DONE marker (§9).
 
