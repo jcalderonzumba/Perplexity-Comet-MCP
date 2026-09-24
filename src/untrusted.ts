@@ -17,10 +17,11 @@ import { randomBytes } from "node:crypto";
  * CONTENT]` is trivially spoofable — attacker prints the literal close
  * marker inside the page, then "trusted-looking" instructions, then a
  * matching open marker. With a fresh nonce on every wrap the attacker
- * cannot predict the closing sequence. We also strip any literal
- * `[BEGIN UNTRUSTED PAGE CONTENT nonce=` and `[END UNTRUSTED nonce=`
- * substrings from the wrapped content as defense-in-depth (defeats
- * fake open-marker injection and leaked-nonce replay).
+ * cannot predict the closing sequence. We also neutralise any literal
+ * `[BEGIN UNTRUSTED PAGE CONTENT nonce=`, `[END UNTRUSTED PAGE CONTENT
+ * nonce=` and `[END UNTRUSTED nonce=` substrings in the wrapped content as
+ * defense-in-depth (defeats fake open- and close-marker injection and
+ * leaked-nonce replay).
  *
  * Set `COMET_DISABLE_UNTRUSTED_MARKERS=1` to opt out (backward-compat
  * for callers that parse the raw response).
@@ -38,6 +39,10 @@ export function wrapUntrustedPageContent(
     .replace(
       /\[BEGIN UNTRUSTED PAGE CONTENT nonce=/g,
       "[BEGIN_UNTRUSTED_PAGE_CONTENT_nonce=",
+    )
+    .replace(
+      /\[END UNTRUSTED PAGE CONTENT nonce=/g,
+      "[END_UNTRUSTED_PAGE_CONTENT_nonce=",
     )
     .replace(/\[END UNTRUSTED nonce=/g, "[END_UNTRUSTED_nonce=");
   return [
