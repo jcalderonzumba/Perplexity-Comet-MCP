@@ -14,6 +14,7 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 import { spawn } from "child_process";
 import { existsSync, writeFileSync } from "fs";
 import { runCheck } from "./lib/battery-score.mjs";
+import { callWithin } from "./lib/call-within.mjs";
 import { connectCheck } from "./lib/no-pro-checks.mjs";
 import { RESEARCH_WORKFLOW } from "./lib/pro-checks.mjs";
 import { debugPort, serverUnderTest } from "./lib/server-under-test.mjs";
@@ -42,15 +43,7 @@ function log(id, status, note = "") {
 }
 
 async function call(client, toolName, args = {}, timeoutMs = 60000) {
-  return Promise.race([
-    client.callTool({ name: toolName, arguments: args }),
-    new Promise((_, reject) =>
-      setTimeout(
-        () => reject(new Error(`TIMEOUT after ${timeoutMs}ms`)),
-        timeoutMs,
-      ),
-    ),
-  ]);
+  return callWithin(client)(toolName, args, timeoutMs);
 }
 
 function text(result) {
@@ -70,8 +63,7 @@ async function main() {
   const client = new Client({ name: "test-runner", version: "1.0.0" });
   await client.connect(transport);
   console.log("Connected to MCP server.\n");
-  const callTool = (name, args, timeoutMs) =>
-    call(client, name, args, timeoutMs);
+  const callTool = callWithin(client);
 
   // ─────────────────────────────────────────────
   // GROUP 1: Connection & Lifecycle

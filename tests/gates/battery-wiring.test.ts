@@ -40,6 +40,14 @@ describe.each(["run-no-pro.mjs", "run-all.mjs"])(
       expect(source).toContain("debugPort(server.port)");
       expect(source).not.toContain("/json/version");
     });
+
+    it("calls tools only through callWithin, which gives the SDK each call's limit", () => {
+      expect(source).toMatch(
+        /import \{[^}]*\bcallWithin\b[^}]*\} from "\.\/lib\/call-within\.mjs";/,
+      );
+      expect(source).toContain("callWithin(client)");
+      expect(source).not.toContain(".callTool(");
+    });
   },
 );
 

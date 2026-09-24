@@ -13,6 +13,7 @@ import {
   reportLine,
   summaryLine,
 } from "./lib/battery-score.mjs";
+import { callWithin } from "./lib/call-within.mjs";
 import { runNoProBattery } from "./lib/no-pro-checks.mjs";
 import { debugPort, serverUnderTest } from "./lib/server-under-test.mjs";
 
@@ -20,19 +21,6 @@ const DIST_ENTRY = resolve(
   dirname(fileURLToPath(import.meta.url)),
   "../dist/index.js",
 );
-
-function callWithin(client) {
-  return (name, args, timeoutMs) =>
-    Promise.race([
-      client.callTool({ name, arguments: args }),
-      new Promise((_, reject) =>
-        setTimeout(
-          () => reject(new Error(`TIMEOUT after ${timeoutMs}ms`)),
-          timeoutMs,
-        ),
-      ),
-    ]);
-}
 
 async function main() {
   const server = serverUnderTest(DIST_ENTRY, process.env);
