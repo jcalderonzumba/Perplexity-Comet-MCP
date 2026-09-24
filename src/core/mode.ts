@@ -86,11 +86,15 @@ export type SwitchResult =
   | { ok: true; mode: ToolMode }
   | { ok: false; failure: ModeFailure };
 
-/** The mode the page's button shows. */
+/**
+ * The mode the page's button shows. A page error's message is page text,
+ * like the button's.
+ */
 export type ModeReading =
   | { kind: "known"; mode: ToolMode }
   | { kind: "unknown"; text: string }
-  | { kind: "no-button" };
+  | { kind: "no-button" }
+  | { kind: "page-error"; message: string };
 
 export type EnsureOutcome =
   | { status: "no-mode" }
@@ -163,11 +167,16 @@ export class ModeCore {
 
   /**
    * The mode the button shows, read without opening the menu, once the
-   * button appears within the bounded wait. A page error propagates: a read
-   * leaves nothing to clean up.
+   * button appears within the bounded wait. A page error is a reading, not
+   * a throw, so its message reaches the adapter as page text.
    */
   async readMode(): Promise<ModeReading> {
-    const button = await this.waitForButton();
+    let button: ModeButton | null;
+    try {
+      button = await this.waitForButton();
+    } catch (error) {
+      return { kind: "page-error", message: errorMessage(error) };
+    }
     if (!button) return { kind: "no-button" };
     const mode = toolModeForPageLabel(button.text);
     return mode
@@ -199,16 +208,20 @@ export class ModeCore {
   async ensureMode(): Promise<EnsureOutcome> {
     const mode = this.remembered;
     if (!mode) return { status: "no-mode" };
-    try {
-      const reading = await this.readMode();
-      if (reading.kind === "no-button") {
-        return { status: "failed", mode, failure: { kind: "no-button", mode } };
-      }
-      if (reading.kind === "known" && reading.mode === mode) {
-        return { status: "already-set", mode };
-      }
-    } catch (error) {
-      return { status: "failed", mode, failure: pageError(mode, error) };
+    const reading = await this.readMode();
+    if (reading.kind === "no-button") {
+      return { status: "failed", mode, failure: { kind: "no-button", mode } };
+    }
+    if (reading.kind === "page-error") {
+      const failure: ModeFailure = {
+        kind: "page-error",
+        mode,
+        message: reading.message,
+      };
+      return { status: "failed", mode, failure };
+    }
+    if (reading.kind === "known" && reading.mode === mode) {
+      return { status: "already-set", mode };
     }
     const result = await this.switchMode(mode);
     return result.ok
@@ -348,8 +361,11 @@ function fail(failure: ModeFailure): SwitchResult {
 }
 
 function pageError(mode: ToolMode, error: unknown): ModeFailure {
-  const message = error instanceof Error ? error.message : String(error);
-  return { kind: "page-error", mode, message };
+  return { kind: "page-error", mode, message: errorMessage(error) };
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 function checkedLabelOf(items: ModeMenuItem[]): string | null {

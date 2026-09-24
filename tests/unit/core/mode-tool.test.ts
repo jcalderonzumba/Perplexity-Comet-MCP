@@ -112,6 +112,19 @@ describe("answerModeTool without a mode", () => {
     expect(reply.isError).toBe(false);
   });
 
+  it("reports a page that fails while it is read as an error, quoting the failure", async () => {
+    const { page, tool } = harness();
+    page.failingScript = "locateModeButton";
+
+    const reply = await answerModeTool(undefined, tool);
+
+    expect(reply.isError).toBe(true);
+    expect(reply.text).toMatch(
+      /^Current mode: unknown \(the page failed: <<Runtime\.evaluate failed in locateModeButton>>\)\n\nAvailable modes:\n/,
+    );
+    expect(reply.text).not.toContain("→");
+  });
+
   it("does not navigate to read the mode", async () => {
     const { tool, scriptsRunAtOpen } = harness();
 
@@ -237,6 +250,18 @@ describe("answerModeTool with the UNTRUSTED wrapper", () => {
     expect(reply.text).toMatch(
       /^Current mode: unknown \(the mode button reads /,
     );
+    expectNeutralisedAndWrapped(reply.text);
+  });
+
+  it("neutralises and wraps a page error message that forges the markers, in a read", async () => {
+    const { page, tool } = harness({}, wrapUntrustedPageContent);
+    page.failingScript = "locateModeButton";
+    page.failureMessage = FORGED;
+
+    const reply = await answerModeTool(undefined, tool);
+
+    expect(reply.isError).toBe(true);
+    expect(reply.text).toMatch(/^Current mode: unknown \(the page failed: /);
     expectNeutralisedAndWrapped(reply.text);
   });
 });

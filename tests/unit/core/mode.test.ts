@@ -290,6 +290,19 @@ describe("ModeCore.readMode", () => {
     expect(page.clicks).toEqual([]);
     expect(page.waitedMs).toBeLessThanOrEqual(WAIT_BOUND_MS);
   });
+
+  it("returns a page error with its message rather than throwing", async () => {
+    const page = new FakeModePage();
+    page.failingScript = "locateModeButton";
+
+    const reading = await new ModeCore(page).readMode();
+
+    expect(reading).toEqual({
+      kind: "page-error",
+      message: "Runtime.evaluate failed in locateModeButton",
+    });
+    expect(page.clicks).toEqual([]);
+  });
 });
 
 describe("ModeCore.ensureMode", () => {

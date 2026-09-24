@@ -264,7 +264,7 @@ Returns: the current mode read from the page, or confirmation that the switch ha
 | labs | Not available: Perplexity's input bar no longer offers Labs, so the call fails saying so |
 | learn | Not available yet: the call fails saying so |
 
-Without a mode, `comet_mode` reads the mode from the mode button in Perplexity's input bar. When the button shows something other than these modes, or there is no button, it reports `unknown` and quotes what it saw.
+Without a mode, `comet_mode` reads the mode from the mode button in Perplexity's input bar. When the button shows something other than these modes, or there is no button, it reports `unknown` and quotes what it saw. When the page fails while it is read, it reports `unknown` as an error and quotes the page's error message.
 
 With a mode, it opens the mode menu with real pointer clicks, selects the mode's item, and opens the menu again to read which item is checked. It says `Switched to <mode> mode` only when the menu and the button both show the new mode. Otherwise it returns an error naming what the page showed. Either way it closes the menu. If the tab is not on Perplexity, it opens Perplexity's home page first.
 

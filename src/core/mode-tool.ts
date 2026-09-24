@@ -51,7 +51,7 @@ export interface ModeToolReply {
 
 /**
  * Answers `comet_mode`: an absent or empty `mode` reads the current mode,
- * any other switches to it.
+ * any other switches to it. A read the page fails is an error reply.
  */
 export async function answerModeTool(
   mode: unknown,
@@ -59,7 +59,10 @@ export async function answerModeTool(
 ): Promise<ModeToolReply> {
   if (!mode) {
     const reading = await tool.core.readMode();
-    return { text: describeReading(reading, tool.quotePage), isError: false };
+    return {
+      text: describeReading(reading, tool.quotePage),
+      isError: reading.kind === "page-error",
+    };
   }
   if (touchesThePage(mode)) await tool.openPerplexity();
   const result = await tool.core.switchMode(mode);
@@ -101,6 +104,8 @@ function currentModeText(
       return `unknown (the mode button reads ${quotePage(reading.text)})`;
     case "no-button":
       return "unknown (no mode button found on the page)";
+    case "page-error":
+      return `unknown (the page failed: ${quotePage(reading.message)})`;
   }
 }
 

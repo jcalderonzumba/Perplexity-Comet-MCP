@@ -56,6 +56,8 @@ export class FakeModePage implements ModePage {
   public escapeCloses = true;
   /** The script whose run throws, as a CDP error would. */
   public failingScript: string | undefined;
+  /** The message that run throws with; by default it names the script. */
+  public failureMessage: string | undefined;
 
   private labels: string[];
   private checkedLabel: string;
@@ -108,7 +110,9 @@ export class FakeModePage implements ModePage {
     this.scriptsRun.push(script.name);
     this.scriptArguments.push(args);
     if (script.name === this.failingScript) {
-      throw new Error(`Runtime.evaluate failed in ${script.name}`);
+      throw new Error(
+        this.failureMessage ?? `Runtime.evaluate failed in ${script.name}`,
+      );
     }
     return this.answer(script, args) as R;
   }
