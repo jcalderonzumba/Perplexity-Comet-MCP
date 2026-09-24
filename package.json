@@ -18,7 +18,9 @@
     "test": "node tests/run-all.mjs",
     "test:no-pro": "node tests/run-no-pro.mjs",
     "test:unit": "vitest run",
-    "test:unit:watch": "vitest"
+    "test:unit:watch": "vitest",
+    "lint": "biome lint .",
+    "format": "biome format --write ."
   },
   "keywords": [
     "mcp",
@@ -54,6 +56,7 @@
     "chrome-remote-interface": "^0.34.0"
   },
   "devDependencies": {
+    "@biomejs/biome": "2.5.14",
     "@types/chrome-remote-interface": "^0.33.0",
     "@types/jsdom": "^28.0.1",
     "@types/node": "^22.10.2",
