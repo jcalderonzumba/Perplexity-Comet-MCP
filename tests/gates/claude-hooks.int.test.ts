@@ -196,13 +196,24 @@ describe("protect-main.sh and git's global options", () => {
     "git --git-dir ../.git commit -m x",
     "git --git-dir=.git --work-tree=. merge feat/x",
     "git -c k=v push",
+    // No list of git's options: any long option may take one argument.
+    "git --attr-source HEAD commit -m x",
+    'git -c "user.name=a b" commit -m x',
+    "git -c 'user.name=a b' commit -m x",
   ])('denies "%s" on main', (command) => {
     expect(decision(hook("protect-main.sh", toolInput(command)))).toMatchObject({
       allowed: false,
     });
   });
 
-  it.each(["git -c k=v push origin main", "git --no-pager push origin HEAD:main"])(
+  it.each([
+    "git -c k=v push origin main",
+    "git --no-pager push origin HEAD:main",
+    // Every push of a compound command is judged, and a forced refspec too.
+    "git push origin feat/x && git push origin main",
+    "git -c k=v push origin +main",
+    "git push origin +HEAD:main",
+  ])(
     'denies "%s" from a branch',
     (command) => {
       sandbox.git("switch", "--quiet", "--create", "feat/x");
