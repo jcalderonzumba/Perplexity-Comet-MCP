@@ -1,8 +1,12 @@
 // @vitest-environment jsdom
 
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import {
   cdpModePage,
+  createCdpModeTool,
   openPerplexityIfElsewhere,
 } from "../../src/cdp-mode-page.js";
 import { pageScriptExpression } from "../../src/page-scripts.js";
@@ -111,5 +115,51 @@ describe("openPerplexityIfElsewhere", () => {
     await openPerplexityIfElsewhere(client);
 
     expect(client.navigations).toEqual([]);
+  });
+});
+
+describe("createCdpModeTool", () => {
+  const quote = (pageText: string) => `<<${pageText}>>`;
+
+  it("reads the page through the client", async () => {
+    document.body.innerHTML = readFileSync(
+      join(
+        dirname(fileURLToPath(import.meta.url)),
+        "fixtures",
+        "mode-menu.html",
+      ),
+      "utf8",
+    );
+    const client = new FakePageClient();
+
+    const reading = await createCdpModeTool(client, quote).core.readMode();
+
+    expect(reading).toEqual({ kind: "known", mode: "search" });
+    expect(client.expressions).not.toEqual([]);
+  });
+
+  it("opens Perplexity through the client", async () => {
+    const client = new FakePageClient();
+    client.currentState = { currentUrl: "https://example.com/" };
+
+    await createCdpModeTool(client, quote).openPerplexity();
+
+    expect(client.navigations).toEqual([
+      "https://www.perplexity.ai/ wait=true",
+    ]);
+  });
+
+  it("quotes page text with the wrapper it is given", () => {
+    expect(createCdpModeTool(new FakePageClient(), quote).quotePage).toBe(
+      quote,
+    );
+  });
+
+  it("gives each tool a core of its own", () => {
+    const client = new FakePageClient();
+
+    expect(createCdpModeTool(client, quote).core).not.toBe(
+      createCdpModeTool(client, quote).core,
+    );
   });
 });

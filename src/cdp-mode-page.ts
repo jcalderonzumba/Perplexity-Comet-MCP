@@ -1,8 +1,9 @@
 // The mode core's page, over the CDP client: the one `ModePage` both
-// adapters build when they start, and the navigation to Perplexity the
-// `comet_mode` tool makes before a switch.
+// adapters build when they start, the navigation to Perplexity the
+// `comet_mode` tool makes before a switch, and the tool built from them.
 
-import type { ModePage } from "./core/mode.js";
+import { ModeCore, type ModePage } from "./core/mode.js";
+import type { ModeTool } from "./core/mode-tool.js";
 import {
   type PageArgument,
   type PagePoint,
@@ -73,4 +74,19 @@ function errorDetail(
   details: NonNullable<EvaluateResult["exceptionDetails"]>,
 ): string {
   return details.exception?.description ?? details.text;
+}
+
+/**
+ * The `comet_mode` tool over `client`, with a mode core of its own. Each
+ * adapter builds one when it starts, passing its UNTRUSTED wrapper.
+ */
+export function createCdpModeTool(
+  client: ModePageClient & PerplexityNavigator,
+  quotePage: (pageText: string) => string,
+): ModeTool {
+  return {
+    core: new ModeCore(cdpModePage(client)),
+    openPerplexity: () => openPerplexityIfElsewhere(client),
+    quotePage,
+  };
 }

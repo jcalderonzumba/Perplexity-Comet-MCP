@@ -24,7 +24,10 @@ import { timingSafeEqual } from "crypto";
 import http from "http";
 import { URL } from "url";
 import { cometClient } from "./cdp-client.js";
+import { createCdpModeTool } from "./cdp-mode-page.js";
 import { cometAI } from "./comet-ai.js";
+import { answerModeTool } from "./core/mode-tool.js";
+import { wrapUntrustedPageContent } from "./untrusted.js";
 import {
   validateDomain,
   validateSelector,
@@ -624,126 +627,13 @@ async function handleUpload(args: {
   };
 }
 
-async function handleMode(args: { mode?: string }): Promise<ToolResult> {
-  const mode = args.mode;
+const modeTool = createCdpModeTool(cometClient, wrapUntrustedPageContent);
 
-  if (!mode) {
-    const result = await cometClient.evaluate(`
-      (() => {
-        const modes = ['Search', 'Research', 'Labs', 'Learn'];
-        for (const mode of modes) {
-          const btn = document.querySelector('button[aria-label="' + mode + '"]');
-          if (btn && btn.getAttribute('data-state') === 'checked') {
-            return mode.toLowerCase();
-          }
-        }
-        const dropdownBtn = document.querySelector('button[class*="gap"]');
-        if (dropdownBtn) {
-          const text = (dropdownBtn as HTMLElement).innerText.toLowerCase();
-          if (text.includes('search')) return 'search';
-          if (text.includes('research')) return 'research';
-          if (text.includes('labs')) return 'labs';
-          if (text.includes('learn')) return 'learn';
-        }
-        return 'search';
-      })()
-    `);
-
-    const currentMode = result.result.value as string;
-    const descriptions: Record<string, string> = {
-      search: "Basic web search",
-      research: "Deep research with comprehensive analysis",
-      labs: "Analytics, visualizations, and coding",
-      learn: "Educational content and explanations",
-    };
-
-    let output = `Current mode: ${currentMode}\n\nAvailable modes:\n`;
-    for (const [m, desc] of Object.entries(descriptions)) {
-      const marker = m === currentMode ? "→" : " ";
-      output += `${marker} ${m}: ${desc}\n`;
-    }
-
-    return { success: true, content: output };
-  }
-
-  const modeMap: Record<string, string> = {
-    search: "Search",
-    research: "Research",
-    labs: "Labs",
-    learn: "Learn",
-  };
-  const ariaLabel = modeMap[mode];
-  if (!ariaLabel) {
-    return {
-      success: false,
-      content: "",
-      error: `Invalid mode: ${mode}. Use: search, research, labs, learn`,
-    };
-  }
-
-  const state = cometClient.currentState;
-  if (!state.currentUrl?.includes("perplexity.ai")) {
-    await cometClient.navigate("https://www.perplexity.ai/", true);
-  }
-
-  const clickResult = await cometClient.evaluate(`
-    (() => {
-      const btn = document.querySelector('button[aria-label="${ariaLabel}"]');
-      if (btn) {
-        btn.click();
-        return { success: true, method: 'button' };
-      }
-      const allButtons = document.querySelectorAll('button');
-      for (const b of allButtons) {
-        const text = b.innerText.toLowerCase();
-        if ((text.includes('search') || text.includes('research') ||
-             text.includes('labs') || text.includes('learn')) &&
-            b.querySelector('svg')) {
-          b.click();
-          return { success: true, method: 'dropdown-open', needsSelect: true };
-        }
-      }
-      return { success: false, error: "Mode selector not found" };
-    })()
-  `);
-
-  const result = clickResult.result.value as {
-    success: boolean;
-    method?: string;
-    needsSelect?: boolean;
-    error?: string;
-  };
-
-  if (result.success && result.needsSelect) {
-    await new Promise((resolve) => setTimeout(resolve, 300));
-    const selectResult = await cometClient.evaluate(`
-      (() => {
-        const items = document.querySelectorAll('[role="menuitem"], [role="option"], button');
-        for (const item of items) {
-          if (item.innerText.toLowerCase().includes('${mode}')) {
-            item.click();
-            return { success: true };
-          }
-        }
-        return { success: false, error: "Mode option not found in dropdown" };
-      })()
-    `);
-    const selectRes = selectResult.result.value as {
-      success: boolean;
-      error?: string;
-    };
-    if (selectRes.success) {
-      return { success: true, content: `Switched to ${mode} mode` };
-    } else {
-      return { success: false, content: "", error: selectRes.error };
-    }
-  }
-
-  if (result.success) {
-    return { success: true, content: `Switched to ${mode} mode` };
-  } else {
-    return { success: false, content: "", error: result.error };
-  }
+async function handleMode(args: { mode?: unknown }): Promise<ToolResult> {
+  const reply = await answerModeTool(args.mode, modeTool);
+  return reply.isError
+    ? { success: false, content: "", error: reply.text }
+    : { success: true, content: reply.text };
 }
 
 // ============================================================================
@@ -971,7 +861,7 @@ async function executeToolByName(
         args as { action?: string; domain?: string; tabId?: string },
       );
     case "comet_mode":
-      return handleMode(args as { mode?: string });
+      return handleMode(args);
     case "comet_upload":
       return handleUpload(
         args as { filePath?: string; selector?: string; checkOnly?: boolean },

@@ -188,6 +188,18 @@ describe("KNOWN_FAILURES", () => {
     );
   });
 
+  it("says why each listed mode switch fails, as the mode menu stands", () => {
+    const reasonFor = (id: string) =>
+      KNOWN_FAILURES.find((entry) => entry.id === id)?.reason;
+
+    expect(reasonFor("7.2-labs")).toBe(
+      "Perplexity's input bar no longer offers Labs, so comet_mode labs fails saying so",
+    );
+    expect(reasonFor("7.2-learn")).toBe(
+      'Perplexity\'s input bar offers "Learn step by step", and comet_mode does not switch to it yet',
+    );
+  });
+
   it("gives every entry a unique id, a reason and an owning plan", () => {
     const ids = KNOWN_FAILURES.map((entry) => entry.id);
     expect(new Set(ids).size).toBe(ids.length);
