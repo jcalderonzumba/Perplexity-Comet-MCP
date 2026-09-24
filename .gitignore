@@ -31,5 +31,12 @@ coverage/
 *.temp
 .mcpregistry_*
 
-# Claude Code
-.claude/
+# Claude Code: the project's skills, agents, hooks and settings are committed;
+# personal settings are not
+.claude/settings.local.json
+
+# CodeGraph index, built per machine by `codegraph init`
+.codegraph/
+
+# Private working docs: specs, plans and research (their own private repo)
+.work/

@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+# Refuse pushes that update refs/heads/main, and pushes of any branch unless
+# the phase review approved HEAD and preflight passed on it.
+# Activate with: git config core.hooksPath .githooks
+root=$(git rev-parse --show-toplevel)
+while read -r _local_ref _local_sha remote_ref _remote_sha; do
+  if [ "$remote_ref" = "refs/heads/main" ]; then
+    echo "pre-push: pushing to main is forbidden. Open a PR (see AGENTS.md)." >&2
+    exit 1
+  fi
+done
+"$root/.githooks/review-check.sh" "$root" || exit 1
+"$root/.githooks/preflight-check.sh" "$root" || exit 1
+exit 0

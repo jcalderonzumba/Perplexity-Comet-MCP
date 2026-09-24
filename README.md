@@ -442,6 +442,18 @@ wsl --shutdown
 
 ## Development
 
+Working on this repository needs Node 18 or later, `jq` and `git`. The project's instructions for people and agents are in [`AGENTS.md`](AGENTS.md).
+
+Activate the git hooks once per clone:
+
+```bash
+git config core.hooksPath .githooks
+```
+
+The hooks refuse commits and pushes to `main`, and refuse to push a branch until the phase review and preflight have both passed on its last commit.
+
+Changes follow the workflow in [`AGENTS.md`](AGENTS.md): a reviewed plan, one branch per plan phase built test-first, a phase review by a fresh-context reviewer, then a local preflight run before the pull request. Claude Code users get the steps as the `/review-plan`, `/run-phase` and `/review-phase` skills.
+
 ### Build from Source
 
 ```bash
