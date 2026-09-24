@@ -5,6 +5,7 @@ import { type ChildProcess, execSync, spawn } from "child_process";
 import CDP from "chrome-remote-interface";
 import { existsSync } from "fs";
 import { platform } from "os";
+import type { PagePoint } from "./page-scripts.js";
 import type {
   CDPTarget,
   CDPVersion,
@@ -189,6 +190,37 @@ export function waitForLifecycle(
     }
     timer = setTimeout(() => finish(false), timeoutMs);
   });
+}
+
+/** The parameters of the CDP `Input.dispatchMouseEvent` calls `clickAtPoint` sends. */
+export interface MouseEventParams {
+  type: "mouseMoved" | "mousePressed" | "mouseReleased";
+  x: number;
+  y: number;
+  button?: "left";
+  clickCount?: number;
+}
+
+/** The slice of the CDP Input domain that `clickAtPoint` uses. */
+export interface MouseInputAPI {
+  dispatchMouseEvent(params: MouseEventParams): Promise<unknown>;
+}
+
+/**
+ * Click at `point`, in viewport CSS pixels, with real pointer events: move
+ * there, then press and release the left button once. Some page controls
+ * (Perplexity's mode menu among them) open only on pointer events, never on
+ * a scripted `element.click()`.
+ */
+export async function clickAtPoint(
+  input: MouseInputAPI,
+  point: PagePoint,
+): Promise<void> {
+  const { x, y } = point;
+  await input.dispatchMouseEvent({ type: "mouseMoved", x, y });
+  const press = { x, y, button: "left", clickCount: 1 } as const;
+  await input.dispatchMouseEvent({ type: "mousePressed", ...press });
+  await input.dispatchMouseEvent({ type: "mouseReleased", ...press });
 }
 
 // Detect if running in WSL (must be before windowsFetch)
@@ -1751,6 +1783,15 @@ export class CometCDPClient {
     this.ensureConnected();
     await this.client!.Input.dispatchKeyEvent({ type: "keyDown", key });
     await this.client!.Input.dispatchKeyEvent({ type: "keyUp", key });
+  }
+
+  /**
+   * Click at a point in the page, in viewport CSS pixels, with real pointer
+   * events (see `clickAtPoint`)
+   */
+  async clickAt(point: PagePoint): Promise<void> {
+    this.ensureConnected();
+    await clickAtPoint(this.client!.Input, point);
   }
 
   /**

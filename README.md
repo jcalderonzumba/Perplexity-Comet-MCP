@@ -248,21 +248,27 @@ Closed github.com
 
 ### comet_mode
 
-Switch Perplexity search modes for different use cases.
+Read or switch Perplexity's mode.
 
 ```
 Parameters:
   - mode (optional): "search", "research", "labs", or "learn"
 
-Returns: Current mode or confirmation of switch
+Returns: the current mode read from the page, or confirmation that the switch happened
 ```
 
-| Mode | Use Case |
-|------|----------|
-| search | Quick web searches |
-| research | Deep, comprehensive analysis |
-| labs | Data analytics and visualization |
-| learn | Educational explanations |
+| Mode | What it selects |
+|------|-----------------|
+| search | Search, Perplexity's default |
+| research | Deep research |
+| labs | Not available: Perplexity's input bar no longer offers Labs, so the call fails saying so |
+| learn | Not available yet: the call fails saying so |
+
+Without a mode, `comet_mode` reads the mode from the mode button in Perplexity's input bar. When the button shows something other than these modes, or there is no button, it reports `unknown` and quotes what it saw. When the page fails while it is read, it reports `unknown` as an error and quotes the page's error message.
+
+With a mode, it opens the mode menu with real pointer clicks, selects the mode's item, and opens the menu again to read which item is checked. It says `Switched to <mode> mode` only when the menu and the button both show the new mode. Otherwise it returns an error naming what the page showed. Either way it closes the menu. If the tab is not on Perplexity, it opens Perplexity's home page first.
+
+Text read from the page is wrapped in the same UNTRUSTED markers as answers. Perplexity puts the mode back to Search when the page navigates, for example for a new chat.
 
 ---
 
@@ -480,7 +486,7 @@ The battery first asks the debug port itself whether Comet answers. If it does n
 Results: 8 passed, 0 failed, 2 known
 ```
 
-Today the list holds the switches to the `labs` and `learn` modes, which Perplexity moved out of its mode dropdown.
+Today the list holds the switches to the `labs` mode, which Perplexity's input bar no longer offers, and to the `learn` mode, which `comet_mode` does not switch to yet.
 
 ### Gates
 

@@ -19,19 +19,18 @@
 
 /** @typedef {{ id: string, verdict: Verdict, note: string, known?: KnownFailure }} ScoredCheck */
 
-const MODE_PICKER_MOVED =
-  'Perplexity moved Labs (now "Create files and apps") and Learn out of the mode dropdown into the input bar\'s "+" menu in February 2026';
-
 /** @type {readonly KnownFailure[]} */
 export const KNOWN_FAILURES = [
   {
     id: "7.2-labs",
-    reason: MODE_PICKER_MOVED,
+    reason:
+      "Perplexity's input bar no longer offers Labs, so comet_mode labs fails saying so",
     owningPlan: "plan 5 (research mode)",
   },
   {
     id: "7.2-learn",
-    reason: MODE_PICKER_MOVED,
+    reason:
+      'Perplexity\'s input bar offers "Learn step by step", and comet_mode does not switch to it yet',
     owningPlan: "plan 5 (research mode)",
   },
 ];
