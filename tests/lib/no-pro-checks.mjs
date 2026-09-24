@@ -28,6 +28,13 @@ import { runCheck, scoreCheck } from "./battery-score.mjs";
 
 const INVALID_MODE = "invalid_mode_xyz";
 
+/** The first line of `comet_mode`'s reply when it read a mode from the page. */
+const MODE_READ = /^Current mode: (search|research|labs|learn)$/m;
+
+/** `comet_mode labs`'s refusal: Perplexity's input bar no longer offers it. */
+const LABS_NOT_OFFERED =
+  "Cannot switch to labs mode: not offered by Perplexity's current input bar";
+
 /** @param {ToolReply} reply */
 function replyText(reply) {
   return (reply.content ?? [])
@@ -71,11 +78,21 @@ export function tabsListed(reply) {
 }
 
 /**
- * [7.1], [7.3-reconnect]: the reply names a mode.
+ * [7.1], [7.3-reconnect]: no error, and the current mode is one read from the
+ * page, not `unknown`. The reply lists every mode, so naming one is not enough.
  * @param {ToolReply} reply
  */
 export function reportsMode(reply) {
-  return /search|research|labs|learn/i.test(replyText(reply));
+  return succeeded(reply) && MODE_READ.test(replyText(reply));
+}
+
+/**
+ * [7.2-labs]: the switch to labs is refused, saying Perplexity no longer
+ * offers it; any other reply, a success or another error, fails.
+ * @param {ToolReply} reply
+ */
+export function labsNotOffered(reply) {
+  return !succeeded(reply) && replyText(reply).trim() === LABS_NOT_OFFERED;
 }
 
 /**
@@ -127,12 +144,21 @@ function singleCall(id, tool, args, timeoutMs, judge) {
   };
 }
 
-/** @param {string} mode */
-function modeSwitch(mode) {
+/**
+ * A `[7.2-<mode>]` check: one `comet_mode` call with that mode.
+ * @param {string} mode
+ * @param {(reply: ToolReply) => boolean} expected
+ */
+function modeCall(mode, expected) {
   return singleCall(`7.2-${mode}`, "comet_mode", { mode }, 20000, (reply) => ({
-    held: switchedTo(mode, reply),
+    held: expected(reply),
     note: excerpt(reply, 60),
   }));
+}
+
+/** @param {string} mode */
+function modeSwitch(mode) {
+  return modeCall(mode, (reply) => switchedTo(mode, reply));
 }
 
 /**
@@ -191,7 +217,10 @@ const AFTER_CONNECT = [
     held: reportsMode(reply),
     note: excerpt(reply, 60),
   })),
-  ...["research", "labs", "learn", "search"].map(modeSwitch),
+  modeSwitch("research"),
+  modeCall("labs", labsNotOffered),
+  modeSwitch("learn"),
+  modeSwitch("search"),
   singleCall("7.3-reconnect", "comet_mode", {}, 10000, (reply) => ({
     held: reportsMode(reply),
     note: excerpt(reply, 60),

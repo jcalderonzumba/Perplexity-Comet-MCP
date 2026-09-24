@@ -487,10 +487,10 @@ The no-pro battery prints one line per check: its verdict, its id, and what the 
 The battery first asks the debug port itself whether Comet answers. If it does not, `[1.2]` fails with `Comet is not running with its debug port on <port>` and no tool is called, so the battery never launches Comet or restarts one running on another port. If connect fails, the other checks are not run and count as failed. The battery ends with a summary, in which an unexpected pass counts as failed, and exits non-zero on any failure:
 
 ```
-Results: 8 passed, 0 failed, 2 known
+Results: 9 passed, 0 failed, 1 known
 ```
 
-Today the list holds the switches to the `labs` mode, which Perplexity's input bar no longer offers, and to the `learn` mode, which `comet_mode` does not switch to yet.
+The mode checks hold only on what the server really did. `[7.1]` and `[7.3-reconnect]` pass when `comet_mode` reads a mode from the page, and fail on an error or on `unknown`; `[9.4]`'s follow-up read is judged the same way. `[7.2-research]` and `[7.2-search]` pass on `Switched to <mode> mode`, and `[7.2-labs]` passes on the error saying Perplexity's input bar no longer offers Labs. Today the known-failures list holds one check, the switch to the `learn` mode: Perplexity's input bar offers "Learn step by step", and `comet_mode` does not switch to it yet.
 
 ### Gates
 
