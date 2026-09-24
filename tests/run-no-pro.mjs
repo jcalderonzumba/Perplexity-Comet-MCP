@@ -13,12 +13,29 @@ import {
   reportLine,
   summaryLine,
 } from "./lib/battery-score.mjs";
-import { runNoProBattery } from "./lib/no-pro-checks.mjs";
+import { debugPortFromEnv, runNoProBattery } from "./lib/no-pro-checks.mjs";
 
 const DIST_ENTRY = resolve(
   dirname(fileURLToPath(import.meta.url)),
   "../dist/index.js",
 );
+
+/**
+ * Whether Comet answers on the debug port, asked without the server, so that
+ * the battery never makes the server launch or relaunch Comet.
+ */
+function debugPort(port) {
+  return {
+    port,
+    answers: () =>
+      fetch(`http://127.0.0.1:${port}/json/version`, {
+        signal: AbortSignal.timeout(3000),
+      }).then(
+        (response) => response.ok,
+        () => false,
+      ),
+  };
+}
 
 function callWithin(client) {
   return (name, args, timeoutMs) =>
@@ -43,8 +60,10 @@ async function main() {
   await client.connect(transport);
   console.log("Server started.\n");
 
-  const checks = await runNoProBattery(callWithin(client), (check) =>
-    console.log(reportLine(check)),
+  const checks = await runNoProBattery(
+    callWithin(client),
+    debugPort(debugPortFromEnv(process.env)),
+    (check) => console.log(reportLine(check)),
   );
 
   console.log(`\n${"─".repeat(50)}`);

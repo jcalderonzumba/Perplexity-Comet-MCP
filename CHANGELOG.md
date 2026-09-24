@@ -18,7 +18,7 @@ All notable changes to this project will be documented in this file.
 ### Changed
 
 - `npm test` runs the Vitest suite; the live batteries are `npm run test:live` (no Pro queries) and `npm run test:live:pro` (spends Pro queries)
-- **The live no-pro battery scores every check** - each check has a condition that can fail and prints `PASS`, `FAIL`, `KNOWN` or `UNEXPECTED PASS`; a known-failures list gives the reason and the owning plan for each check that fails for a known cause (today the `labs` and `learn` mode switches), and the battery fails on any failure or unexpected pass
+- **The live no-pro battery scores every check** - each check has a condition that can fail and prints `PASS`, `FAIL`, `KNOWN` or `UNEXPECTED PASS`; a known-failures list gives the reason and the owning plan for each check that fails for a known cause (today the `labs` and `learn` mode switches), and the battery fails on any failure or unexpected pass. It needs Comet already running with its debug port on the server's port (`COMET_PORT`, 9223 by default), and fails at connect without calling a tool when nothing answers there
 
 ### Removed
 

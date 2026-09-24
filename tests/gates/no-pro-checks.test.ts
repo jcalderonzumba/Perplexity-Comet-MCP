@@ -8,6 +8,8 @@ import {
 import {
   type CallTool,
   connected,
+  type DebugPort,
+  debugPortFromEnv,
   hasScreenshot,
   invalidModeHandled,
   reportsMode,
@@ -173,19 +175,25 @@ function fakeServer(replies: Replies, afterInvalidMode?: Error) {
   return { callTool, calls };
 }
 
+const LISTENING: DebugPort = { port: 9223, answers: async () => true };
+const SILENT: DebugPort = { port: 9223, answers: async () => false };
+
 const byId = (checks: readonly ScoredCheck[], id: string) =>
   checks.find((check) => check.id === id);
 
 describe("runNoProBattery", () => {
   it("scores today's Comet as 8 passed and 2 known, and passes", async () => {
-    const checks = await runNoProBattery(fakeServer(HEALTHY).callTool);
+    const checks = await runNoProBattery(
+      fakeServer(HEALTHY).callTool,
+      LISTENING,
+    );
     expect(summaryLine(checks)).toBe("Results: 8 passed, 0 failed, 2 known");
     expect(batteryPassed(checks)).toBe(true);
   });
 
   it("makes the same tool calls as before, plus one read-only mode query after the invalid mode", async () => {
     const server = fakeServer(HEALTHY);
-    await runNoProBattery(server.callTool);
+    await runNoProBattery(server.callTool, LISTENING);
     expect(server.calls).toEqual([
       key("comet_connect", {}),
       key("comet_screenshot", {}),
@@ -203,7 +211,7 @@ describe("runNoProBattery", () => {
 
   it("reports each check as it is scored, in order", async () => {
     const reported: string[] = [];
-    await runNoProBattery(fakeServer(HEALTHY).callTool, (check) =>
+    await runNoProBattery(fakeServer(HEALTHY).callTool, LISTENING, (check) =>
       reported.push(check.id),
     );
     expect(reported).toEqual([
@@ -228,6 +236,7 @@ describe("runNoProBattery", () => {
           "Failed: Mode option not found in dropdown",
         ),
       }).callTool,
+      LISTENING,
     );
     expect(byId(checks, "7.2-research")).toMatchObject({
       verdict: "FAIL",
@@ -242,6 +251,7 @@ describe("runNoProBattery", () => {
         ...HEALTHY,
         [key("comet_tabs", {})]: error("Error: Not connected"),
       }).callTool,
+      LISTENING,
     );
     expect(byId(checks, "6.1")?.verdict).toBe("FAIL");
   });
@@ -254,6 +264,7 @@ describe("runNoProBattery", () => {
           "MCP error -32000: Connection closed",
         ),
       }).callTool,
+      LISTENING,
     );
     expect(byId(checks, "9.4")).toMatchObject({
       verdict: "FAIL",
@@ -264,6 +275,7 @@ describe("runNoProBattery", () => {
   it("fails [9.4] when the server stops answering after the invalid mode", async () => {
     const checks = await runNoProBattery(
       fakeServer(HEALTHY, new Error("TIMEOUT after 10000ms")).callTool,
+      LISTENING,
     );
     expect(byId(checks, "9.4")).toMatchObject({
       verdict: "FAIL",
@@ -276,7 +288,7 @@ describe("runNoProBattery", () => {
       fakeServer({ ...HEALTHY, [key("comet_connect", {})]: error(COMET_DOWN) });
 
     it("fails at [1.2] with the connection problem as its note", async () => {
-      const checks = await runNoProBattery(cometDown().callTool);
+      const checks = await runNoProBattery(cometDown().callTool, LISTENING);
       expect(checks[0]).toMatchObject({ id: "1.2", verdict: "FAIL" });
       expect(checks[0]?.note).toContain("Timeout waiting for Comet");
       expect(batteryPassed(checks)).toBe(false);
@@ -284,7 +296,7 @@ describe("runNoProBattery", () => {
 
     it("passes no later check, and calls no other tool", async () => {
       const server = cometDown();
-      const checks = await runNoProBattery(server.callTool);
+      const checks = await runNoProBattery(server.callTool, LISTENING);
       expect(server.calls).toEqual([key("comet_connect", {})]);
       expect(checks).toHaveLength(10);
       for (const check of checks) {
@@ -300,6 +312,7 @@ describe("runNoProBattery", () => {
           ...HEALTHY,
           [key("comet_connect", {})]: new Error("TIMEOUT after 30000ms"),
         }).callTool,
+        LISTENING,
       );
       expect(checks[0]).toMatchObject({
         id: "1.2",
@@ -307,5 +320,60 @@ describe("runNoProBattery", () => {
         note: "TIMEOUT after 30000ms",
       });
     });
+  });
+
+  describe("when Comet does not answer on its debug port", () => {
+    it("fails at [1.2] naming the port, without calling any tool", async () => {
+      const server = fakeServer(HEALTHY);
+      const checks = await runNoProBattery(server.callTool, SILENT);
+      expect(server.calls).toEqual([]);
+      expect(checks[0]).toMatchObject({
+        id: "1.2",
+        verdict: "FAIL",
+        note: "Comet is not running with its debug port on 9223",
+      });
+      expect(batteryPassed(checks)).toBe(false);
+    });
+
+    it("passes no later check", async () => {
+      const checks = await runNoProBattery(
+        fakeServer(HEALTHY).callTool,
+        SILENT,
+      );
+      expect(checks).toHaveLength(10);
+      for (const check of checks.slice(1)) {
+        expect(check.note).toBe("not run: [1.2] connect failed");
+        expect(["FAIL", "KNOWN"]).toContain(check.verdict);
+      }
+    });
+
+    it("fails at [1.2] when the port probe itself throws", async () => {
+      const checks = await runNoProBattery(fakeServer(HEALTHY).callTool, {
+        port: 9223,
+        answers: async () => {
+          throw new Error("probe failed");
+        },
+      });
+      expect(checks[0]).toMatchObject({
+        verdict: "FAIL",
+        note: "probe failed",
+      });
+    });
+  });
+});
+
+describe("debugPortFromEnv", () => {
+  it("defaults to the server's port, 9223", () => {
+    expect(debugPortFromEnv({})).toBe(9223);
+  });
+
+  it("reads COMET_PORT, as the server does", () => {
+    expect(debugPortFromEnv({ COMET_PORT: "9222" })).toBe(9222);
+  });
+
+  it("falls back to 9223 on a value the server rejects", () => {
+    expect(debugPortFromEnv({ COMET_PORT: "not-a-port" })).toBe(9223);
+    expect(debugPortFromEnv({ COMET_PORT: "70000" })).toBe(9223);
+    expect(debugPortFromEnv({ COMET_PORT: "0" })).toBe(9223);
   });
 });

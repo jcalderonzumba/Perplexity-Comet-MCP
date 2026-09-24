@@ -113,8 +113,8 @@ First run: `npm ci`, then `git config core.hooksPath .githooks`, plus `codegraph
 | `npm run dev` | `tsc --watch` |
 | `npm start` | runs `dist/index.js`, the stdio MCP server |
 | `npm run check` | the per-commit gate (`scripts/check.mjs`): Biome lint and format, `tsc` over `src/` and over the tests and scripts (`tsconfig.tools.json`), and every Vitest test, unit and integration |
-| `npm run preflight` | the per-PR gate on clean trees (`scripts/preflight.mjs`): everything `check` does, a clean build, the package contents (`npm pack --dry-run` holds `dist/`, `package.json`, `README.md`, `LICENSE` and nothing else), and the live no-pro battery against the local Comet (ten minutes at most), then that both trees are still clean. Adds HEAD to `.git/preflight-ok`. `--allow-dirty` runs it without stamping |
+| `npm run preflight` | the per-PR gate on clean trees (`scripts/preflight.mjs`): everything `check` does, a clean build, the package contents (`npm pack --dry-run` holds `dist/`, `package.json`, `README.md`, `LICENSE` and nothing else), and the live no-pro battery against the local Comet (ten minutes at most; Comet must already be on the server's debug port, for example `COMET_PORT=9222 npm run preflight`), then that both trees are still clean. Adds HEAD to `.git/preflight-ok`. `--allow-dirty` runs it without stamping |
 | `npm test` · `test:watch` | Vitest once, or watching |
 | `npm run typecheck` · `lint` · `format` | the check's parts on their own; `format` rewrites files |
-| `npm run test:live` | the live no-pro battery, `tests/run-no-pro.mjs`: needs Comet signed in; spends no Pro queries |
+| `npm run test:live` | the live no-pro battery, `tests/run-no-pro.mjs`: needs Comet signed in and already running with its debug port on the server's port (`COMET_PORT`, default 9223), and fails at connect without calling a tool otherwise; spends no Pro queries. Prints PASS, FAIL, KNOWN or UNEXPECTED PASS per check and fails on any FAIL or UNEXPECTED PASS |
 | `npm run test:live:pro` | the live Pro battery, `tests/run-all.mjs`: needs Comet signed in to Perplexity Pro, and spends Pro queries |

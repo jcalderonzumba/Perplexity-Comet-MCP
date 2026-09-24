@@ -21,7 +21,27 @@ import { runCheck, scoreCheck } from "./battery-score.mjs";
 
 /** @typedef {{ id: string, probe: (callTool: CallTool) => Promise<ProbeOutcome> }} NoProCheck */
 
+/**
+ * The debug port the server under test uses, and whether Comet answers on it.
+ * @typedef {{ port: number, answers: () => Promise<boolean> }} DebugPort
+ */
+
+const SERVER_DEFAULT_PORT = 9223;
+
 const INVALID_MODE = "invalid_mode_xyz";
+
+/**
+ * The server's debug port: `COMET_PORT` when it is a valid port, otherwise
+ * 9223, the same rule the server applies.
+ * @param {Record<string, string | undefined>} env
+ * @returns {number}
+ */
+export function debugPortFromEnv(env) {
+  const port = Number.parseInt(env.COMET_PORT ?? "", 10);
+  return Number.isInteger(port) && port >= 1 && port <= 65535
+    ? port
+    : SERVER_DEFAULT_PORT;
+}
 
 /** @param {ToolReply} reply */
 function replyText(reply) {
@@ -130,11 +150,29 @@ function modeSwitch(mode) {
   }));
 }
 
-/** @type {NoProCheck} */
-const CONNECT = singleCall("1.2", "comet_connect", {}, 30000, (reply) => ({
-  held: connected(reply),
-  note: excerpt(reply, 80),
-}));
+/**
+ * [1.2]: Comet already answers on the server's debug port, and connect
+ * succeeds. Without the port, no tool is called: connect would launch Comet,
+ * or kill and relaunch one running on another port.
+ * @param {DebugPort} debugPort
+ * @returns {NoProCheck}
+ */
+function connectCheck(debugPort) {
+  const connect = singleCall("1.2", "comet_connect", {}, 30000, (reply) => ({
+    held: connected(reply),
+    note: excerpt(reply, 80),
+  }));
+  return {
+    id: connect.id,
+    probe: async (callTool) =>
+      (await debugPort.answers())
+        ? connect.probe(callTool)
+        : {
+            held: false,
+            note: `Comet is not running with its debug port on ${debugPort.port}`,
+          },
+  };
+}
 
 /** @type {NoProCheck} */
 const INVALID_MODE_REJECTED = {
@@ -194,15 +232,16 @@ function notRun(check) {
 }
 
 /**
- * Runs the battery against a server. When connect fails, the other checks
+ * Runs the battery against a server. When [1.2] fails, the other checks
  * are not run, and each is scored as failed: nothing passes without a
  * connection, and no call reaches a browser the battery could not connect to.
  * @param {CallTool} callTool
+ * @param {DebugPort} debugPort
  * @param {(check: ScoredCheck) => void} [report] called as each check is scored
  * @returns {Promise<ScoredCheck[]>}
  */
-export async function runNoProBattery(callTool, report = () => {}) {
-  const connect = await scored(CONNECT, callTool);
+export async function runNoProBattery(callTool, debugPort, report = () => {}) {
+  const connect = await scored(connectCheck(debugPort), callTool);
   report(connect);
   const checks = [connect];
   const connectHeld = connect.verdict === "PASS";
