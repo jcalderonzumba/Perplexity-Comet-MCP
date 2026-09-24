@@ -125,7 +125,7 @@ Present findings in three clearly separated sections:
 
 List every skipped check with its reason, every Context7 doc fetched and every research note checked. If Must Fix items exist in any section, the plan is **not approved**: revise the plan and re-review. Should Fix items must be resolved or explicitly deferred with a stated reason.
 
-**Recording the verdict.** Count the rounds of this review on this plan. When a round reports no Must Fix, write the verdict into the plan's header as one line, replacing any earlier `**Review-plan verdict:**` line:
+**Recording the verdict.** Count the rounds of this review on this plan. When a round reports no Must Fix, write the verdict into the plan's header as one line, replacing the header's earlier `**Review-plan verdict:**` line (the one above the first `## ` heading; a plan may quote the template further down, and that copy is left alone):
 
 ```markdown
 **Review-plan verdict:** approved in round <n> on <YYYY-MM-DD>; Should Fix deferred: <each id with its reason, or "none">
