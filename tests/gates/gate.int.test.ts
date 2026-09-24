@@ -70,12 +70,13 @@ describe("capture", () => {
 describe("Gate", () => {
   it("passes when every step passes, and runs the success hook", () => {
     const outcome = gateWith(
-      'gate.step("one", () => 0); gate.step("two", () => "skipped");',
+      'gate.step("one", () => 0); gate.step("two", () => 0);',
     );
     expect(outcome.status).toBe(0);
+    expect(outcome.stdout).toContain("PASS one");
+    expect(outcome.stdout).toContain("PASS two");
     expect(outcome.stdout).toContain("test gate passed");
     expect(outcome.stdout).toContain("on success");
-    expect(outcome.stdout).toContain("skipped: two");
   });
 
   it("runs every step after a failure and names each failed step", () => {

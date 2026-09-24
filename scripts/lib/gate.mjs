@@ -20,9 +20,6 @@ const paint = (code, text) =>
 export const heading = (text) =>
   process.stdout.write(`\n${paint("1", `> ${text}`)}\n`);
 /** @param {string} text */
-export const note = (text) =>
-  process.stdout.write(`${paint("2", `  ${text}`)}\n`);
-/** @param {string} text */
 export const ok = (text) =>
   process.stdout.write(`${paint("32", `  PASS ${text}`)}\n`);
 /** @param {string} text */
@@ -104,8 +101,6 @@ function whyItFailed(result) {
 const messageOf = (error) =>
   error instanceof Error ? error.message : String(error);
 
-/** @typedef {number | "skipped"} StepOutcome */
-
 /**
  * A gate is an ordered list of named steps. Each step runs to completion and
  * reports on its own, so one run names every step that failed.
@@ -113,7 +108,6 @@ const messageOf = (error) =>
 export class Gate {
   /** @type {string} */ #name;
   /** @type {string[]} */ #failures = [];
-  /** @type {string[]} */ #skipped = [];
   #started = Date.now();
 
   /** @param {string} name */
@@ -123,12 +117,12 @@ export class Gate {
 
   /**
    * @param {string} title
-   * @param {() => StepOutcome} body returns an exit code (0 passes) or "skipped"
+   * @param {() => number} body returns an exit code; 0 passes
    */
   step(title, body) {
     heading(title);
     const startedAt = Date.now();
-    /** @type {StepOutcome} */
+    /** @type {number} */
     let outcome;
     try {
       outcome = body();
@@ -138,20 +132,12 @@ export class Gate {
       return;
     }
     const seconds = ((Date.now() - startedAt) / 1000).toFixed(1);
-    if (outcome === "skipped") {
-      this.#skipped.push(title);
-      return;
-    }
     if (outcome === 0) {
       ok(`${title} (${seconds}s)`);
       return;
     }
     fail(`${title} failed (${seconds}s)`);
     this.#failures.push(title);
-  }
-
-  get failed() {
-    return this.#failures.length > 0;
   }
 
   /**
@@ -169,7 +155,6 @@ export class Gate {
       );
       process.exit(1);
     }
-    if (this.#skipped.length > 0) note(`skipped: ${this.#skipped.join(", ")}`);
     process.stdout.write(
       `\n${paint("32;1", `${this.#name} passed`)} in ${seconds}s\n`,
     );
