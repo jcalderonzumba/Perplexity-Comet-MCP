@@ -20,14 +20,11 @@ const paint = (code, text) =>
 export const heading = (text) =>
   process.stdout.write(`\n${paint("1", `> ${text}`)}\n`);
 /** @param {string} text */
-export const note = (text) =>
-  process.stdout.write(`${paint("2", `  ${text}`)}\n`);
-/** @param {string} text */
 export const ok = (text) =>
   process.stdout.write(`${paint("32", `  PASS ${text}`)}\n`);
 /** @param {string} text */
 export const warn = (text) =>
-  process.stdout.write(`${paint("33", `  SKIP ${text}`)}\n`);
+  process.stdout.write(`${paint("33", `  WARN ${text}`)}\n`);
 /** @param {string} text */
 export const fail = (text) =>
   process.stdout.write(`${paint("31", `  FAIL ${text}`)}\n`);
@@ -64,23 +61,45 @@ export function run(command, args, options = {}) {
 }
 
 /**
- * Runs a command and captures stdout. Returns "" when the command fails.
+ * Runs a command and returns its standard output. Throws, naming the command,
+ * when it cannot start or exits non-zero, so a failed read never passes for
+ * empty output.
  * @param {string} command
  * @param {readonly string[]} args
- * @param {{ cwd?: string }} [options]
+ * @param {{ cwd?: string, env?: NodeJS.ProcessEnv }} [options]
  * @returns {string}
  */
 export function capture(command, args, options = {}) {
   const result = spawnSync(command, [...args], {
     cwd: options.cwd ?? repoRoot,
     encoding: "utf8",
+    env: { ...process.env, ...options.env },
     shell: false,
   });
-  if (result.error || result.status !== 0) return "";
+  if (result.error || result.status !== 0) {
+    throw new Error(
+      `${[command, ...args].join(" ")} failed: ${whyItFailed(result)}`,
+    );
+  }
   return result.stdout;
 }
 
-/** @typedef {number | "skipped"} StepOutcome */
+/**
+ * @param {import("node:child_process").SpawnSyncReturns<string>} result
+ * @returns {string}
+ */
+function whyItFailed(result) {
+  if (result.error) return result.error.message;
+  const stderr = result.stderr.trim();
+  if (stderr !== "") return stderr;
+  return result.signal
+    ? `killed by ${result.signal}`
+    : `exit code ${result.status}`;
+}
+
+/** @param {unknown} error */
+const messageOf = (error) =>
+  error instanceof Error ? error.message : String(error);
 
 /**
  * A gate is an ordered list of named steps. Each step runs to completion and
@@ -89,7 +108,6 @@ export function capture(command, args, options = {}) {
 export class Gate {
   /** @type {string} */ #name;
   /** @type {string[]} */ #failures = [];
-  /** @type {string[]} */ #skipped = [];
   #started = Date.now();
 
   /** @param {string} name */
@@ -99,27 +117,21 @@ export class Gate {
 
   /**
    * @param {string} title
-   * @param {() => StepOutcome} body returns an exit code (0 passes) or "skipped"
+   * @param {() => number} body returns an exit code; 0 passes
    */
   step(title, body) {
     heading(title);
     const startedAt = Date.now();
-    /** @type {StepOutcome} */
+    /** @type {number} */
     let outcome;
     try {
       outcome = body();
     } catch (error) {
-      fail(
-        `${title} threw: ${error instanceof Error ? error.message : String(error)}`,
-      );
+      fail(`${title} threw: ${messageOf(error)}`);
       this.#failures.push(title);
       return;
     }
     const seconds = ((Date.now() - startedAt) / 1000).toFixed(1);
-    if (outcome === "skipped") {
-      this.#skipped.push(title);
-      return;
-    }
     if (outcome === 0) {
       ok(`${title} (${seconds}s)`);
       return;
@@ -128,16 +140,14 @@ export class Gate {
     this.#failures.push(title);
   }
 
-  get failed() {
-    return this.#failures.length > 0;
-  }
-
   /**
    * Prints the summary and exits the process with the right code.
-   * @param {() => void} [onSuccess]
+   * @param {() => void} [onSuccess] records the gate's result; runs only when
+   *   every step passed, and fails the gate if it throws
    * @returns {never}
    */
   finish(onSuccess) {
+    if (this.#failures.length === 0) this.#recordResult(onSuccess);
     const seconds = ((Date.now() - this.#started) / 1000).toFixed(1);
     if (this.#failures.length > 0) {
       process.stdout.write(
@@ -145,11 +155,19 @@ export class Gate {
       );
       process.exit(1);
     }
-    onSuccess?.();
-    if (this.#skipped.length > 0) note(`skipped: ${this.#skipped.join(", ")}`);
     process.stdout.write(
       `\n${paint("32;1", `${this.#name} passed`)} in ${seconds}s\n`,
     );
     process.exit(0);
+  }
+
+  /** @param {(() => void) | undefined} onSuccess */
+  #recordResult(onSuccess) {
+    try {
+      onSuccess?.();
+    } catch (error) {
+      fail(`recording the result: ${messageOf(error)}`);
+      this.#failures.push("recording the result");
+    }
   }
 }

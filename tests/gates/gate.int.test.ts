@@ -3,7 +3,7 @@ import { pathToFileURL } from "node:url";
 
 import { describe, expect, it } from "vitest";
 
-import { run } from "../../scripts/lib/gate.mjs";
+import { capture, run } from "../../scripts/lib/gate.mjs";
 import { repoRoot, runProcess } from "./support/git-sandbox.ts";
 
 const gateModule = pathToFileURL(
@@ -41,15 +41,42 @@ describe("run", () => {
   });
 });
 
+describe("capture", () => {
+  it("returns the command's standard output", () => {
+    expect(capture("node", ["-e", "process.stdout.write('out')"])).toBe("out");
+  });
+
+  it("throws, naming the command and its error, when it exits non-zero", () => {
+    expect(() =>
+      capture("node", ["-e", "console.error('broken'); process.exit(2)"]),
+    ).toThrow(/^node -e .* failed: broken$/);
+  });
+
+  it("throws, naming the command, when it cannot start", () => {
+    expect(() => capture("no-such-command-comet-mcp", ["--flag"])).toThrow(
+      /^no-such-command-comet-mcp --flag failed: /,
+    );
+  });
+
+  it("passes the given environment to the command", () => {
+    expect(
+      capture("node", ["-e", "process.stdout.write(process.env.PROBE ?? '')"], {
+        env: { PROBE: "given" },
+      }),
+    ).toBe("given");
+  });
+});
+
 describe("Gate", () => {
   it("passes when every step passes, and runs the success hook", () => {
     const outcome = gateWith(
-      'gate.step("one", () => 0); gate.step("two", () => "skipped");',
+      'gate.step("one", () => 0); gate.step("two", () => 0);',
     );
     expect(outcome.status).toBe(0);
+    expect(outcome.stdout).toContain("PASS one");
+    expect(outcome.stdout).toContain("PASS two");
     expect(outcome.stdout).toContain("test gate passed");
     expect(outcome.stdout).toContain("on success");
-    expect(outcome.stdout).toContain("skipped: two");
   });
 
   it("runs every step after a failure and names each failed step", () => {
@@ -62,5 +89,23 @@ describe("Gate", () => {
     expect(outcome.stdout).toContain("test gate FAILED");
     expect(outcome.stdout).toContain("one, three");
     expect(outcome.stdout).not.toContain("on success");
+  });
+
+  it("fails, naming the error, when the success hook throws", () => {
+    const script = `
+      import { Gate } from ${JSON.stringify(gateModule)};
+      const gate = new Gate("test gate");
+      gate.step("one", () => 0);
+      gate.finish(() => { throw new Error("could not record"); });
+    `;
+    const outcome = runProcess("node", ["--input-type=module", "-e", script], {
+      env: { NO_COLOR: "1" },
+    });
+    expect(outcome.status).toBe(1);
+    expect(outcome.stdout).toContain(
+      "FAIL recording the result: could not record",
+    );
+    expect(outcome.stdout).toContain("test gate FAILED");
+    expect(outcome.stdout).not.toContain("test gate passed");
   });
 });

@@ -11,7 +11,9 @@
  * success it adds the commit to `.git/preflight-ok`; `.githooks/pre-push` and
  * `.claude/hooks/pr-gate.sh` refuse the push and the PR unless HEAD is listed
  * there and in `.git/review-ok`. Both this repository and the notebook `.work/`
- * (when the clone has one) must be clean, before and after.
+ * (when the clone has one) must be clean, before and after. A tree it cannot
+ * read is never taken for a clean one: a failed `git` read stops it, naming
+ * the command, and records nothing.
  *
  * Flags:
  *   --allow-dirty   run the battery on dirty trees without stamping.
@@ -31,16 +33,37 @@ import { CHECK_STEPS } from "./lib/steps.mjs";
 const allowDirty = process.argv.includes("--allow-dirty");
 const notebook = join(repoRoot, ".work");
 
-function currentDirt() {
-  return dirtyTrees({
-    public: capture("git", ["status", "--porcelain"]),
-    work: existsSync(notebook)
-      ? capture("git", ["-C", notebook, "status", "--porcelain"])
-      : null,
+/**
+ * The notebook's `git status`. Git would otherwise walk up from a `.work/` that
+ * is not a repository to this one, which ignores `.work/`, and report it clean.
+ */
+function notebookStatus() {
+  return capture("git", ["-C", notebook, "status", "--porcelain"], {
+    env: { GIT_CEILING_DIRECTORIES: repoRoot },
   });
 }
 
-const dirt = currentDirt();
+function currentDirt() {
+  return dirtyTrees({
+    public: capture("git", ["status", "--porcelain"]),
+    work: existsSync(notebook) ? notebookStatus() : null,
+  });
+}
+
+/** @returns {string[]} */
+function dirtBeforeTheSteps() {
+  try {
+    return currentDirt();
+  } catch (error) {
+    fail(error instanceof Error ? error.message : String(error));
+    process.stderr.write(
+      "\npreflight could not read the trees, so it cannot tell they are clean.\n",
+    );
+    process.exit(1);
+  }
+}
+
+const dirt = dirtBeforeTheSteps();
 if (dirt.length > 0 && !allowDirty) {
   fail("uncommitted changes");
   process.stderr.write(
@@ -66,10 +89,6 @@ gate.step("Package contents", () => {
     "--json",
     "--ignore-scripts",
   ]);
-  if (json === "") {
-    fail("npm pack --dry-run failed");
-    return 1;
-  }
   /** @type {{ files: { path: string }[] }[]} */
   const packed = JSON.parse(json);
   const problems = packProblems(packed[0].files.map((file) => file.path));
