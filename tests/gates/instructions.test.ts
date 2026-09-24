@@ -20,10 +20,13 @@ function markdownUnder(directory: string): string[] {
   });
 }
 
-const files = [join(repoRoot, "AGENTS.md"), ...markdownUnder(join(repoRoot, ".claude"))];
+const files = [
+  join(repoRoot, "AGENTS.md"),
+  ...markdownUnder(join(repoRoot, ".claude")),
+];
 
 /** GitHub's heading anchor: lower case, punctuation dropped, spaces to hyphens. */
-export function anchorOf(heading: string): string {
+function anchorOf(heading: string): string {
   return heading
     .trim()
     .toLowerCase()
@@ -51,32 +54,42 @@ describe("anchorOf", () => {
     expect(anchorOf("Workflow (every change, no exceptions)")).toBe(
       "workflow-every-change-no-exceptions",
     );
-    expect(anchorOf("`AGENTS.md` and the checks")).toBe("agentsmd-and-the-checks");
+    expect(anchorOf("`AGENTS.md` and the checks")).toBe(
+      "agentsmd-and-the-checks",
+    );
   });
 });
 
-describe.each(files.map((path) => [relative(repoRoot, path), path]))("%s", (_name, path) => {
-  const text = readFileSync(path, "utf8");
+describe.each(files.map((path) => [relative(repoRoot, path), path]))(
+  "%s",
+  (_name, path) => {
+    const text = readFileSync(path, "utf8");
 
-  it("carries no learn-play project rule", () => {
-    const hits = text
-      .split("\n")
-      .filter((line) => LEFTOVERS.test(line) || CASE_SENSITIVE_LEFTOVERS.test(line));
-    expect(hits).toEqual([]);
-  });
+    it("carries no learn-play project rule", () => {
+      const hits = text
+        .split("\n")
+        .filter(
+          (line) => LEFTOVERS.test(line) || CASE_SENSITIVE_LEFTOVERS.test(line),
+        );
+      expect(hits).toEqual([]);
+    });
 
-  it("links only to files and headings that exist, never into .work/", () => {
-    const links = [...text.matchAll(/\]\(([^)\s]+)\)/g)]
-      .map((match) => match[1])
-      .filter((target) => !/^[a-z]+:/i.test(target));
-    for (const target of links) {
-      const [file, anchor] = target.split("#");
-      const destination = file === "" ? path : resolve(dirname(path), file);
-      expect(relative(repoRoot, destination).startsWith(".work"), target).toBe(false);
-      expect(existsSync(destination), target).toBe(true);
-      if (anchor !== undefined && destination.endsWith(".md")) {
-        expect(anchorsIn(destination).has(anchor), target).toBe(true);
+    it("links only to files and headings that exist, never into .work/", () => {
+      const links = [...text.matchAll(/\]\(([^)\s]+)\)/g)]
+        .map((match) => match[1])
+        .filter((target) => !/^[a-z]+:/i.test(target));
+      for (const target of links) {
+        const [file, anchor] = target.split("#");
+        const destination = file === "" ? path : resolve(dirname(path), file);
+        expect(
+          relative(repoRoot, destination).startsWith(".work"),
+          target,
+        ).toBe(false);
+        expect(existsSync(destination), target).toBe(true);
+        if (anchor !== undefined && destination.endsWith(".md")) {
+          expect(anchorsIn(destination).has(anchor), target).toBe(true);
+        }
       }
-    }
-  });
-});
+    });
+  },
+);

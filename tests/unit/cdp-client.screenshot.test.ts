@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, expect, it } from "vitest";
 import { captureScreenshotWithFallback } from "../../src/cdp-client.js";
 import { FakeScreenshotPage } from "./fakes/fake-screenshot-page.js";
 
@@ -23,7 +23,9 @@ const FALLBACK_CLIP = {
 describe("captureScreenshotWithFallback — non-degenerate viewport", () => {
   it("forwards format and supplies no clip when the cssLayoutViewport is non-zero", async () => {
     const page = new FakeScreenshotPage();
-    page.setMetrics({ cssLayoutViewport: { clientWidth: 1024, clientHeight: 768 } });
+    page.setMetrics({
+      cssLayoutViewport: { clientWidth: 1024, clientHeight: 768 },
+    });
 
     await captureScreenshotWithFallback(page, "png");
 
@@ -33,7 +35,9 @@ describe("captureScreenshotWithFallback — non-degenerate viewport", () => {
 
   it("falls back to layoutViewport when cssLayoutViewport is missing", async () => {
     const page = new FakeScreenshotPage();
-    page.setMetrics({ layoutViewport: { clientWidth: 800, clientHeight: 600 } });
+    page.setMetrics({
+      layoutViewport: { clientWidth: 800, clientHeight: 600 },
+    });
 
     await captureScreenshotWithFallback(page, "png");
 
@@ -42,7 +46,9 @@ describe("captureScreenshotWithFallback — non-degenerate viewport", () => {
 
   it("passes through (no fallback) and fails loudly when only width is 0", async () => {
     const page = new FakeScreenshotPage();
-    page.setMetrics({ cssLayoutViewport: { clientWidth: 0, clientHeight: 800 } });
+    page.setMetrics({
+      cssLayoutViewport: { clientWidth: 0, clientHeight: 800 },
+    });
     // Model real-browser behavior: no encoder can produce output for a
     // zero-dim image, so the captureScreenshot call returns empty data.
     page.setScreenshotData(undefined);
@@ -55,7 +61,9 @@ describe("captureScreenshotWithFallback — non-degenerate viewport", () => {
 
   it("passes through (no fallback) and fails loudly when only height is 0", async () => {
     const page = new FakeScreenshotPage();
-    page.setMetrics({ cssLayoutViewport: { clientWidth: 1024, clientHeight: 0 } });
+    page.setMetrics({
+      cssLayoutViewport: { clientWidth: 1024, clientHeight: 0 },
+    });
     page.setScreenshotData(undefined);
 
     await expect(captureScreenshotWithFallback(page, "png")).rejects.toThrow(
@@ -66,7 +74,9 @@ describe("captureScreenshotWithFallback — non-degenerate viewport", () => {
 
   it("forwards jpeg format unchanged", async () => {
     const page = new FakeScreenshotPage();
-    page.setMetrics({ cssLayoutViewport: { clientWidth: 1024, clientHeight: 768 } });
+    page.setMetrics({
+      cssLayoutViewport: { clientWidth: 1024, clientHeight: 768 },
+    });
 
     await captureScreenshotWithFallback(page, "jpeg");
 

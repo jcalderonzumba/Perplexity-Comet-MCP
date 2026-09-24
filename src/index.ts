@@ -4,32 +4,32 @@
 // Claude Code ↔ Perplexity Comet bidirectional interaction
 // Simplified to 6 essential tools
 
-import { readFileSync } from "fs";
-import { fileURLToPath } from "url";
-import { dirname, join } from "path";
-import { randomBytes } from "crypto";
-import {
-  validateUploadPath,
-  validateTabId,
-  validateDomain,
-  validateSelector,
-} from "./upload-validator.js";
 import { Server } from "@modelcontextprotocol/sdk/server/index.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
-  Tool,
+  type Tool,
 } from "@modelcontextprotocol/sdk/types.js";
+import { randomBytes } from "crypto";
+import { readFileSync } from "fs";
+import { dirname, join } from "path";
+import { fileURLToPath } from "url";
 import { cometClient, DEFAULT_PORT } from "./cdp-client.js";
 import { cometAI } from "./comet-ai.js";
+import { type ProseState, readProseState } from "./page-scripts.js";
 import {
-  sessionState,
-  startNewTask,
   completeTask,
   isSessionStale,
+  sessionState,
+  startNewTask,
 } from "./session-state.js";
-import { readProseState, type ProseState } from "./page-scripts.js";
+import {
+  validateDomain,
+  validateSelector,
+  validateTabId,
+  validateUploadPath,
+} from "./upload-validator.js";
 
 // Read version from package.json so the MCP `initialize` handshake reports
 // the actually-shipped version. Hardcoding (previously "2.5.0" while
@@ -607,8 +607,6 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                 break;
               }
             }
-            // Continue polling despite temporary errors
-            continue;
           }
         }
 

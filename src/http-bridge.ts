@@ -20,16 +20,16 @@
  *                               Never set to "*" in production.
  */
 
-import http from "http";
 import { timingSafeEqual } from "crypto";
+import http from "http";
 import { URL } from "url";
 import { cometClient } from "./cdp-client.js";
 import { cometAI } from "./comet-ai.js";
 import {
-  validateUploadPath,
-  validateTabId,
   validateDomain,
   validateSelector,
+  validateTabId,
+  validateUploadPath,
 } from "./upload-validator.js";
 
 // ============================================================================

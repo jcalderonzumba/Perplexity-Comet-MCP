@@ -84,20 +84,27 @@ describe("preflight-check.sh in a repository with no preflight script", () => {
   it("has nothing to gate", () => {
     sandbox.git("rm", "--quiet", "package.json");
     sandbox.commit("docs only");
-    expect(sandbox.run(".githooks/preflight-check.sh", [sandbox.root]).status).toBe(0);
+    expect(
+      sandbox.run(".githooks/preflight-check.sh", [sandbox.root]).status,
+    ).toBe(0);
   });
 });
 
 describe("review-withdraw.sh", () => {
   const stampFile = () => join(sandbox.root, ".git", "review-ok");
-  const withdraw = () => sandbox.run(".githooks/review-withdraw.sh", [sandbox.root]);
+  const withdraw = () =>
+    sandbox.run(".githooks/review-withdraw.sh", [sandbox.root]);
 
   it("removes HEAD and keeps every other approval", () => {
     const head = sandbox.head();
     sandbox.stamp("review-ok", [OTHER_SHA, head, "b".repeat(40), head]);
     expect(withdraw().status).toBe(0);
-    expect(readFileSync(stampFile(), "utf8")).toBe(`${OTHER_SHA}\n${"b".repeat(40)}\n`);
-    expect(sandbox.run(".githooks/review-check.sh", [sandbox.root]).status).toBe(1);
+    expect(readFileSync(stampFile(), "utf8")).toBe(
+      `${OTHER_SHA}\n${"b".repeat(40)}\n`,
+    );
+    expect(
+      sandbox.run(".githooks/review-check.sh", [sandbox.root]).status,
+    ).toBe(1);
   });
 
   it("leaves an empty file when HEAD was the only approval", () => {
@@ -114,9 +121,13 @@ describe("review-withdraw.sh", () => {
 
 describe("pre-push", () => {
   const push = (remoteRef: string) =>
-    sandbox.run(".githooks/pre-push", ["origin", "git@example.invalid:comet-mcp.git"], {
-      stdin: `refs/heads/x ${sandbox.head()} ${remoteRef} ${"0".repeat(40)}\n`,
-    });
+    sandbox.run(
+      ".githooks/pre-push",
+      ["origin", "git@example.invalid:comet-mcp.git"],
+      {
+        stdin: `refs/heads/x ${sandbox.head()} ${remoteRef} ${"0".repeat(40)}\n`,
+      },
+    );
 
   beforeEach(() => {
     sandbox.git("switch", "--quiet", "--create", "feat/working-model-p9-x");

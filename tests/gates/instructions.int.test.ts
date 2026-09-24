@@ -16,14 +16,20 @@ describe("the instruction file", () => {
   });
 
   it("has no CLAUDE.md or CLAUDE.local.md beside it anywhere", () => {
-    const listed = runProcess(
-      "git",
-      ["-C", repoRoot, "ls-files", "--cached", "--others", "--exclude-standard"],
-    );
+    const listed = runProcess("git", [
+      "-C",
+      repoRoot,
+      "ls-files",
+      "--cached",
+      "--others",
+      "--exclude-standard",
+    ]);
     expect(listed.status).toBe(0);
     const shadows = listed.stdout
       .split("\n")
-      .filter((path) => ["CLAUDE.md", "CLAUDE.local.md"].includes(basename(path)));
+      .filter((path) =>
+        ["CLAUDE.md", "CLAUDE.local.md"].includes(basename(path)),
+      );
     expect(shadows).toEqual([]);
   });
 });

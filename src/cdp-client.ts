@@ -1,20 +1,20 @@
 // CDP Client wrapper for Comet browser control
 // Modified for Windows/WSL support
 
+import { type ChildProcess, execSync, spawn } from "child_process";
 import CDP from "chrome-remote-interface";
-import { spawn, ChildProcess, execSync } from "child_process";
-import { platform } from "os";
 import { existsSync } from "fs";
-import { validateUploadPath, validateSelector } from "./upload-validator.js";
+import { platform } from "os";
 import type {
   CDPTarget,
   CDPVersion,
+  CometState,
+  EvaluateResult,
   NavigateResult,
   ScreenshotResult,
-  EvaluateResult,
-  CometState,
   TabContext,
 } from "./types.js";
+import { validateSelector, validateUploadPath } from "./upload-validator.js";
 
 // chrome-remote-interface@^0.34.0 exposes `ProtocolError` at runtime
 // (`module.exports.ProtocolError = ...`), but @types/chrome-remote-interface
@@ -517,10 +517,7 @@ export class CometCDPClient {
   private ensureSingleReconnect(): Promise<void> {
     if (!this.reconnectPromise) {
       const attempt = this.reconnectAttempts;
-      const delay = Math.min(
-        300 * Math.pow(1.3, Math.max(attempt - 1, 0)),
-        2000,
-      );
+      const delay = Math.min(300 * 1.3 ** Math.max(attempt - 1, 0), 2000);
       this.reconnectPromise = (async () => {
         this.invalidateHealthCache();
         await new Promise((r) => setTimeout(r, delay));
@@ -1885,9 +1882,7 @@ export class CometCDPClient {
               found = true;
               break;
             }
-          } catch {
-            continue;
-          }
+          } catch {}
         }
 
         if (!found) {

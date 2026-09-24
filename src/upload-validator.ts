@@ -7,7 +7,7 @@
 
 import { realpathSync, statSync } from "fs";
 import { homedir } from "os";
-import { resolve as resolvePath, sep as PATH_SEP } from "path";
+import { sep as PATH_SEP, resolve as resolvePath } from "path";
 
 /**
  * Validate a user-supplied upload path against the optional allowlist root
@@ -182,7 +182,7 @@ export function validateDomain(domain: string): string {
   if (domain.length === 0 || domain.length > 253) {
     throw new Error("Invalid domain: must be 1–253 characters long");
   }
-  if (!/^[A-Za-z0-9.\-]+$/.test(domain)) {
+  if (!/^[A-Za-z0-9.-]+$/.test(domain)) {
     throw new Error(
       "Invalid domain: only letters, digits, hyphens, and dots are allowed",
     );
@@ -220,9 +220,7 @@ export function validateSelector(selector: string): string {
   // are not valid in CSS selectors and can corrupt error messages that echo
   // the selector back to the caller.
   // Excludes: <, >, null bytes, and all other characters not used in CSS selectors.
-  if (
-    !/^[A-Za-z0-9 \t\.\#\[\]=~^$*|:>+,\"'\(\)\-_\\/@!;{}%&]+$/.test(selector)
-  ) {
+  if (!/^[A-Za-z0-9 \t.#[\]=~^$*|:>+,"'()\-_\\/@!;{}%&]+$/.test(selector)) {
     throw new Error(
       "Invalid selector: contains characters not permitted in CSS selectors",
     );

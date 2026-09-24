@@ -1,7 +1,7 @@
 // @vitest-environment jsdom
 
-import { describe, it, expect, beforeEach } from "vitest";
-import { readProseState, extractAgentStatus } from "../../src/page-scripts.js";
+import { beforeEach, describe, expect, it } from "vitest";
+import { extractAgentStatus, readProseState } from "../../src/page-scripts.js";
 
 beforeEach(() => {
   document.body.innerHTML = "";
@@ -162,7 +162,7 @@ describe("extractAgentStatus", () => {
         "Searching for vegan ingredients",
         "Reading product details",
         "Navigating to checkout",
-      ])
+      ]),
     );
     // currentStep should be the most recently matched step.
     expect(result.currentStep).toMatch(/Searching for|Reading|Navigating/);

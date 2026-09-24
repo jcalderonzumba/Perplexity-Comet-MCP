@@ -15,10 +15,15 @@
     "clean": "rm -rf dist",
     "prepare": "npm run build",
     "prepublishOnly": "npm run build",
-    "test": "node tests/run-all.mjs",
-    "test:no-pro": "node tests/run-no-pro.mjs",
-    "test:unit": "vitest run",
-    "test:unit:watch": "vitest"
+    "check": "node scripts/check.mjs",
+    "preflight": "node scripts/preflight.mjs",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.tools.json",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:live": "node tests/run-no-pro.mjs",
+    "test:live:pro": "node tests/run-all.mjs",
+    "lint": "biome lint .",
+    "format": "biome format --write ."
   },
   "keywords": [
     "mcp",
@@ -54,6 +59,7 @@
     "chrome-remote-interface": "^0.34.0"
   },
   "devDependencies": {
+    "@biomejs/biome": "2.5.14",
     "@types/chrome-remote-interface": "^0.33.0",
     "@types/jsdom": "^28.0.1",
     "@types/node": "^22.10.2",

@@ -1,4 +1,4 @@
-import { describe, it, expect } from "vitest";
+import { describe, expect, it } from "vitest";
 import { CometAI } from "../../src/comet-ai.js";
 import { FakeCdpClient } from "./fakes/fake-cdp-client.js";
 

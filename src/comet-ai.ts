@@ -2,7 +2,7 @@
 // Handles sending prompts to Comet's AI assistant and reading responses
 
 import { cometClient } from "./cdp-client.js";
-import { extractAgentStatus, type AgentStatusResult } from "./page-scripts.js";
+import { type AgentStatusResult, extractAgentStatus } from "./page-scripts.js";
 
 /**
  * Minimal CDP-client surface used by `CometAI.getAgentStatus`. Letting
@@ -10,14 +10,17 @@ import { extractAgentStatus, type AgentStatusResult } from "./page-scripts.js";
  * CDP infrastructure to exercise the status-extraction logic. Methods
  * outside this set continue to use the module-level `cometClient`.
  */
-export type CometAIClient = Pick<typeof cometClient, "safeEvaluate" | "listTabsCategorized">;
+export type CometAIClient = Pick<
+  typeof cometClient,
+  "safeEvaluate" | "listTabsCategorized"
+>;
 
 // Input selectors - contenteditable div is primary for Perplexity
 const INPUT_SELECTORS = [
   '[contenteditable="true"]',
   'textarea[placeholder*="Ask"]',
   'textarea[placeholder*="Search"]',
-  'textarea',
+  "textarea",
   'input[type="text"]',
 ];
 
@@ -50,7 +53,9 @@ export class CometAI {
     const inputSelector = await this.findInputElement();
 
     if (!inputSelector) {
-      throw new Error("Could not find input element. Navigate to Perplexity first.");
+      throw new Error(
+        "Could not find input element. Navigate to Perplexity first.",
+      );
     }
 
     // Use the actually-matched selector. The previous implementation
@@ -91,7 +96,7 @@ export class CometAI {
     // Submit the prompt
     await this.submitPrompt();
 
-    return `Prompt sent: "${prompt.substring(0, 50)}${prompt.length > 50 ? '...' : ''}"`;
+    return `Prompt sent: "${prompt.substring(0, 50)}${prompt.length > 50 ? "..." : ""}"`;
   }
 
   /**
@@ -99,7 +104,7 @@ export class CometAI {
    */
   private async submitPrompt(): Promise<void> {
     // Wait for React to process the typed content
-    await new Promise(resolve => setTimeout(resolve, 300));
+    await new Promise((resolve) => setTimeout(resolve, 300));
 
     // Verify text was typed before attempting submit
     const hasContent = await cometClient.evaluate(`
@@ -113,7 +118,9 @@ export class CometAI {
     `);
 
     if (!hasContent.result.value) {
-      throw new Error("Prompt text not found in input - typing may have failed");
+      throw new Error(
+        "Prompt text not found in input - typing may have failed",
+      );
     }
 
     // Strategy 1: Simulate Enter key via DOM events (most reliable for contenteditable)
@@ -151,7 +158,7 @@ export class CometAI {
       })()
     `);
 
-    await new Promise(resolve => setTimeout(resolve, 800));
+    await new Promise((resolve) => setTimeout(resolve, 800));
 
     // Check if submission worked
     const submitted = await cometClient.evaluate(`
@@ -232,7 +239,7 @@ export class CometAI {
       })()
     `);
 
-    await new Promise(resolve => setTimeout(resolve, 500));
+    await new Promise((resolve) => setTimeout(resolve, 500));
 
     // Final verification and last resort.
     // The previous check used `[class*="animate"]` which matches
@@ -274,7 +281,7 @@ export class CometAI {
   // Effectively "the response has not changed across the last 3 polls".
   // The previous comment claimed "same for 2 checks" which was off by
   // one; renaming the constant to match what the code actually does.
-  private lastResponseText: string = '';
+  private lastResponseText: string = "";
   private stableResponseCount: number = 0;
   private readonly STABLE_REPEATS_REQUIRED: number = 2;
 
@@ -301,7 +308,7 @@ export class CometAI {
    * Reset stability tracking (call when starting new prompt)
    */
   resetStabilityTracking(): void {
-    this.lastResponseText = '';
+    this.lastResponseText = "";
     this.stableResponseCount = 0;
   }
 
@@ -318,7 +325,7 @@ export class CometAI {
     isStable: boolean;
   }> {
     // Get browsing URL from agent's tab
-    let agentBrowsingUrl = '';
+    let agentBrowsingUrl = "";
     try {
       const tabs = await this.client.listTabsCategorized();
       if (tabs.agentBrowsing) {
@@ -328,7 +335,9 @@ export class CometAI {
       // Continue without URL
     }
 
-    const result = await this.client.safeEvaluate(`(${extractAgentStatus.toString()})()`);
+    const result = await this.client.safeEvaluate(
+      `(${extractAgentStatus.toString()})()`,
+    );
 
     const statusResult = result.result.value as AgentStatusResult;
 
@@ -336,8 +345,12 @@ export class CometAI {
     const isStable = this.isResponseStable(statusResult.response);
 
     // If response is stable and has content, override status to completed
-    if (isStable && statusResult.response.length > 50 && !statusResult.hasStopButton) {
-      statusResult.status = 'completed';
+    if (
+      isStable &&
+      statusResult.response.length > 50 &&
+      !statusResult.hasStopButton
+    ) {
+      statusResult.status = "completed";
     }
 
     return {
