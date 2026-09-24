@@ -22,15 +22,22 @@ fi
 [ -z "$cmd" ] && exit 0
 root="${CLAUDE_PROJECT_DIR:-$PWD}"
 branch=$(git -C "$root" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
-# Every git invocation aimed at .work/ is rewritten to a word that no rule
-# below matches, so only the commands aimed at this repository are judged.
-public_cmd=$(printf '%s' "$cmd" | sed -E 's#(^|[^[:alnum:]_-])git[[:space:]]+-C[[:space:]]+([^[:space:]]*/)?\.work/?([[:space:]]|$)#\1notebook-git\3#g')
-if [ "$branch" = "main" ] && printf '%s' "$public_cmd" | grep -Eq '(^|[^[:alnum:]_-])git([[:space:]]+-C[[:space:]]+[^[:space:]]+)?[[:space:]]+(commit|merge|rebase|cherry-pick|revert)([[:space:]]|$)'; then
+# git's global options that may come before the subcommand: -C and -c with
+# their argument, the long options that take a separate argument, and any other
+# long or short flag. A rule that skipped none of them could be walked around
+# with `git -c k=v commit` or `git --no-pager push origin main`.
+global_opts='([[:space:]]+(-[Cc][[:space:]]+[^[:space:]]+|--(git-dir|work-tree|namespace|exec-path|super-prefix|config-env)[[:space:]]+[^-[:space:]][^[:space:]]*|--[a-z][a-z-]*(=[^[:space:]]*)?|-[a-zA-Z]))*'
+# A git invocation aimed at .work/, `git -C <…/.work> <subcommand>` with no other
+# global option, is rewritten to a word that no rule below matches, so only the
+# commands aimed at this repository are judged. Anything more (a second -C,
+# --git-dir, --work-tree) could point git back here, so it is judged too.
+public_cmd=$(printf '%s' "$cmd" | sed -E 's#(^|[^[:alnum:]_-])git[[:space:]]+-C[[:space:]]+([^[:space:]]*/)?\.work/?[[:space:]]+([a-z][a-z-]*)#\1notebook-git \3#g')
+if [ "$branch" = "main" ] && printf '%s' "$public_cmd" | grep -Eq "(^|[^[:alnum:]_-])git${global_opts}[[:space:]]+(commit|merge|rebase|cherry-pick|revert)([[:space:]]|\$)"; then
   deny "Direct writes to main are forbidden (AGENTS.md workflow). Create a branch: git switch -c feat/<plan>-p<phase>-<slug>"
 fi
 # Only the arguments of the push segment are inspected, so the word "main" in a
 # commit message or an echo elsewhere in a compound command does not trigger.
-push_args=$(printf '%s' "$public_cmd" | grep -oE '(^|[^[:alnum:]_-])git([[:space:]]+-C[[:space:]]+[^[:space:]]+)?[[:space:]]+push([^&;|]*)' | head -1)
+push_args=$(printf '%s' "$public_cmd" | grep -oE "(^|[^[:alnum:]_-])git${global_opts}[[:space:]]+push([^&;|]*)" | head -1)
 if [ -n "$push_args" ]; then
   if [ "$branch" = "main" ] || printf '%s' "$push_args" | grep -Eq '(^|[[:space:]:/])main([[:space:]]|$)'; then
     deny "Pushing to main is forbidden (AGENTS.md workflow). Push a feature branch and open a PR."

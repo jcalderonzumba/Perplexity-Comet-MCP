@@ -176,10 +176,49 @@ describe("protect-main.sh and the private notebook", () => {
     "git -C .work commit -m x && git commit -m y",
     "git -C my.work commit -m x",
     "git -C .workshop push origin main",
+    // A second -C, or --git-dir and --work-tree, point git back at this
+    // repository: only `git -C <…/.work> <subcommand>` is the notebook.
+    "git -C .work -C .. commit -m x",
+    "git -C .work -C .. push origin main",
+    "git -C .work --git-dir=../.git --work-tree=.. commit -m x",
   ])('denies "%s" on main', (command) => {
     expect(decision(hook("protect-main.sh", toolInput(command)))).toMatchObject({
       allowed: false,
     });
+  });
+});
+
+describe("protect-main.sh and git's global options", () => {
+  it.each([
+    "git -c user.name=x commit -m x",
+    "git -c core.hooksPath=/dev/null commit -m x",
+    "git --no-pager commit -m x",
+    "git --git-dir ../.git commit -m x",
+    "git --git-dir=.git --work-tree=. merge feat/x",
+    "git -c k=v push",
+  ])('denies "%s" on main', (command) => {
+    expect(decision(hook("protect-main.sh", toolInput(command)))).toMatchObject({
+      allowed: false,
+    });
+  });
+
+  it.each(["git -c k=v push origin main", "git --no-pager push origin HEAD:main"])(
+    'denies "%s" from a branch',
+    (command) => {
+      sandbox.git("switch", "--quiet", "--create", "feat/x");
+      expect(decision(hook("protect-main.sh", toolInput(command)))).toMatchObject({
+        allowed: false,
+      });
+    },
+  );
+
+  it.each([
+    "git -c user.name=x commit -m x",
+    "git --no-pager log main..HEAD",
+    'git -c k=v commit -m "push to main later"',
+  ])('allows "%s" on a branch', (command) => {
+    sandbox.git("switch", "--quiet", "--create", "feat/x");
+    expect(decision(hook("protect-main.sh", toolInput(command)))).toEqual({ allowed: true });
   });
 });
 
