@@ -2,7 +2,8 @@
  * How a battery starts the server under test, and which debug port that
  * server uses. The port is worked out once and given both to the battery,
  * which asks Comet on it, and to the server, which the SDK's stdio transport
- * otherwise starts without the battery's `COMET_PORT`.
+ * otherwise starts without the battery's `COMET_PORT`. Both live batteries
+ * use it.
  */
 
 import { getDefaultEnvironment } from "@modelcontextprotocol/sdk/client/stdio.js";
@@ -41,5 +42,24 @@ export function serverUnderTest(entry, env) {
       args: [entry],
       env: { ...getDefaultEnvironment(), COMET_PORT: String(port) },
     },
+  };
+}
+
+/**
+ * Whether Comet answers on the debug port, asked without the server, so that
+ * a battery never makes the server launch or relaunch Comet.
+ * @param {number} port
+ * @returns {{ port: number, answers: () => Promise<boolean> }}
+ */
+export function debugPort(port) {
+  return {
+    port,
+    answers: () =>
+      fetch(`http://127.0.0.1:${port}/json/version`, {
+        signal: AbortSignal.timeout(3000),
+      }).then(
+        (response) => response.ok,
+        () => false,
+      ),
   };
 }

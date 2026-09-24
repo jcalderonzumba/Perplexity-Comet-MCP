@@ -1,5 +1,7 @@
 import { describe, expect, it } from "vitest";
 
+import { ModeCore } from "../../src/core/mode.js";
+import { answerModeTool } from "../../src/core/mode-tool.js";
 import {
   batteryPassed,
   type ScoredCheck,
@@ -11,12 +13,14 @@ import {
   type DebugPort,
   hasScreenshot,
   invalidModeHandled,
+  labsNotOffered,
   reportsMode,
   runNoProBattery,
   switchedTo,
   type ToolReply,
   tabsListed,
 } from "../lib/no-pro-checks.mjs";
+import { FakeModePage } from "../unit/fakes/fake-mode-page.js";
 
 const ok = (text: string): ToolReply => ({
   content: [{ type: "text", text }],
@@ -26,7 +30,26 @@ const error = (text: string): ToolReply => ({
   isError: true,
 });
 
-const MODE_REPORT = "Current mode: search\n\nAvailable modes:\n→ search: Basic";
+const modeReport = (current: string) =>
+  [
+    `Current mode: ${current}`,
+    "",
+    "Available modes:",
+    "  search: Search",
+    "  research: Deep research",
+    "  labs: not available (not offered by Perplexity's current input bar)",
+    "  learn: not available (not supported yet)",
+    "",
+  ].join("\n");
+const MODE_REPORT = modeReport("search");
+const UNKNOWN_MODE_REPORT = modeReport(
+  "unknown (no mode button found on the page)",
+);
+const PAGE_FAILED_MODE_REPORT = error(
+  modeReport("unknown (the page failed: Execution context was destroyed)"),
+);
+const LABS_NOT_OFFERED =
+  "Cannot switch to labs mode: not offered by Perplexity's current input bar";
 const COMET_DOWN =
   "Error: Timeout waiting for Comet. Try: /Applications/Comet.app --remote-debugging-port=9222";
 
@@ -74,12 +97,57 @@ describe("tabsListed [6.1]", () => {
 });
 
 describe("reportsMode [7.1] [7.3-reconnect]", () => {
-  it("holds when the reply names a mode", () => {
+  it("holds when the reply reports a mode read from the page", () => {
     expect(reportsMode(ok(MODE_REPORT))).toBe(true);
+    expect(reportsMode(ok(modeReport("research")))).toBe(true);
   });
 
   it("fails when the reply names none", () => {
     expect(reportsMode(ok(""))).toBe(false);
+  });
+
+  it("fails when the mode is unknown, although the reply lists every mode", () => {
+    expect(reportsMode(ok(UNKNOWN_MODE_REPORT))).toBe(false);
+    expect(
+      reportsMode(
+        ok(modeReport("unknown (the mode button reads Deep research)")),
+      ),
+    ).toBe(false);
+  });
+
+  it("fails on an error result, even one that names a mode", () => {
+    expect(reportsMode(PAGE_FAILED_MODE_REPORT)).toBe(false);
+    expect(reportsMode(error(MODE_REPORT))).toBe(false);
+  });
+});
+
+describe("labsNotOffered [7.2-labs]", () => {
+  it("holds on the error saying Perplexity no longer offers labs", () => {
+    expect(labsNotOffered(error(LABS_NOT_OFFERED))).toBe(true);
+  });
+
+  it("fails when the switch to labs is reported as done", () => {
+    expect(labsNotOffered(ok("Switched to labs mode"))).toBe(false);
+  });
+
+  it("fails on any other error", () => {
+    expect(
+      labsNotOffered(
+        error("Cannot switch to labs mode: no mode button found on the page"),
+      ),
+    ).toBe(false);
+    expect(labsNotOffered(error("Error: Not connected to Comet"))).toBe(false);
+    expect(
+      labsNotOffered(
+        error(
+          "Cannot switch to learn mode: not offered by Perplexity's current input bar",
+        ),
+      ),
+    ).toBe(false);
+  });
+
+  it("fails on the not-offered text when it is not an error result", () => {
+    expect(labsNotOffered(ok(LABS_NOT_OFFERED))).toBe(false);
   });
 });
 
@@ -126,6 +194,46 @@ describe("invalidModeHandled [9.4]", () => {
       invalidModeHandled(rejected, error("Error: Not connected to Comet")),
     ).toBe(false);
   });
+
+  // reportsMode decides the follow-up call too, so a follow-up that cannot
+  // read the mode fails [9.4]: the server answered, but not with a mode.
+  it("fails when the next call reports the mode as unknown", () => {
+    expect(invalidModeHandled(rejected, ok(UNKNOWN_MODE_REPORT))).toBe(false);
+  });
+
+  it("fails when the next call is an error that names a mode", () => {
+    expect(invalidModeHandled(rejected, PAGE_FAILED_MODE_REPORT)).toBe(false);
+  });
+});
+
+describe("the mode predicates against the server's own comet_mode replies", () => {
+  async function serverReply(
+    mode: string | undefined,
+    page: FakeModePage,
+  ): Promise<ToolReply> {
+    const reply = await answerModeTool(mode, {
+      core: new ModeCore(page),
+      openPerplexity: async () => {},
+      quotePage: (pageText) => pageText,
+    });
+    return reply.isError ? error(reply.text) : ok(reply.text);
+  }
+
+  it("[7.2-labs] holds on the server's refusal of labs", async () => {
+    expect(labsNotOffered(await serverReply("labs", new FakeModePage()))).toBe(
+      true,
+    );
+  });
+
+  it("[7.1] holds on the mode the server reads from the page", async () => {
+    const page = new FakeModePage({ current: "Deep research" });
+    expect(reportsMode(await serverReply(undefined, page))).toBe(true);
+  });
+
+  it("[7.1] fails when the server finds no mode button", async () => {
+    const page = new FakeModePage({ hasButton: false });
+    expect(reportsMode(await serverReply(undefined, page))).toBe(false);
+  });
 });
 
 type Replies = Record<string, ToolReply | Error>;
@@ -143,11 +251,9 @@ const HEALTHY: Replies = {
   [key("comet_tabs", {})]: ok("Tabs (1):\n  perplexity.ai [active]"),
   [key("comet_mode", {})]: ok(MODE_REPORT),
   [key("comet_mode", { mode: "research" })]: ok("Switched to research mode"),
-  [key("comet_mode", { mode: "labs" })]: error(
-    "Failed: Mode option not found in dropdown",
-  ),
+  [key("comet_mode", { mode: "labs" })]: error(LABS_NOT_OFFERED),
   [key("comet_mode", { mode: "learn" })]: error(
-    "Failed: Mode option not found in dropdown",
+    "Cannot switch to learn mode: not supported yet",
   ),
   [key("comet_mode", { mode: "search" })]: ok("Switched to search mode"),
   [key("comet_mode", { mode: "invalid_mode_xyz" })]: error(
@@ -181,13 +287,43 @@ const byId = (checks: readonly ScoredCheck[], id: string) =>
   checks.find((check) => check.id === id);
 
 describe("runNoProBattery", () => {
-  it("scores today's Comet as 8 passed and 2 known, and passes", async () => {
+  it("scores today's Comet as 9 passed and 1 known, and passes", async () => {
     const checks = await runNoProBattery(
       fakeServer(HEALTHY).callTool,
       LISTENING,
     );
-    expect(summaryLine(checks)).toBe("Results: 8 passed, 0 failed, 2 known");
+    expect(summaryLine(checks)).toBe("Results: 9 passed, 0 failed, 1 known");
     expect(batteryPassed(checks)).toBe(true);
+    expect(byId(checks, "7.2-labs")).toMatchObject({
+      verdict: "PASS",
+      note: LABS_NOT_OFFERED.slice(0, 60),
+    });
+    expect(byId(checks, "7.2-learn")?.verdict).toBe("KNOWN");
+  });
+
+  it("fails [7.2-labs] when the switch to labs is reported as done", async () => {
+    const checks = await runNoProBattery(
+      fakeServer({
+        ...HEALTHY,
+        [key("comet_mode", { mode: "labs" })]: ok("Switched to labs mode"),
+      }).callTool,
+      LISTENING,
+    );
+    expect(byId(checks, "7.2-labs")?.verdict).toBe("FAIL");
+    expect(batteryPassed(checks)).toBe(false);
+  });
+
+  it("fails [7.1] and [7.3-reconnect] when the mode cannot be read", async () => {
+    const checks = await runNoProBattery(
+      fakeServer({
+        ...HEALTHY,
+        [key("comet_mode", {})]: ok(UNKNOWN_MODE_REPORT),
+      }).callTool,
+      LISTENING,
+    );
+    expect(byId(checks, "7.1")?.verdict).toBe("FAIL");
+    expect(byId(checks, "7.3-reconnect")?.verdict).toBe("FAIL");
+    expect(byId(checks, "9.4")?.verdict).toBe("FAIL");
   });
 
   it("makes the same tool calls as before, plus one read-only mode query after the invalid mode", async () => {

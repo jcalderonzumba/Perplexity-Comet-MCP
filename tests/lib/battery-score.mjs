@@ -22,16 +22,10 @@
 /** @type {readonly KnownFailure[]} */
 export const KNOWN_FAILURES = [
   {
-    id: "7.2-labs",
-    reason:
-      "Perplexity's input bar no longer offers Labs, so comet_mode labs fails saying so",
-    owningPlan: "plan 5 (research mode)",
-  },
-  {
     id: "7.2-learn",
     reason:
       'Perplexity\'s input bar offers "Learn step by step", and comet_mode does not switch to it yet',
-    owningPlan: "plan 5 (research mode)",
+    owningPlan: "plan 11 (Learn mode)",
   },
 ];
 

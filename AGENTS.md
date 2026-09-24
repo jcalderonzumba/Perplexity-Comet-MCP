@@ -117,4 +117,4 @@ First run: `npm ci`, then `git config core.hooksPath .githooks`, plus `codegraph
 | `npm test` · `test:watch` | Vitest once, or watching |
 | `npm run typecheck` · `lint` · `format` | the check's parts on their own; `format` rewrites files |
 | `npm run test:live` | the live no-pro battery, `tests/run-no-pro.mjs`: needs Comet signed in and already running with its debug port on the server's port (`COMET_PORT`, default 9223), and fails at connect without calling a tool otherwise; spends no Pro queries. Prints PASS, FAIL, KNOWN or UNEXPECTED PASS per check and fails on any FAIL or UNEXPECTED PASS |
-| `npm run test:live:pro` | the live Pro battery, `tests/run-all.mjs`: needs Comet signed in to Perplexity Pro, and spends Pro queries |
+| `npm run test:live:pro` | the live Pro battery, `tests/run-all.mjs`: needs Comet signed in to Perplexity Pro and already running with its debug port on the server's port (`COMET_PORT`, default 9223), and fails at connect without calling a tool otherwise; spends Pro queries, one Deep research query among them |

@@ -179,23 +179,19 @@ describe("reportLine", () => {
 });
 
 describe("KNOWN_FAILURES", () => {
-  it("lists the labs and learn mode switches, owned by plan 5", () => {
+  it("lists only the learn mode switch, owned by plan 11", () => {
     expect(KNOWN_FAILURES.map((entry) => [entry.id, entry.owningPlan])).toEqual(
-      [
-        ["7.2-labs", "plan 5 (research mode)"],
-        ["7.2-learn", "plan 5 (research mode)"],
-      ],
+      [["7.2-learn", "plan 11 (Learn mode)"]],
     );
   });
 
-  it("says why each listed mode switch fails, as the mode menu stands", () => {
-    const reasonFor = (id: string) =>
-      KNOWN_FAILURES.find((entry) => entry.id === id)?.reason;
+  it("no longer lists the labs mode switch, whose refusal the battery now expects", () => {
+    expect(scoreCheck(held("7.2-labs")).verdict).toBe("PASS");
+    expect(scoreCheck(broke("7.2-labs")).verdict).toBe("FAIL");
+  });
 
-    expect(reasonFor("7.2-labs")).toBe(
-      "Perplexity's input bar no longer offers Labs, so comet_mode labs fails saying so",
-    );
-    expect(reasonFor("7.2-learn")).toBe(
+  it("says why the learn mode switch fails, as the mode menu stands", () => {
+    expect(KNOWN_FAILURES[0]?.reason).toBe(
       'Perplexity\'s input bar offers "Learn step by step", and comet_mode does not switch to it yet',
     );
   });

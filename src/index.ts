@@ -17,6 +17,7 @@ import { fileURLToPath } from "url";
 import { cometClient, DEFAULT_PORT } from "./cdp-client.js";
 import { createCdpModeTool } from "./cdp-mode-page.js";
 import { cometAI } from "./comet-ai.js";
+import { reapplyModeBeforeAsk, withModeNotice } from "./core/ask-mode.js";
 import { answerModeTool, COMET_MODE_TOOL } from "./core/mode-tool.js";
 import { type ProseState, readProseState } from "./page-scripts.js";
 import {
@@ -370,6 +371,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           }
         }
 
+        // Perplexity resets its mode on every navigation: put back the mode
+        // comet_mode last set. A failure does not stop the ask; its line
+        // starts the result instead.
+        const modeNotice = await reapplyModeBeforeAsk(modeTool);
+
         // Reset stability tracking for new prompt
         cometAI.resetStabilityTracking();
 
@@ -486,7 +492,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                 content: [
                   {
                     type: "text",
-                    text: wrapUntrustedPageContent(status.response),
+                    text: withModeNotice(
+                      modeNotice,
+                      wrapUntrustedPageContent(status.response),
+                    ),
                   },
                 ],
               };
@@ -504,7 +513,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                 content: [
                   {
                     type: "text",
-                    text: wrapUntrustedPageContent(status.response),
+                    text: withModeNotice(
+                      modeNotice,
+                      wrapUntrustedPageContent(status.response),
+                    ),
                   },
                 ],
               };
@@ -524,7 +536,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
                 content: [
                   {
                     type: "text",
-                    text: wrapUntrustedPageContent(status.response),
+                    text: withModeNotice(
+                      modeNotice,
+                      wrapUntrustedPageContent(status.response),
+                    ),
                   },
                 ],
               };
@@ -573,7 +588,10 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             content: [
               {
                 type: "text",
-                text: wrapUntrustedPageContent(finalStatus.response),
+                text: withModeNotice(
+                  modeNotice,
+                  wrapUntrustedPageContent(finalStatus.response),
+                ),
               },
             ],
           };
@@ -601,7 +619,11 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
         // Keep task active since it may still be running
         sessionState.steps = stepsCollected;
-        return { content: [{ type: "text", text: inProgressMsg }] };
+        return {
+          content: [
+            { type: "text", text: withModeNotice(modeNotice, inProgressMsg) },
+          ],
+        };
       }
 
       case "comet_poll": {

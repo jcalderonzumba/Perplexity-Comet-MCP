@@ -26,6 +26,7 @@ import { URL } from "url";
 import { cometClient } from "./cdp-client.js";
 import { createCdpModeTool } from "./cdp-mode-page.js";
 import { cometAI } from "./comet-ai.js";
+import { reapplyModeBeforeAsk, withModeNotice } from "./core/ask-mode.js";
 import { answerModeTool } from "./core/mode-tool.js";
 import { wrapUntrustedPageContent } from "./untrusted.js";
 import {
@@ -118,6 +119,10 @@ function isSessionStale(): boolean {
 // Tool Handlers (extracted from index.ts for reuse)
 // ============================================================================
 
+// The mode tool, and the mode it remembers, shared by comet_mode and
+// comet_ask for as long as the bridge runs.
+const modeTool = createCdpModeTool(cometClient, wrapUntrustedPageContent);
+
 type ToolResult = {
   success: boolean;
   content: string | { type: string; data?: string; mimeType?: string }[];
@@ -152,6 +157,8 @@ async function handleConnect(): Promise<ToolResult> {
     content: `${startResult}\nCreated new tab and navigated to Perplexity`,
   };
 }
+
+const NO_RESPONSE = "Task timed out or no response received";
 
 async function handleAsk(args: {
   prompt: string;
@@ -267,6 +274,11 @@ async function handleAsk(args: {
     }
   }
 
+  // Perplexity resets its mode on every navigation: put back the mode
+  // comet_mode last set. A failure does not stop the ask; its line starts
+  // the result instead.
+  const modeNotice = await reapplyModeBeforeAsk(modeTool);
+
   cometAI.resetStabilityTracking();
 
   // Capture old state
@@ -360,13 +372,25 @@ async function handleAsk(args: {
       if (status.status === "completed" && sawNewResponse) {
         const response = status.response;
         completeTask(response);
-        return { success: true, content: response };
+        return {
+          success: true,
+          content: withModeNotice(
+            modeNotice,
+            wrapUntrustedPageContent(response),
+          ),
+        };
       }
 
       if (sawNewResponse && Date.now() - lastActivityTime > IDLE_TIMEOUT) {
         const response = status.response || previousResponse;
         completeTask(response);
-        return { success: true, content: response };
+        return {
+          success: true,
+          content: withModeNotice(
+            modeNotice,
+            wrapUntrustedPageContent(response),
+          ),
+        };
       }
     } catch {
       consecutiveErrors++;
@@ -376,12 +400,15 @@ async function handleAsk(args: {
     }
   }
 
-  const finalResponse =
-    sessionState.lastResponse ||
-    previousResponse ||
-    "Task timed out or no response received";
-  completeTask(finalResponse);
-  return { success: true, content: finalResponse };
+  const pageResponse = sessionState.lastResponse || previousResponse;
+  completeTask(pageResponse || NO_RESPONSE);
+  return {
+    success: true,
+    content: withModeNotice(
+      modeNotice,
+      pageResponse ? wrapUntrustedPageContent(pageResponse) : NO_RESPONSE,
+    ),
+  };
 }
 
 async function handlePoll(): Promise<ToolResult> {
@@ -626,8 +653,6 @@ async function handleUpload(args: {
     error: result.success ? undefined : result.message,
   };
 }
-
-const modeTool = createCdpModeTool(cometClient, wrapUntrustedPageContent);
 
 async function handleMode(args: { mode?: unknown }): Promise<ToolResult> {
   const reply = await answerModeTool(args.mode, modeTool);

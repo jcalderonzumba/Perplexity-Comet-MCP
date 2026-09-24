@@ -13,43 +13,14 @@ import {
   reportLine,
   summaryLine,
 } from "./lib/battery-score.mjs";
+import { callWithin } from "./lib/call-within.mjs";
 import { runNoProBattery } from "./lib/no-pro-checks.mjs";
-import { serverUnderTest } from "./lib/server-under-test.mjs";
+import { debugPort, serverUnderTest } from "./lib/server-under-test.mjs";
 
 const DIST_ENTRY = resolve(
   dirname(fileURLToPath(import.meta.url)),
   "../dist/index.js",
 );
-
-/**
- * Whether Comet answers on the debug port, asked without the server, so that
- * the battery never makes the server launch or relaunch Comet.
- */
-function debugPort(port) {
-  return {
-    port,
-    answers: () =>
-      fetch(`http://127.0.0.1:${port}/json/version`, {
-        signal: AbortSignal.timeout(3000),
-      }).then(
-        (response) => response.ok,
-        () => false,
-      ),
-  };
-}
-
-function callWithin(client) {
-  return (name, args, timeoutMs) =>
-    Promise.race([
-      client.callTool({ name, arguments: args }),
-      new Promise((_, reject) =>
-        setTimeout(
-          () => reject(new Error(`TIMEOUT after ${timeoutMs}ms`)),
-          timeoutMs,
-        ),
-      ),
-    ]);
-}
 
 async function main() {
   const server = serverUnderTest(DIST_ENTRY, process.env);

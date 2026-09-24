@@ -145,6 +145,10 @@ Parameters:
 Returns: Complete response text
 ```
 
+The answer is page content, so it comes back wrapped in UNTRUSTED markers carrying a fresh nonce, over stdio and the HTTP bridge alike.
+
+The mode `comet_mode` last set carries over to every ask. Perplexity puts the mode back to Search whenever the page navigates, so after its own navigation (a new chat, a reconnect) and before it types the prompt, `comet_ask` reads the page's mode and switches it back when it differs. Without a mode set by `comet_mode`, or with the page already in it, nothing is clicked and the result is just the answer. When the mode cannot be put back, the ask still runs, and its result starts with a line beginning `Mode not applied:` that says which mode and why, followed by a blank line and the answer.
+
 **Examples:**
 
 ```
@@ -266,9 +270,9 @@ Returns: the current mode read from the page, or confirmation that the switch ha
 
 Without a mode, `comet_mode` reads the mode from the mode button in Perplexity's input bar. When the button shows something other than these modes, or there is no button, it reports `unknown` and quotes what it saw. When the page fails while it is read, it reports `unknown` as an error and quotes the page's error message.
 
-With a mode, it opens the mode menu with real pointer clicks, selects the mode's item, and opens the menu again to read which item is checked. It says `Switched to <mode> mode` only when the menu and the button both show the new mode. Otherwise it returns an error naming what the page showed. Either way it closes the menu. If the tab is not on Perplexity, it opens Perplexity's home page first.
+With a mode, it opens the mode menu with real pointer clicks, selects the mode's item, and opens the menu again to read which item is checked. It says `Switched to <mode> mode` only when the menu and the button both show the new mode. Otherwise it returns an error naming what the page showed. Either way it closes the menu. If the tab is not on Perplexity, it opens Perplexity's home page first. Before every click it asks the browser which site the tab shows, and it clicks only on Perplexity's own site, `https://www.perplexity.ai`: on any other site the switch fails and nothing is clicked.
 
-Text read from the page is wrapped in the same UNTRUSTED markers as answers. Perplexity puts the mode back to Search when the page navigates, for example for a new chat.
+Text read from the page is wrapped in the same UNTRUSTED markers as answers. Perplexity puts the mode back to Search when the page navigates, for example for a new chat; the server remembers the mode `comet_mode` last set, and `comet_ask` switches back to it before each ask (see `comet_ask`).
 
 ---
 
@@ -471,7 +475,7 @@ npm run check                         # before every commit
 Both batteries start the built server (`npm run build` first) and drive your local Comet through it: connect, tabs, screenshots, mode, and for the Pro battery, questions and agentic browsing.
 
 - **No-pro** (`tests/run-no-pro.mjs`): needs Comet signed in and already running with its debug port on the server's port (`COMET_PORT`, 9223 by default); spends no Perplexity Pro queries. `npm run preflight` runs it on every pull request, with a ten-minute ceiling. If your Comet listens on another port, set `COMET_PORT` to it, for example `COMET_PORT=9222 npm run preflight`: the battery checks that port and starts the server on it.
-- **Pro** (`tests/run-all.mjs`): needs Comet signed in to Perplexity Pro and **spends Pro queries**. It is run by hand when a change touches asking, polling, modes or agentic browsing, and the pull request records the result.
+- **Pro** (`tests/run-all.mjs`): needs Comet signed in to Perplexity Pro and already running with its debug port on the server's port (`COMET_PORT`, 9223 by default), and **spends Pro queries**, one Deep research query among them. It is run by hand when a change touches asking, polling, modes or agentic browsing, and the pull request records the result. Like the no-pro battery, it starts the server on the port it checks and asks that port first: when nothing answers, `[1.2]` fails and no tool is called, and when connect fails, nothing else runs. Its `[7.4-research-workflow]` check runs the research workflow: `comet_mode research`, then `comet_ask` with `newChat: true`, then `comet_mode`; it passes when the ask's result has no `Mode not applied:` line and the page still reads `research`, and it puts Search back afterwards.
 
 The no-pro battery prints one line per check: its verdict, its id, and what the tool replied.
 
@@ -483,10 +487,10 @@ The no-pro battery prints one line per check: its verdict, its id, and what the 
 The battery first asks the debug port itself whether Comet answers. If it does not, `[1.2]` fails with `Comet is not running with its debug port on <port>` and no tool is called, so the battery never launches Comet or restarts one running on another port. If connect fails, the other checks are not run and count as failed. The battery ends with a summary, in which an unexpected pass counts as failed, and exits non-zero on any failure:
 
 ```
-Results: 8 passed, 0 failed, 2 known
+Results: 9 passed, 0 failed, 1 known
 ```
 
-Today the list holds the switches to the `labs` mode, which Perplexity's input bar no longer offers, and to the `learn` mode, which `comet_mode` does not switch to yet.
+The mode checks hold only on what the server really did. `[7.1]` and `[7.3-reconnect]` pass when `comet_mode` reads a mode from the page, and fail on an error or on `unknown`; `[9.4]`'s follow-up read is judged the same way. `[7.2-research]` and `[7.2-search]` pass on `Switched to <mode> mode`, and `[7.2-labs]` passes on the error saying Perplexity's input bar no longer offers Labs. Today the known-failures list holds one check, the switch to the `learn` mode: Perplexity's input bar offers "Learn step by step", and `comet_mode` does not switch to it yet.
 
 ### Gates
 

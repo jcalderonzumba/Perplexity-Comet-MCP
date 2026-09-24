@@ -1,6 +1,11 @@
 // The mode core's page, over the CDP client: the one `ModePage` both
 // adapters build when they start, the navigation to Perplexity the
 // `comet_mode` tool makes before a switch, and the tool built from them.
+//
+// Clicks are trusted pointer events at points a page script returns, so
+// each one is sent only while the browser reports the tab's top frame on
+// Perplexity's own origin: a page elsewhere, imitating the mode button,
+// never steers them.
 
 import { ModeCore, type ModePage } from "./core/mode.js";
 import type { ModeTool } from "./core/mode-tool.js";
@@ -12,17 +17,23 @@ import {
 import type { EvaluateResult } from "./types.js";
 
 const PERPLEXITY_HOME = "https://www.perplexity.ai/";
+const PERPLEXITY_ORIGIN = new URL(PERPLEXITY_HOME).origin;
+
+/** The part of the CDP client that reads the tab's origin from the browser. */
+export interface OriginReader {
+  /** The top frame's security origin, as the browser reports it now. */
+  pageOrigin(): Promise<string>;
+}
 
 /** The part of the CDP client the mode page drives. */
-export interface ModePageClient {
+export interface ModePageClient extends OriginReader {
   evaluate(expression: string): Promise<EvaluateResult>;
   clickAt(point: PagePoint): Promise<void>;
   pressKey(key: string): Promise<void>;
 }
 
 /** The part of the CDP client that knows and changes the tab's address. */
-export interface PerplexityNavigator {
-  readonly currentState: { currentUrl?: string };
+export interface PerplexityNavigator extends OriginReader {
   navigate(url: string, waitForLoad?: boolean): Promise<unknown>;
 }
 
@@ -44,8 +55,14 @@ class CdpModePage implements ModePage {
     return response.result.value as R;
   }
 
-  clickAt(point: PagePoint): Promise<void> {
-    return this.client.clickAt(point);
+  async clickAt(point: PagePoint): Promise<void> {
+    const origin = await this.client.pageOrigin();
+    if (origin !== PERPLEXITY_ORIGIN) {
+      throw new Error(
+        `refused to click: the tab is on ${origin}, not ${PERPLEXITY_ORIGIN}`,
+      );
+    }
+    await this.client.clickAt(point);
   }
 
   pressEscape(): Promise<void> {
@@ -66,7 +83,7 @@ export function cdpModePage(client: ModePageClient): ModePage {
 export async function openPerplexityIfElsewhere(
   client: PerplexityNavigator,
 ): Promise<void> {
-  if (client.currentState.currentUrl?.includes("perplexity.ai")) return;
+  if ((await client.pageOrigin()) === PERPLEXITY_ORIGIN) return;
   await client.navigate(PERPLEXITY_HOME, true);
 }
 
