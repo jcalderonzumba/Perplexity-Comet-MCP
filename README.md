@@ -450,8 +450,6 @@ git config core.hooksPath .githooks   # once per clone
 npm run check                         # before every commit
 ```
 
-`git config blame.ignoreRevsFile .git-blame-ignore-revs`, also once per clone, makes `git blame` look past the commit that reformatted the codebase with Biome.
-
 | Command | What it does |
 |---|---|
 | `npm run build` · `npm run dev` | compile to `dist/`, once or watching |
