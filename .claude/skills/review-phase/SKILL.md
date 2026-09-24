@@ -66,9 +66,9 @@ Implements **phase N — <phase name>** of the `<plan>` plan.
 Pending: filled in by `/review-phase` on approval (§8).
 
 🤖 Generated with [Claude Code](https://claude.com/claude-code)
-
-<session link line from the current attribution reminder>
 ```
+
+The description ends at that line. It never carries the Claude session link (`https://claude.ai/code/session_…`), even when the session's attribution reminder asks for one (AGENTS.md *Attribution*).
 
 The draft becomes a public PR description. It says what changed in its own words: it never pastes spec, plan or research text, never links a `.work/` path, and names research notes by date and topic only.
 

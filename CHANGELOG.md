@@ -22,6 +22,7 @@ All notable changes to this project will be documented in this file.
 - **`comet_mode` works with Perplexity's current mode menu** - `research` selects Deep research again. A switch opens the mode menu with real pointer clicks, selects the item by its exact label, and reads the menu back: it reports `Switched to <mode> mode` only when the page shows that mode, returns an error naming what the page showed otherwise, and always closes the menu. `labs` fails saying Perplexity's input bar no longer offers it, and `learn` fails as not supported yet. Without a mode, the current mode is read from the page's mode button, and reported as `unknown` with what the button reads, instead of defaulting to `search`; a page that fails while it is read gives an error reply with the page's error message quoted, like any other page text
 - **The HTTP bridge answers `comet_mode` as the stdio server does** - the same switch, the same replies, and page text in them wrapped in the UNTRUSTED markers
 - **`npm run preflight` fails closed on a `git` read it cannot make** - a failed `git status` (of the working tree, or of a `.work/` directory that is not a git repository of its own) or `git rev-parse HEAD` stops it with the failing command, and it records no approval, instead of reading the failure as a clean tree
+- The Claude session link appears nowhere: not in commit messages, pull request descriptions, code or docs. `AGENTS.md` gains an *Attribution* section, and the `/review-phase` template, the `/run-phase` brief and both subagents follow it.
 
 ### Fixed
 
