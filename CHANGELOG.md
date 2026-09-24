@@ -24,6 +24,7 @@ All notable changes to this project will be documented in this file.
 - **The live Pro battery starts the server on the port it checks** - like the no-pro battery, it passes `COMET_PORT` (9223 by default) to the server it starts, asks that port before connecting, and calls no tool when nothing answers there, so it never launches Comet or restarts one listening on another port; when connect fails, nothing else runs. A new `[7.4-research-workflow]` check runs `comet_mode research`, then `comet_ask` with `newChat: true`, then `comet_mode`, and passes when the ask's result has no `Mode not applied:` line and the page still reads `research`
 - **The HTTP bridge answers `comet_mode` as the stdio server does** - the same switch, the same replies, and page text in them wrapped in the UNTRUSTED markers
 - **`npm run preflight` fails closed on a `git` read it cannot make** - a failed `git status` (of the working tree, or of a `.work/` directory that is not a git repository of its own) or `git rev-parse HEAD` stops it with the failing command, and it records no approval, instead of reading the failure as a clean tree
+- Commit messages, pull request descriptions, code and docs no longer carry the Claude session link. `AGENTS.md` gains an *Attribution* section, and the `/review-phase` template, the `/run-phase` brief and both subagents follow it.
 
 ### Fixed
 
