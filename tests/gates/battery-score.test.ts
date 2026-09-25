@@ -3,8 +3,9 @@ import { describe, expect, expectTypeOf, it } from "vitest";
 import {
   batteryPassed,
   type CheckResult,
-  KNOWN_FAILURES,
   type KnownFailure,
+  NO_PRO_KNOWN_FAILURES,
+  PRO_KNOWN_FAILURES,
   reportLine,
   runCheck,
   type ScoredCheck,
@@ -59,12 +60,13 @@ describe("scoreCheck", () => {
     });
   });
 
-  it("scores against the battery's own list by default", () => {
-    expect(scoreCheck(broke("7.2-learn")).verdict).toBe("KNOWN");
+  it("takes the list to score against, so no battery falls back on another's", () => {
+    // @ts-expect-error: the known-failures list is required
+    expect(() => scoreCheck(broke("7.2-learn"))).toThrow(TypeError);
   });
 
   it("returns a verdict from the closed set, so a misspelt one fails the typecheck", () => {
-    expectTypeOf(scoreCheck(held("5.1")).verdict).toEqualTypeOf<
+    expectTypeOf(scoreCheck(held("5.1"), [listed]).verdict).toEqualTypeOf<
       "PASS" | "FAIL" | "KNOWN" | "UNEXPECTED PASS"
     >();
   });
@@ -178,37 +180,96 @@ describe("reportLine", () => {
   });
 });
 
-describe("KNOWN_FAILURES", () => {
+describe("NO_PRO_KNOWN_FAILURES", () => {
   it("lists only the learn mode switch, owned by plan 11", () => {
-    expect(KNOWN_FAILURES.map((entry) => [entry.id, entry.owningPlan])).toEqual(
-      [["7.2-learn", "plan 11 (Learn mode)"]],
-    );
+    expect(
+      NO_PRO_KNOWN_FAILURES.map((entry) => [entry.id, entry.owningPlan]),
+    ).toEqual([["7.2-learn", "plan 11 (Learn mode)"]]);
   });
 
   it("no longer lists the labs mode switch, whose refusal the battery now expects", () => {
-    expect(scoreCheck(held("7.2-labs")).verdict).toBe("PASS");
-    expect(scoreCheck(broke("7.2-labs")).verdict).toBe("FAIL");
-  });
-
-  it("says why the learn mode switch fails, as the mode menu stands", () => {
-    expect(KNOWN_FAILURES[0]?.reason).toBe(
-      'Perplexity\'s input bar offers "Learn step by step", and comet_mode does not switch to it yet',
+    expect(scoreCheck(held("7.2-labs"), NO_PRO_KNOWN_FAILURES).verdict).toBe(
+      "PASS",
+    );
+    expect(scoreCheck(broke("7.2-labs"), NO_PRO_KNOWN_FAILURES).verdict).toBe(
+      "FAIL",
     );
   });
 
-  it("gives every entry a unique id, a reason and an owning plan", () => {
-    const ids = KNOWN_FAILURES.map((entry) => entry.id);
+  it("says why the learn mode switch fails, as the mode menu stands", () => {
+    expect(NO_PRO_KNOWN_FAILURES[0]?.reason).toBe(
+      'Perplexity\'s input bar offers "Learn step by step", and comet_mode does not switch to it yet',
+    );
+  });
+});
+
+describe("PRO_KNOWN_FAILURES", () => {
+  it("starts empty", () => {
+    expect(PRO_KNOWN_FAILURES).toEqual([]);
+  });
+});
+
+describe.each([
+  ["no-pro", NO_PRO_KNOWN_FAILURES],
+  ["Pro", PRO_KNOWN_FAILURES],
+])("the %s battery's known failures", (_battery, knownFailures) => {
+  it("give every entry a unique id, a reason and an owning plan", () => {
+    const ids = knownFailures.map((entry) => entry.id);
     expect(new Set(ids).size).toBe(ids.length);
-    for (const entry of KNOWN_FAILURES) {
+    for (const entry of knownFailures) {
       expect(entry.reason.trim()).not.toBe("");
       expect(entry.owningPlan).toMatch(/^plan \d+/);
     }
   });
 
-  it("words its reasons for the public repository", () => {
-    for (const entry of KNOWN_FAILURES) {
+  it("word their reasons for the public repository", () => {
+    for (const entry of knownFailures) {
       expect(entry.reason).not.toMatch(
         /\.work\b|research note|spec §|\bD\d+\b/,
+      );
+    }
+  });
+});
+
+describe("each battery's own known failures", () => {
+  // The batteries share check ids ([1.2], [5.1], [7.x], [9.4]), so an entry
+  // must excuse its id in its own battery alone.
+  const proListed: KnownFailure = {
+    id: "5.1",
+    reason: "the screenshot comes back empty after an agentic ask",
+    owningPlan: "plan 3 (comet_ask reliability)",
+  };
+  const proList = [proListed];
+  const noProList = [listed];
+
+  it("scores a Pro check on the Pro list as known when it fails", () => {
+    expect(scoreCheck(broke("5.1"), proList)).toMatchObject({
+      verdict: "KNOWN",
+      known: proListed,
+    });
+  });
+
+  it("scores a Pro check on the Pro list as an unexpected pass when it passes", () => {
+    expect(scoreCheck(held("5.1"), proList).verdict).toBe("UNEXPECTED PASS");
+  });
+
+  it("scores the same id as unlisted in the no-pro battery", () => {
+    expect(scoreCheck(broke("5.1"), noProList).verdict).toBe("FAIL");
+    expect(scoreCheck(held("5.1"), noProList).verdict).toBe("PASS");
+  });
+
+  it("scores an id on the no-pro list as unlisted in the Pro battery", () => {
+    expect(scoreCheck(broke("7.2-labs"), proList).verdict).toBe("FAIL");
+    expect(scoreCheck(held("7.2-labs"), proList).verdict).toBe("PASS");
+  });
+
+  it("lets no no-pro entry excuse a Pro check the Pro list does not name", () => {
+    const proIds = new Set(PRO_KNOWN_FAILURES.map((entry) => entry.id));
+    for (const entry of NO_PRO_KNOWN_FAILURES.filter(
+      (noPro) => !proIds.has(noPro.id),
+    )) {
+      expect(scoreCheck(broke(entry.id), PRO_KNOWN_FAILURES).verdict).toBe(
+        "FAIL",
       );
     }
   });

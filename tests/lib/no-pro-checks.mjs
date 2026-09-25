@@ -6,7 +6,11 @@
  * connect check and the reading of replies (`pro-checks.mjs`).
  */
 
-import { runCheck, scoreCheck } from "./battery-score.mjs";
+import {
+  NO_PRO_KNOWN_FAILURES,
+  runCheck,
+  scoreCheck,
+} from "./battery-score.mjs";
 
 /** @typedef {import("./battery-score.mjs").ProbeOutcome} ProbeOutcome */
 /** @typedef {import("./battery-score.mjs").ScoredCheck} ScoredCheck */
@@ -256,16 +260,18 @@ const AFTER_CONNECT = [
  * @param {CallTool} callTool
  */
 async function scored(check, callTool) {
-  return scoreCheck(await runCheck(check.id, () => check.probe(callTool)));
+  return scoreCheck(
+    await runCheck(check.id, () => check.probe(callTool)),
+    NO_PRO_KNOWN_FAILURES,
+  );
 }
 
 /** @param {NoProCheck} check */
 function notRun(check) {
-  return scoreCheck({
-    id: check.id,
-    held: false,
-    note: "not run: [1.2] connect failed",
-  });
+  return scoreCheck(
+    { id: check.id, held: false, note: "not run: [1.2] connect failed" },
+    NO_PRO_KNOWN_FAILURES,
+  );
 }
 
 /**

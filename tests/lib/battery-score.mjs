@@ -7,6 +7,10 @@
  * another plan owns. It is reported, with its actual note, but does not fail
  * the battery. A listed check that passes fails the battery, so the entry is
  * removed once the fix lands.
+ *
+ * Each battery has its own list, and every scoring names the list it scores
+ * against: the batteries share check ids ([1.2], [5.1], [7.x], [9.4]), and an
+ * entry excuses its id in its own battery alone.
  */
 
 /** @typedef {"PASS" | "FAIL" | "KNOWN" | "UNEXPECTED PASS"} Verdict */
@@ -19,8 +23,11 @@
 
 /** @typedef {{ id: string, verdict: Verdict, note: string, known?: KnownFailure }} ScoredCheck */
 
-/** @type {readonly KnownFailure[]} */
-export const KNOWN_FAILURES = [
+/**
+ * The no-pro battery's known failures (`tests/run-no-pro.mjs`).
+ * @type {readonly KnownFailure[]}
+ */
+export const NO_PRO_KNOWN_FAILURES = [
   {
     id: "7.2-learn",
     reason:
@@ -28,6 +35,12 @@ export const KNOWN_FAILURES = [
     owningPlan: "plan 11 (Learn mode)",
   },
 ];
+
+/**
+ * The Pro battery's known failures (`tests/run-all.mjs`).
+ * @type {readonly KnownFailure[]}
+ */
+export const PRO_KNOWN_FAILURES = [];
 
 /**
  * Runs one check's probe. A probe that throws or rejects, a timeout included,
@@ -52,10 +65,10 @@ function errorText(error) {
 
 /**
  * @param {CheckResult} result
- * @param {readonly KnownFailure[]} [knownFailures]
+ * @param {readonly KnownFailure[]} knownFailures the list of the battery the check belongs to
  * @returns {ScoredCheck}
  */
-export function scoreCheck(result, knownFailures = KNOWN_FAILURES) {
+export function scoreCheck(result, knownFailures) {
   const known = knownFailures.find((entry) => entry.id === result.id);
   const scored = {
     id: result.id,
