@@ -82,19 +82,17 @@ dir="$top/.git/review/$(git branch --show-current | tr / -)"
 base=$(git merge-base main HEAD)
 head=$(git rev-parse HEAD)
 round=$(( $(ls "$dir"/round-*.md 2>/dev/null | wc -l) + 1 ))
-# the notebook's range for this phase (skip when .work/ does not exist)
-work_head=$(git -C "$top/.work" rev-parse --short HEAD)
-work_start=$(sed -n 's/^Start: public [0-9a-f]* · work \([0-9a-f]*\).*/\1/p' "$top/.git/run/$(git branch --show-current | tr / -)/work-list.md" 2>/dev/null)
-first=$(git log --reverse --format=%cI "$base"..HEAD | head -1)
-work_base=${work_start:-$(git -C "$top/.work" rev-list -1 --before="$first" HEAD)}
+work=$(node "$top/scripts/notebook-range.mjs")   # the notebook's range for this phase
 ```
+
+`scripts/notebook-range.mjs` prints the notebook's range as `<base>..<head>`. The base is the work list's *Start* when `/run-phase` keeps a run state for the branch. Otherwise it is the last notebook commit made before the branch was created, read from the branch's reflog. It prints nothing in a clone without `.work/`: leave the *work* line out. When it fails, it names the reason (a `.work/` that is not a readable repository, a work list without a *Start* line, a branch with no notebook commit before it). Stop there and bring the message to the owner, because a brief without the notebook's range would hide the plan ticks and the spec edits from the reviewer.
 
 ```markdown
 ## Review brief
 - **Plan and phase:** `<plan path>`, `## Phase <n>: <name>` — or: no plan phase
 - **base:** <base sha>
 - **head:** <head sha>
-- **work:** <work_base>..<work_head>   (omit when .work/ does not exist)
+- **work:** <work>   (omit when the script printed nothing)
 - **PR draft:** `.git/review/<branch>/pr-body.md`
 - **Round:** <round>
 - **Previous report:** `.git/review/<branch>/round-<round-1>.md`   (round > 1 only)

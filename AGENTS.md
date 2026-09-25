@@ -73,7 +73,7 @@ A claim needs research when it is about the world outside the repository, it can
 
 ## Stack and layout
 
-TypeScript (strict, ES2022, NodeNext) compiled by `tsc` to `dist/`, one npm package, `engines` `node >=18`. `@modelcontextprotocol/sdk` for the server, `chrome-remote-interface` for CDP, Vitest with jsdom for tests. Fetch current docs with Context7 before using a specific API of any of them.
+TypeScript (strict, ES2022, NodeNext) compiled by `tsc` to `dist/`, one npm package, `engines` `node >=18`. `@modelcontextprotocol/sdk` for the server, `chrome-remote-interface` for CDP, Vitest with jsdom for tests, Biome for lint and format. Fetch current docs with Context7 before using a specific API of any of them.
 
 | Path | What |
 |---|---|
@@ -85,6 +85,7 @@ TypeScript (strict, ES2022, NodeNext) compiled by `tsc` to `dist/`, one npm pack
 | `src/upload-validator.ts` | Allowlists for paths, tab ids, domains and selectors |
 | `tests/unit/`, `tests/gates/` | Unit tests; the gate scripts' tests |
 | `tests/run-*.mjs` | The live batteries |
+| `scripts/`, `biome.json`, `tsconfig.tools.json` | The gates `check.mjs` and `preflight.mjs` over their library in `scripts/lib/`, and `notebook-range.mjs`, the notebook's range in `/review-phase`'s brief; Biome's settings; the typecheck of the tests and scripts |
 | `.githooks/`, `.claude/hooks/` | The git hooks and the Claude Code hooks |
 | `.claude/skills/`, `.claude/agents/` | `/review-plan`, `/run-phase`, `/review-phase`; `phase-builder`, `phase-reviewer` |
 
