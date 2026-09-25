@@ -8,6 +8,13 @@ import { ModeCore } from "../../src/core/mode.js";
 import { answerModeTool } from "../../src/core/mode-tool.js";
 import { wrapUntrustedPageContent } from "../../src/untrusted.js";
 import {
+  batteryPassed,
+  PRO_KNOWN_FAILURES,
+  type ScoredCheck,
+  summaryLine,
+} from "../lib/battery-score.mjs";
+import type { DebugPort, ToolReply } from "../lib/no-pro-checks.mjs";
+import {
   agentOpenedTab,
   agentStopped,
   answered,
@@ -21,12 +28,14 @@ import {
   RESEARCH_PROMPT,
   RESEARCH_WORKFLOW,
   researchWorkflowHeld,
+  runProBattery,
   selectorNotFound,
   siteTabClosed,
   switchedToSite,
   tabsKept,
   timeoutStated,
   trendingRepoNamed,
+  UPLOAD_TEST_FILE,
   wholeAnswer,
 } from "../lib/pro-checks.mjs";
 import { FakeModePage } from "../unit/fakes/fake-mode-page.js";
@@ -38,6 +47,7 @@ import {
   ok,
   type Replies,
 } from "./support/battery-replies.js";
+import { declaredTools, schemaViolations } from "./support/declared-tools.js";
 
 // The Pro checks' conditions. Each holds on the reply the check expects and
 // fails on the replies that used to pass it: a login page, an error, a
@@ -803,5 +813,472 @@ describe("RESEARCH_WORKFLOW", () => {
     expect(outcome.note).toMatch(
       / \/ search not restored: Cannot switch to search mode: no mode button found$/,
     );
+  });
+});
+
+// The Pro battery as a whole, against a stand-in server: which tools it
+// calls, with which arguments, in which order, and how it scores what
+// comes back.
+
+const LISTENING: DebugPort = { port: 9223, answers: async () => true };
+const SILENT: DebugPort = { port: 9223, answers: async () => false };
+const noWait = async () => {};
+
+const ANSWER_ASK = 60000;
+const BROWSING_ASK = 90000;
+const LONG_ASK = 120000;
+const MISSING_FILE = "/tmp/file-that-does-not-exist-xyzabc.txt";
+const MISSING_SELECTOR = "#does-not-exist-xyzabc";
+
+const ask = (prompt: string, timeout: number, more = {}) =>
+  key("comet_ask", { prompt, ...more, timeout });
+
+const CALLS = {
+  connect: key("comet_connect", {}),
+  session: ask("Reply with exactly one word: VERIFIED", ANSWER_ASK),
+  capital: ask("What is the capital of France? Reply in one word.", ANSWER_ASK),
+  remember: ask(
+    "Remember the number 9473. Reply with exactly one word: NOTED",
+    ANSWER_ASK,
+    { newChat: true },
+  ),
+  recall: ask(
+    "What number did I ask you to remember? Reply with the number only.",
+    ANSWER_ASK,
+  ),
+  rememberAgain: ask("Remember the number 9473.", ANSWER_ASK, {
+    newChat: true,
+  }),
+  recallInNewChat: ask("What number did I ask you to remember?", ANSWER_ASK, {
+    newChat: true,
+  }),
+  essay: ask("Write a 10000 word essay on the history of Rome.", 3000),
+  context: ask("What is the project name?", ANSWER_ASK, {
+    context: "Project name: Artemis",
+  }),
+  paragraphs: ask(
+    "Write three short paragraphs about the sea. Start the first with the word ALPHA, the second with the word BRAVO and the third with the word CHARLIE.",
+    ANSWER_ASK,
+  ),
+  heading: ask("Go to example.com and tell me the page heading.", BROWSING_ASK),
+  tabs: key("comet_tabs", {}),
+  agentTab: ask(
+    "Go to example.org and tell me the page heading.",
+    BROWSING_ASK,
+  ),
+  trending: ask(
+    "Go to github.com/trending, find the top-ranked repository today, and tell me its name and star count.",
+    LONG_ASK,
+  ),
+  poll: key("comet_poll", {}),
+  slowTask: ask(
+    "Go to wikipedia.org and summarize the entire featured article in extreme detail.",
+    LONG_ASK,
+  ),
+  stop: key("comet_stop", {}),
+  screenshot: key("comet_screenshot", {}),
+  visit: ask("Go to example.com.", BROWSING_ASK),
+  switchTab: key("comet_tabs", { action: "switch", domain: "example.com" }),
+  closeTab: key("comet_tabs", { action: "close", domain: "example.com" }),
+  readMode: key("comet_mode", {}),
+  research: key("comet_mode", { mode: "research" }),
+  labs: key("comet_mode", { mode: "labs" }),
+  learn: key("comet_mode", { mode: "learn" }),
+  search: key("comet_mode", { mode: "search" }),
+  researchAsk: ASK,
+  wrongSelector: key("comet_upload", {
+    filePath: UPLOAD_TEST_FILE,
+    selector: MISSING_SELECTOR,
+  }),
+  missingFile: key("comet_upload", { filePath: MISSING_FILE }),
+  emptyPrompt: key("comet_ask", { prompt: "" }),
+  invalidMode: key("comet_mode", { mode: "invalid_mode_xyz" }),
+};
+
+const IMAGE: ToolReply = {
+  content: [{ type: "image", data: "iVBORw0KGgo", mimeType: "image/png" }],
+};
+const NO_TABS = ok("No browsing tabs open");
+const COMPLETED = ok(
+  `Status: COMPLETED (0s ago)\n\n${wrapUntrustedPageContent("octo/widgets")}`,
+);
+
+/**
+ * Comet as the Pro runs of 2026-09-24 found it, each reply in the shape
+ * the server gives today: the checks the known-failures list names fail,
+ * and every other check holds.
+ */
+const TODAY: Replies = {
+  [CALLS.connect]: ok("Comet already running with debug port: Chrome/152"),
+  [CALLS.session]: STILL_IN_PROGRESS,
+  [CALLS.capital]: STILL_IN_PROGRESS,
+  [CALLS.remember]: STILL_IN_PROGRESS,
+  [CALLS.recall]: answer("NOTED"),
+  [CALLS.rememberAgain]: answer("Got it: 9473."),
+  [CALLS.recallInNewChat]: answer("You have not asked me to remember one."),
+  [CALLS.essay]: answer("Rome was founded, according to legend, in 753 BC."),
+  [CALLS.context]: error(
+    "Error: Prompt text not found in input - typing may have failed",
+  ),
+  [CALLS.paragraphs]: answer("CHARLIE closes the three paragraphs."),
+  [CALLS.heading]: answer("I can certainly help you with an overview."),
+  [CALLS.tabs]: [NO_TABS, NO_TABS, NO_TABS],
+  [CALLS.agentTab]: answer("The heading of example.org is Example Domain."),
+  [CALLS.trending]: answer("The heading of example.org is Example Domain."),
+  [CALLS.poll]: [COMPLETED, answer("The featured article is about")],
+  [CALLS.slowTask]: STILL_IN_PROGRESS,
+  [CALLS.stop]: ok("Agent stopped"),
+  [CALLS.screenshot]: IMAGE,
+  [CALLS.visit]: [answer("Done."), answer("Done.")],
+  [CALLS.switchTab]: error("No tab found for the specified domain"),
+  [CALLS.closeTab]: error(
+    "Cannot close - this is the only browsing tab. Comet needs at least one external tab open.",
+  ),
+  [CALLS.readMode]: [
+    ok(modeReport("search")),
+    ok(modeReport("research")),
+    ok(modeReport("search")),
+  ],
+  [CALLS.research]: ok("Switched to research mode"),
+  [CALLS.labs]: error(
+    "Cannot switch to labs mode: not offered by Perplexity's current input bar",
+  ),
+  [CALLS.learn]: error("Cannot switch to learn mode: not supported yet"),
+  [CALLS.search]: [
+    ok("Switched to search mode"),
+    ok("Switched to search mode"),
+  ],
+  [CALLS.researchAsk]: ok(ANSWER),
+  [CALLS.wrongSelector]: error(
+    `No element found matching selector: ${MISSING_SELECTOR}`,
+  ),
+  [CALLS.missingFile]: error(`Error: File not found: ${MISSING_FILE}`),
+  [CALLS.emptyPrompt]: ok("Error: prompt cannot be empty"),
+  [CALLS.invalidMode]: error(
+    "Invalid mode: invalid_mode_xyz. Use: search, research, labs, learn",
+  ),
+};
+
+const AGENT_TABS = tabListing(AGENT_TAB);
+
+/** Comet once every fix lands: every check's condition holds. */
+const FIXED: Replies = {
+  ...TODAY,
+  [CALLS.session]: answer("VERIFIED"),
+  [CALLS.capital]: answer("Paris"),
+  [CALLS.remember]: answer("NOTED"),
+  [CALLS.recall]: answer("9473"),
+  [CALLS.essay]: MAY_BE_INCOMPLETE,
+  [CALLS.context]: answer("The project is Artemis."),
+  [CALLS.paragraphs]: answer("ALPHA one.\n\nBRAVO two.\n\nCHARLIE three."),
+  [CALLS.heading]: answer("Example Domain"),
+  [CALLS.tabs]: [NO_TABS, AGENT_TABS, AGENT_TABS],
+  [CALLS.trending]: answer("octo/widgets, with 12,345 stars"),
+  [CALLS.poll]: [COMPLETED, ok("Status: STOPPED")],
+  [CALLS.switchTab]: ok("Switched to example.com (https://example.com/)"),
+  [CALLS.learn]: ok("Switched to learn mode"),
+};
+
+const ORDER = [
+  "1.2",
+  "1.5",
+  "2.1",
+  "2.2",
+  "2.3",
+  "2.4",
+  "2.5",
+  "2.6-whole-answer",
+  "3.1",
+  "3.2-agent-tab",
+  "3.3-tabs-kept",
+  "3.4",
+  "4.1",
+  "4.3",
+  "4.3b",
+  "5.1",
+  "5.2",
+  "6.1",
+  "6.3",
+  "6.4",
+  "7.1",
+  "7.2-research",
+  "7.2-labs",
+  "7.2-learn",
+  "7.2-search",
+  "7.4-research-workflow",
+  "8.3",
+  "8.4",
+  "9.2",
+  "9.4",
+];
+
+const byId = (checks: readonly ScoredCheck[], id: string) =>
+  checks.find((check) => check.id === id);
+
+const verdicts = (checks: readonly ScoredCheck[]) =>
+  Object.fromEntries(checks.map((check) => [check.id, check.verdict]));
+
+describe("runProBattery", () => {
+  it("scores today's Comet as passed and known, and passes", async () => {
+    const checks = await runProBattery(
+      fakeServer(TODAY).callTool,
+      LISTENING,
+      undefined,
+      noWait,
+    );
+    expect(summaryLine(checks)).toBe("Results: 17 passed, 0 failed, 13 known");
+    expect(batteryPassed(checks)).toBe(true);
+    expect(
+      checks
+        .filter((check) => check.verdict === "KNOWN")
+        .map((check) => check.id),
+    ).toEqual(PRO_KNOWN_FAILURES.map((entry) => entry.id));
+  });
+
+  it("scores every known failure as an unexpected pass once its fix lands", async () => {
+    const checks = await runProBattery(
+      fakeServer(FIXED).callTool,
+      LISTENING,
+      undefined,
+      noWait,
+    );
+    const listed = new Set(PRO_KNOWN_FAILURES.map((entry) => entry.id));
+    for (const check of checks) {
+      expect([check.id, check.verdict]).toEqual([
+        check.id,
+        listed.has(check.id) ? "UNEXPECTED PASS" : "PASS",
+      ]);
+    }
+    expect(batteryPassed(checks)).toBe(false);
+  });
+
+  it("reports each check as it is scored, in order", async () => {
+    const reported: string[] = [];
+    await runProBattery(
+      fakeServer(TODAY).callTool,
+      LISTENING,
+      (check) => reported.push(check.id),
+      noWait,
+    );
+    expect(reported).toEqual(ORDER);
+  });
+
+  it("makes these tool calls, in this order", async () => {
+    const server = fakeServer(TODAY);
+    await runProBattery(server.callTool, LISTENING, undefined, noWait);
+    expect(server.calls).toEqual([
+      CALLS.connect,
+      CALLS.session,
+      CALLS.capital,
+      CALLS.remember,
+      CALLS.recall,
+      CALLS.rememberAgain,
+      CALLS.recallInNewChat,
+      CALLS.essay,
+      CALLS.context,
+      CALLS.paragraphs,
+      CALLS.heading,
+      CALLS.tabs,
+      CALLS.agentTab,
+      CALLS.tabs,
+      CALLS.trending,
+      CALLS.poll,
+      CALLS.slowTask,
+      CALLS.stop,
+      CALLS.poll,
+      CALLS.screenshot,
+      CALLS.visit,
+      CALLS.screenshot,
+      CALLS.tabs,
+      CALLS.visit,
+      CALLS.switchTab,
+      CALLS.closeTab,
+      CALLS.readMode,
+      CALLS.research,
+      CALLS.labs,
+      CALLS.learn,
+      CALLS.search,
+      CALLS.research,
+      CALLS.researchAsk,
+      CALLS.readMode,
+      CALLS.search,
+      CALLS.wrongSelector,
+      CALLS.missingFile,
+      CALLS.emptyPrompt,
+      CALLS.invalidMode,
+      CALLS.readMode,
+    ]);
+  });
+
+  it("passes no tool a parameter its input schema does not declare, and no value it does not allow but [9.4]'s", async () => {
+    const tools = declaredTools();
+    for (const replies of [TODAY, FIXED]) {
+      const server = fakeServer(replies);
+      await runProBattery(server.callTool, LISTENING, undefined, noWait);
+      const violations = server.calls.flatMap((call) => {
+        const space = call.indexOf(" ");
+        return schemaViolations(
+          tools,
+          call.slice(0, space),
+          JSON.parse(call.slice(space + 1)),
+        );
+      });
+      // [9.4] sends a mode the schema does not allow, to see it refused.
+      expect(violations).toEqual([
+        "comet_mode's mode does not allow invalid_mode_xyz",
+      ]);
+    }
+  });
+
+  it("judges each check on its own condition, so a reply that used to pass fails", async () => {
+    const checks = await runProBattery(
+      fakeServer({
+        ...FIXED,
+        [CALLS.session]: LOGIN_PAGE,
+        [CALLS.recall]: answer("NOTED\n\n9473"),
+        [CALLS.recallInNewChat]: error("Error: Not connected to Comet"),
+        [CALLS.poll]: [ok("Status: WORKING"), answer("The article")],
+        [CALLS.stop]: ok("No active agent to stop"),
+        [CALLS.closeTab]: error("No tab found for the specified domain"),
+        [CALLS.wrongSelector]: ok("File uploaded successfully"),
+        [CALLS.missingFile]: error("Error: Not connected to Comet"),
+        [CALLS.emptyPrompt]: answer("How can I help you today?"),
+      }).callTool,
+      LISTENING,
+      undefined,
+      noWait,
+    );
+    expect(verdicts(checks)).toMatchObject({
+      "1.5": "KNOWN",
+      "2.2": "KNOWN",
+      "2.3": "FAIL",
+      "4.1": "FAIL",
+      "4.3": "FAIL",
+      "4.3b": "KNOWN",
+      "6.4": "FAIL",
+      "8.3": "FAIL",
+      "8.4": "FAIL",
+      "9.2": "FAIL",
+    });
+  });
+
+  it("scores [7.2-learn] with the no-pro battery's predicate, as known", async () => {
+    const checks = await runProBattery(
+      fakeServer(TODAY).callTool,
+      LISTENING,
+      undefined,
+      noWait,
+    );
+    expect(byId(checks, "7.2-learn")).toMatchObject({
+      verdict: "KNOWN",
+      note: "Cannot switch to learn mode: not supported yet",
+    });
+  });
+
+  it("waits before stopping the slow task, and again before polling", async () => {
+    const server = fakeServer(TODAY);
+    const waits: Array<[number, string]> = [];
+    await runProBattery(server.callTool, LISTENING, undefined, async (ms) => {
+      waits.push([ms, server.calls.at(-1) ?? ""]);
+    });
+    expect(waits).toEqual([
+      [3000, CALLS.slowTask],
+      [1000, CALLS.stop],
+    ]);
+  });
+
+  it("fails [4.3] and [4.3b] with the stop's error when the stop throws, and still ends the slow task", async () => {
+    let slowTaskEnded = false;
+    const server = fakeServer({
+      ...TODAY,
+      [CALLS.stop]: new Error("TIMEOUT after 10000ms"),
+    });
+    const callTool: typeof server.callTool = async (name, args, limit) => {
+      const reply = await server.callTool(name, args, limit);
+      if (key(name, args) === CALLS.slowTask) slowTaskEnded = true;
+      return reply;
+    };
+    const checks = await runProBattery(callTool, LISTENING, undefined, noWait);
+    expect(byId(checks, "4.3")).toMatchObject({
+      verdict: "FAIL",
+      note: "TIMEOUT after 10000ms",
+    });
+    expect(byId(checks, "4.3b")).toMatchObject({
+      verdict: "KNOWN",
+      note: "TIMEOUT after 10000ms",
+    });
+    expect(slowTaskEnded).toBe(true);
+    expect(server.calls.filter((call) => call === CALLS.poll)).toHaveLength(1);
+  });
+
+  it("fails [5.1] and [5.2] on an error screenshot, with the no-pro battery's condition", async () => {
+    const checks = await runProBattery(
+      fakeServer({
+        ...TODAY,
+        [CALLS.screenshot]: error(
+          `Error: Screenshot failed: ${"the page did not answer. ".repeat(8)}`,
+        ),
+      }).callTool,
+      LISTENING,
+      undefined,
+      noWait,
+    );
+    expect(byId(checks, "5.1")?.verdict).toBe("FAIL");
+    expect(byId(checks, "5.2")?.verdict).toBe("FAIL");
+  });
+
+  it("fails a check whose call throws, with the error as its note", async () => {
+    const checks = await runProBattery(
+      fakeServer({
+        ...TODAY,
+        [CALLS.screenshot]: new Error("MCP error -32000: Connection closed"),
+      }).callTool,
+      LISTENING,
+      undefined,
+      noWait,
+    );
+    expect(byId(checks, "5.1")).toMatchObject({
+      verdict: "FAIL",
+      note: "MCP error -32000: Connection closed",
+    });
+  });
+
+  describe("when connect fails", () => {
+    it("scores [1.2] alone, and calls no other tool", async () => {
+      const server = fakeServer({
+        [CALLS.connect]: error("Error: Timeout waiting for Comet"),
+      });
+      const checks = await runProBattery(
+        server.callTool,
+        LISTENING,
+        undefined,
+        noWait,
+      );
+      expect(checks).toEqual([
+        expect.objectContaining({ id: "1.2", verdict: "FAIL" }),
+      ]);
+      expect(server.calls).toEqual([CALLS.connect]);
+      expect(batteryPassed(checks)).toBe(false);
+    });
+  });
+
+  describe("when Comet does not answer on its debug port", () => {
+    it("fails at [1.2] naming the port, without calling any tool", async () => {
+      const server = fakeServer({});
+      const checks = await runProBattery(
+        server.callTool,
+        SILENT,
+        undefined,
+        noWait,
+      );
+      expect(checks).toEqual([
+        {
+          id: "1.2",
+          verdict: "FAIL",
+          note: "Comet is not running with its debug port on 9223",
+        },
+      ]);
+      expect(server.calls).toEqual([]);
+    });
   });
 });

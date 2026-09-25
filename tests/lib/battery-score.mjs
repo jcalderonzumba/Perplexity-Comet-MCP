@@ -23,24 +23,100 @@
 
 /** @typedef {{ id: string, verdict: Verdict, note: string, known?: KnownFailure }} ScoredCheck */
 
+const ASK_RELIABILITY = "plan 3 (comet_ask reliability)";
+const AGENTIC_BROWSING = "plan 12 (Agentic browsing)";
+
+/**
+ * Both batteries switch to the `learn` mode with the same predicate, and
+ * fail it for the same reason.
+ * @type {KnownFailure}
+ */
+const LEARN_MODE_NOT_SWITCHED = {
+  id: "7.2-learn",
+  reason:
+    'Perplexity\'s input bar offers "Learn step by step", and comet_mode does not switch to it yet',
+  owningPlan: "plan 11 (Learn mode)",
+};
+
 /**
  * The no-pro battery's known failures (`tests/run-no-pro.mjs`).
  * @type {readonly KnownFailure[]}
  */
-export const NO_PRO_KNOWN_FAILURES = [
-  {
-    id: "7.2-learn",
-    reason:
-      'Perplexity\'s input bar offers "Learn step by step", and comet_mode does not switch to it yet',
-    owningPlan: "plan 11 (Learn mode)",
-  },
-];
+export const NO_PRO_KNOWN_FAILURES = [LEARN_MODE_NOT_SWITCHED];
+
+/** One-word answers, which the ask does not read as complete. */
+const SHORT_ANSWER_NOT_READ =
+  "comet_ask does not read a one-word answer as complete, so it runs to its timeout and says the task may still be in progress";
 
 /**
- * The Pro battery's known failures (`tests/run-all.mjs`).
+ * The Pro battery's known failures (`tests/run-all.mjs`), in the order its
+ * checks run.
  * @type {readonly KnownFailure[]}
  */
-export const PRO_KNOWN_FAILURES = [];
+export const PRO_KNOWN_FAILURES = [
+  { id: "1.5", reason: SHORT_ANSWER_NOT_READ, owningPlan: ASK_RELIABILITY },
+  { id: "2.1", reason: SHORT_ANSWER_NOT_READ, owningPlan: ASK_RELIABILITY },
+  {
+    id: "2.2",
+    reason:
+      "the follow-up's one-word first turn runs to its timeout, and the follow-up can return an answer that is not the new turn's",
+    owningPlan: ASK_RELIABILITY,
+  },
+  {
+    id: "2.4",
+    reason:
+      "when comet_ask runs out of time, it returns the page's partial text as if it were the answer, or says only that the task may still be in progress, never that the answer may be incomplete",
+    owningPlan: ASK_RELIABILITY,
+  },
+  {
+    id: "2.5",
+    reason:
+      'comet_ask can fail to type the prompt, and then reports "Prompt text not found in input"',
+    owningPlan: ASK_RELIABILITY,
+  },
+  {
+    id: "2.6-whole-answer",
+    reason:
+      "comet_ask may return only the end of a multi-paragraph answer, as an earlier release did, and no run has shown it whole yet",
+    owningPlan: ASK_RELIABILITY,
+  },
+  {
+    id: "3.1",
+    reason: "Comet answers a prompt that names a site without opening the site",
+    owningPlan: AGENTIC_BROWSING,
+  },
+  {
+    id: "3.2-agent-tab",
+    reason:
+      "Comet answers a prompt that names a site without opening a tab for it",
+    owningPlan: AGENTIC_BROWSING,
+  },
+  {
+    id: "3.3-tabs-kept",
+    reason:
+      "the check needs the agent to open a tab, and Comet answers without opening one",
+    owningPlan: AGENTIC_BROWSING,
+  },
+  {
+    id: "3.4",
+    reason:
+      "Comet answers the multi-step browsing task without browsing, and the ask can return the previous question's answer",
+    owningPlan: AGENTIC_BROWSING,
+  },
+  {
+    id: "4.3b",
+    reason:
+      "after comet_stop, comet_poll returns the stopped task's page text instead of reporting it stopped",
+    owningPlan: ASK_RELIABILITY,
+  },
+  {
+    id: "6.3",
+    reason:
+      "no tab is found for the site, because the agent answered without opening one",
+    owningPlan: AGENTIC_BROWSING,
+  },
+  LEARN_MODE_NOT_SWITCHED,
+];
 
 /**
  * Runs one check's probe. A probe that throws or rejects, a timeout included,

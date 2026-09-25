@@ -29,8 +29,15 @@ export const modeReport = (current: string) =>
     "",
   ].join("\n");
 
-/** What a stand-in server answers to each call: a reply, or an error it throws. */
-export type Replies = Record<string, ToolReply | Error>;
+/** What a stand-in server answers to one call: a reply, or an error it throws. */
+type Answer = ToolReply | Error;
+
+/**
+ * What a stand-in server answers to each call: an answer to every call with
+ * that key, or a list of them, answered in turn, for a call made more than
+ * once.
+ */
+export type Replies = Record<string, Answer | readonly Answer[]>;
 
 /** The key of one tool call in `Replies`, and in the calls a server records. */
 export const key = (name: string, args: Record<string, unknown>) =>
@@ -40,8 +47,21 @@ export const key = (name: string, args: Record<string, unknown>) =>
 export type Breakdown = { readonly after: string; readonly error: Error };
 
 /**
+ * The answer to the latest of `made`, the calls made so far with one key.
+ * @returns undefined when there is none: no entry, or a list already used up.
+ */
+function answerTo(
+  entry: Answer | readonly Answer[] | undefined,
+  made: readonly string[],
+): Answer | undefined {
+  if (Array.isArray(entry)) return entry[made.length - 1];
+  return entry as Answer | undefined;
+}
+
+/**
  * A stand-in for the server: answers from `replies` and records each call's
- * key in `calls`, in order. A call with no reply rejects, naming it.
+ * key in `calls`, in order. A call with no reply, or none left, rejects,
+ * naming it.
  */
 export function fakeServer(replies: Replies, breakdown?: Breakdown) {
   const calls: string[] = [];
@@ -51,7 +71,10 @@ export function fakeServer(replies: Replies, breakdown?: Breakdown) {
       breakdown !== undefined && calls.includes(breakdown.after);
     calls.push(call);
     if (brokenDown) throw breakdown.error;
-    const reply = replies[call];
+    const reply = answerTo(
+      replies[call],
+      calls.filter((c) => c === call),
+    );
     if (reply === undefined) throw new Error(`unexpected call ${call}`);
     if (reply instanceof Error) throw reply;
     return reply;

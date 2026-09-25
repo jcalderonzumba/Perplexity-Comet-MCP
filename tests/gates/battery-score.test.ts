@@ -204,8 +204,33 @@ describe("NO_PRO_KNOWN_FAILURES", () => {
 });
 
 describe("PRO_KNOWN_FAILURES", () => {
-  it("starts empty", () => {
-    expect(PRO_KNOWN_FAILURES).toEqual([]);
+  const ASK_RELIABILITY = "plan 3 (comet_ask reliability)";
+  const AGENTIC_BROWSING = "plan 12 (Agentic browsing)";
+
+  it("lists the checks the Pro runs of 2026-09-24 failed, and the new ones, each with its owner", () => {
+    expect(
+      PRO_KNOWN_FAILURES.map((entry) => [entry.id, entry.owningPlan]),
+    ).toEqual([
+      ["1.5", ASK_RELIABILITY],
+      ["2.1", ASK_RELIABILITY],
+      ["2.2", ASK_RELIABILITY],
+      ["2.4", ASK_RELIABILITY],
+      ["2.5", ASK_RELIABILITY],
+      ["2.6-whole-answer", ASK_RELIABILITY],
+      ["3.1", AGENTIC_BROWSING],
+      ["3.2-agent-tab", AGENTIC_BROWSING],
+      ["3.3-tabs-kept", AGENTIC_BROWSING],
+      ["3.4", AGENTIC_BROWSING],
+      ["4.3b", ASK_RELIABILITY],
+      ["6.3", AGENTIC_BROWSING],
+      ["7.2-learn", "plan 11 (Learn mode)"],
+    ]);
+  });
+
+  it("gives [7.2-learn] the no-pro list's entry, as both batteries judge it alike", () => {
+    expect(
+      PRO_KNOWN_FAILURES.find((entry) => entry.id === "7.2-learn"),
+    ).toEqual(NO_PRO_KNOWN_FAILURES[0]);
   });
 });
 

@@ -1,23 +1,35 @@
 /**
- * The Pro battery's checks that have a condition of their own, in the shape
- * of the no-pro checks: which tools each calls, and the condition over the
- * replies that decides whether it held. The Pro battery spends Perplexity
+ * The Pro battery's checks, in the shape of the no-pro checks: which tools
+ * each calls, and the condition over the replies that decides whether it
+ * held. Every condition can fail. The battery script supplies the server
+ * connection and the printing; scoring is `battery-score.mjs`'s, against
+ * the Pro battery's own known failures. The Pro battery spends Perplexity
  * Pro queries, so it runs by hand; these conditions are tested without it.
+ * The checks both batteries run are the no-pro battery's.
  */
 
-import { runCheck } from "./battery-score.mjs";
+import { PRO_KNOWN_FAILURES, runCheck, scoreCheck } from "./battery-score.mjs";
 import {
+  connectCheck,
   currentMode,
   excerpt,
+  INVALID_MODE_REJECTED,
+  MODE_REPORTED,
+  MODE_SWITCHES,
   replyText,
+  SCREENSHOT_TAKEN,
+  singleCall,
   succeeded,
   switchedTo,
+  TABS_LISTED,
 } from "./no-pro-checks.mjs";
 
 /** @typedef {import("./battery-score.mjs").ProbeOutcome} ProbeOutcome */
 /** @typedef {import("./no-pro-checks.mjs").CallTool} CallTool */
 /** @typedef {import("./no-pro-checks.mjs").NoProCheck} Check */
 /** @typedef {import("./no-pro-checks.mjs").ToolReply} ToolReply */
+/** @typedef {import("./no-pro-checks.mjs").DebugPort} DebugPort */
+/** @typedef {import("./battery-score.mjs").ScoredCheck} ScoredCheck */
 
 /**
  * The replies of the research workflow's three calls: `comet_mode research`,
@@ -36,7 +48,7 @@ const MAY_BE_INCOMPLETE = /\bmay be incomplete\b/i;
 const NAMES_POLL = /\bcomet_poll\b/;
 
 /** A timed-out ask must return well within this, although it asked for 3 s. */
-export const TIMEOUT_BOUND_MS = 8000;
+const TIMEOUT_BOUND_MS = 8000;
 
 /** The words the first turn of [2.2] answers with and the follow-up asks for. */
 const NOTED = "NOTED";
@@ -46,7 +58,7 @@ const REMEMBERED_NUMBER = "9473";
 const PARAGRAPH_OPENERS = ["ALPHA", "BRAVO", "CHARLIE"];
 
 /** The site the agent is asked to open in [3.2-agent-tab]. */
-export const AGENT_SITE = "example.org";
+const AGENT_SITE = "example.org";
 
 /** A repository's `owner/name`, and a star count near the word `star`. */
 const REPOSITORY = /\b[\w.-]+\/[\w.-]+\b/;
@@ -224,14 +236,21 @@ export function agentOpenedTab({ before, after }) {
  * @param {TabListings} listings
  */
 export function tabsKept(listings) {
-  if (!agentOpenedTab(listings)) return false;
-  const remaining = listedAddresses(listings.after);
-  return listedAddresses(listings.before).every((address) => {
+  return agentOpenedTab(listings) && tabsGone(listings) === 0;
+}
+
+/**
+ * How many tabs listed before the ask are not listed after it at the same
+ * address.
+ * @param {TabListings} listings
+ */
+function tabsGone({ before, after }) {
+  const remaining = listedAddresses(after);
+  return listedAddresses(before).filter((address) => {
     const index = remaining.indexOf(address);
-    if (index < 0) return false;
-    remaining.splice(index, 1);
-    return true;
-  });
+    if (index >= 0) remaining.splice(index, 1);
+    return index < 0;
+  }).length;
 }
 
 /**
@@ -433,3 +452,424 @@ export const RESEARCH_WORKFLOW = {
     };
   },
 };
+
+// ─── The battery ───────────────────────────────────────────────────────────
+
+/** The file the upload checks send; the battery script writes it first. */
+export const UPLOAD_TEST_FILE = "/tmp/comet-test-upload.txt";
+const MISSING_FILE = "/tmp/file-that-does-not-exist-xyzabc.txt";
+const MISSING_SELECTOR = "#does-not-exist-xyzabc";
+
+/** The site the tab checks visit, switch to and close. */
+const VISITED_SITE = "example.com";
+
+/**
+ * How long the server may take over an ask (its `timeout`), and how long
+ * the battery waits for the call: longer, so that a slow answer is judged
+ * on the server's own result, not on the battery giving up first.
+ * @typedef {{ timeout: number, callLimit: number }} AskLimits
+ */
+
+/** @type {AskLimits} */
+const ANSWER = { timeout: 60000, callLimit: 75000 };
+/** @type {AskLimits} */
+const BROWSING = { timeout: 90000, callLimit: 105000 };
+/** @type {AskLimits} */
+const LONG_TASK = { timeout: 120000, callLimit: 135000 };
+/** [2.4]'s ask: far too short for its essay. */
+/** @type {AskLimits} */
+const RUNS_OUT = { timeout: 3000, callLimit: 10000 };
+
+const TOOL_CALL_MS = 10000;
+const UPLOAD_CALL_MS = 15000;
+const EMPTY_PROMPT_CALL_MS = 30000;
+
+/** How long [4.3] lets the slow task start, and [4.3b] lets the stop settle. */
+const STOP_AFTER_MS = 3000;
+const POLL_AFTER_MS = 1000;
+
+/** How much of an ask's reply a check's note shows. */
+const ANSWER_NOTE_LENGTH = 160;
+
+/**
+ * Asks within the limits.
+ * @param {CallTool} callTool
+ * @param {AskLimits} limits
+ * @param {Record<string, unknown>} args
+ */
+function ask(callTool, limits, args) {
+  return callTool(
+    "comet_ask",
+    { ...args, timeout: limits.timeout },
+    limits.callLimit,
+  );
+}
+
+/**
+ * A check's outcome: the predicate over the reply, and the reply's start.
+ * @param {ToolReply} reply
+ * @param {(reply: ToolReply) => boolean} predicate
+ * @returns {ProbeOutcome}
+ */
+function judged(reply, predicate) {
+  return { held: predicate(reply), note: excerpt(reply, ANSWER_NOTE_LENGTH) };
+}
+
+/**
+ * A check of one ask, judged on its answer.
+ * @param {string} id
+ * @param {AskLimits} limits
+ * @param {Record<string, unknown>} args
+ * @param {(reply: ToolReply) => boolean} predicate
+ * @returns {Check}
+ */
+function askCheck(id, limits, args, predicate) {
+  return singleCall(
+    id,
+    "comet_ask",
+    { ...args, timeout: limits.timeout },
+    limits.callLimit,
+    (reply) => judged(reply, predicate),
+  );
+}
+
+/**
+ * A check of one call to a tool other than `comet_ask`.
+ * @param {string} id
+ * @param {string} tool
+ * @param {Record<string, unknown>} args
+ * @param {number} timeoutMs
+ * @param {(reply: ToolReply) => boolean} predicate
+ * @returns {Check}
+ */
+function toolCheck(id, tool, args, timeoutMs, predicate) {
+  return singleCall(id, tool, args, timeoutMs, (reply) =>
+    judged(reply, predicate),
+  );
+}
+
+/**
+ * Runs a scenario once, for the first check that needs it; the checks that
+ * judge the same calls share its outcome, or its error.
+ * @template T
+ * @param {(callTool: CallTool) => Promise<T>} scenario
+ * @returns {(callTool: CallTool) => Promise<T>}
+ */
+function shared(scenario) {
+  /** @type {Promise<T> | undefined} */
+  let outcome;
+  return (callTool) => {
+    outcome ??= scenario(callTool);
+    return outcome;
+  };
+}
+
+/**
+ * [2.2]: a one-word first turn in a new chat, then a follow-up in the same
+ * chat whose answer is not the first turn's. It also shows the follow-up
+ * returns the new turn's answer.
+ * @type {Check}
+ */
+const FOLLOW_UP = {
+  id: "2.2",
+  probe: async (callTool) => {
+    const first = await ask(callTool, ANSWER, {
+      prompt: `Remember the number ${REMEMBERED_NUMBER}. Reply with exactly one word: ${NOTED}`,
+      newChat: true,
+    });
+    const followUp = await ask(callTool, ANSWER, {
+      prompt:
+        "What number did I ask you to remember? Reply with the number only.",
+    });
+    return {
+      held: followUpAnswered({ first, followUp }),
+      note: `${excerpt(first, ANSWER_NOTE_LENGTH)} / then: ${excerpt(followUp, ANSWER_NOTE_LENGTH)}`,
+    };
+  },
+};
+
+/**
+ * [2.3]: a number given in one new chat is unknown in the next.
+ * @type {Check}
+ */
+const CONTEXT_RESET = {
+  id: "2.3",
+  probe: async (callTool) => {
+    const first = await ask(callTool, ANSWER, {
+      prompt: `Remember the number ${REMEMBERED_NUMBER}.`,
+      newChat: true,
+    });
+    const fresh = await ask(callTool, ANSWER, {
+      prompt: "What number did I ask you to remember?",
+      newChat: true,
+    });
+    return {
+      held: contextReset({ first, fresh }),
+      note: excerpt(fresh, ANSWER_NOTE_LENGTH),
+    };
+  },
+};
+
+/**
+ * [2.4]: an ask given 3 s for a long essay returns in time and says its
+ * answer may be incomplete.
+ * @type {Check}
+ */
+const TIMEOUT_STATED = {
+  id: "2.4",
+  probe: async (callTool) => {
+    const start = Date.now();
+    const reply = await ask(callTool, RUNS_OUT, {
+      prompt: "Write a 10000 word essay on the history of Rome.",
+    });
+    const elapsedMs = Date.now() - start;
+    return {
+      held: timeoutStated({ reply, elapsedMs }),
+      note: `returned in ${elapsedMs}ms: ${excerpt(reply, ANSWER_NOTE_LENGTH)}`,
+    };
+  },
+};
+
+/**
+ * The tabs listed before and after an ask that sends the agent to a site.
+ * @param {CallTool} callTool
+ * @returns {Promise<TabListings>}
+ */
+async function listTabsAroundAgentAsk(callTool) {
+  const before = await callTool("comet_tabs", {}, TOOL_CALL_MS);
+  await ask(callTool, BROWSING, {
+    prompt: `Go to ${AGENT_SITE} and tell me the page heading.`,
+  });
+  const after = await callTool("comet_tabs", {}, TOOL_CALL_MS);
+  return { before, after };
+}
+
+/**
+ * What the listings show, without the addresses of tabs the user opened.
+ * @param {TabListings} listings
+ */
+function tabsNote(listings) {
+  return `${AGENT_SITE} tabs: ${tabsOnSite(listings.before, AGENT_SITE)} before the ask, ${tabsOnSite(listings.after, AGENT_SITE)} after; tabs gone: ${tabsGone(listings)} of ${listedAddresses(listings.before).length}`;
+}
+
+/**
+ * The replies of the stop and the poll after it.
+ * @typedef {{ stop: ToolReply, poll: ToolReply }} StopReplies
+ */
+
+/**
+ * Starts a slow agentic task, stops it, and polls. The task's own call is
+ * waited for before anything else runs.
+ * @param {CallTool} callTool
+ * @param {(ms: number) => Promise<void>} wait
+ * @returns {Promise<StopReplies>}
+ */
+async function stopSlowTask(callTool, wait) {
+  const slowTask = ask(callTool, LONG_TASK, {
+    prompt:
+      "Go to wikipedia.org and summarize the entire featured article in extreme detail.",
+  }).catch(() => undefined);
+  try {
+    await wait(STOP_AFTER_MS);
+    const stop = await callTool("comet_stop", {}, TOOL_CALL_MS);
+    await wait(POLL_AFTER_MS);
+    const poll = await callTool("comet_poll", {}, TOOL_CALL_MS);
+    return { stop, poll };
+  } finally {
+    await slowTask;
+  }
+}
+
+/**
+ * [5.2]: a screenshot after the agent visits a site.
+ * @type {Check}
+ */
+const SCREENSHOT_AFTER_VISIT = {
+  id: "5.2",
+  probe: async (callTool) => {
+    await ask(callTool, BROWSING, { prompt: `Go to ${VISITED_SITE}.` });
+    return SCREENSHOT_TAKEN.probe(callTool);
+  },
+};
+
+/**
+ * [6.3]: after the agent visits a site, `comet_tabs` switches to its tab.
+ * @type {Check}
+ */
+const SITE_TAB_SWITCHED = {
+  id: "6.3",
+  probe: async (callTool) => {
+    await ask(callTool, BROWSING, { prompt: `Go to ${VISITED_SITE}.` });
+    const reply = await callTool(
+      "comet_tabs",
+      { action: "switch", domain: VISITED_SITE },
+      TOOL_CALL_MS,
+    );
+    return judged(reply, (switched) => switchedToSite(switched, VISITED_SITE));
+  },
+};
+
+/**
+ * The checks after connect, in the order they run. The checks that judge
+ * the same calls share them, so each battery run builds its own list.
+ * @param {(ms: number) => Promise<void>} wait
+ * @returns {readonly Check[]}
+ */
+function afterConnect(wait) {
+  const browsed = shared(listTabsAroundAgentAsk);
+  const stopped = shared((callTool) => stopSlowTask(callTool, wait));
+  return [
+    askCheck(
+      "1.5",
+      ANSWER,
+      { prompt: "Reply with exactly one word: VERIFIED" },
+      (reply) => answerNames(reply, "VERIFIED"),
+    ),
+    askCheck(
+      "2.1",
+      ANSWER,
+      { prompt: "What is the capital of France? Reply in one word." },
+      (reply) => answerNames(reply, "Paris"),
+    ),
+    FOLLOW_UP,
+    CONTEXT_RESET,
+    TIMEOUT_STATED,
+    askCheck(
+      "2.5",
+      ANSWER,
+      {
+        prompt: "What is the project name?",
+        context: "Project name: Artemis",
+      },
+      (reply) => answerNames(reply, "Artemis"),
+    ),
+    askCheck(
+      "2.6-whole-answer",
+      ANSWER,
+      {
+        prompt: `Write three short paragraphs about the sea. Start the first with the word ${PARAGRAPH_OPENERS[0]}, the second with the word ${PARAGRAPH_OPENERS[1]} and the third with the word ${PARAGRAPH_OPENERS[2]}.`,
+      },
+      wholeAnswer,
+    ),
+    askCheck(
+      "3.1",
+      BROWSING,
+      { prompt: `Go to ${VISITED_SITE} and tell me the page heading.` },
+      (reply) => answerNames(reply, "Example Domain"),
+    ),
+    {
+      id: "3.2-agent-tab",
+      probe: async (callTool) => {
+        const listings = await browsed(callTool);
+        return { held: agentOpenedTab(listings), note: tabsNote(listings) };
+      },
+    },
+    {
+      id: "3.3-tabs-kept",
+      probe: async (callTool) => {
+        const listings = await browsed(callTool);
+        return { held: tabsKept(listings), note: tabsNote(listings) };
+      },
+    },
+    askCheck(
+      "3.4",
+      LONG_TASK,
+      {
+        prompt:
+          "Go to github.com/trending, find the top-ranked repository today, and tell me its name and star count.",
+      },
+      trendingRepoNamed,
+    ),
+    toolCheck("4.1", "comet_poll", {}, TOOL_CALL_MS, pollIdle),
+    {
+      id: "4.3",
+      probe: async (callTool) =>
+        judged((await stopped(callTool)).stop, agentStopped),
+    },
+    {
+      id: "4.3b",
+      probe: async (callTool) =>
+        judged((await stopped(callTool)).poll, pollAfterStop),
+    },
+    SCREENSHOT_TAKEN,
+    SCREENSHOT_AFTER_VISIT,
+    TABS_LISTED,
+    SITE_TAB_SWITCHED,
+    toolCheck(
+      "6.4",
+      "comet_tabs",
+      { action: "close", domain: VISITED_SITE },
+      TOOL_CALL_MS,
+      (reply) => siteTabClosed(reply, VISITED_SITE),
+    ),
+    MODE_REPORTED,
+    ...MODE_SWITCHES,
+    RESEARCH_WORKFLOW,
+    toolCheck(
+      "8.3",
+      "comet_upload",
+      { filePath: UPLOAD_TEST_FILE, selector: MISSING_SELECTOR },
+      UPLOAD_CALL_MS,
+      (reply) => selectorNotFound(reply, MISSING_SELECTOR),
+    ),
+    toolCheck(
+      "8.4",
+      "comet_upload",
+      { filePath: MISSING_FILE },
+      UPLOAD_CALL_MS,
+      (reply) => fileNotFound(reply, MISSING_FILE),
+    ),
+    toolCheck(
+      "9.2",
+      "comet_ask",
+      { prompt: "" },
+      EMPTY_PROMPT_CALL_MS,
+      emptyPromptRefused,
+    ),
+    INVALID_MODE_REJECTED,
+  ];
+}
+
+/** @param {number} ms */
+function pause(ms) {
+  return new Promise((done) => setTimeout(done, ms));
+}
+
+/**
+ * @param {Check} check
+ * @param {CallTool} callTool
+ */
+async function scored(check, callTool) {
+  return scoreCheck(
+    await runCheck(check.id, () => check.probe(callTool)),
+    PRO_KNOWN_FAILURES,
+  );
+}
+
+/**
+ * Runs the battery against a server. When [1.2] fails, no other check is
+ * run or scored: any other call could make the server launch Comet, or
+ * kill and relaunch one listening on another port.
+ * @param {CallTool} callTool
+ * @param {DebugPort} debugPort
+ * @param {(check: ScoredCheck) => void} [report] called as each check is scored
+ * @param {(ms: number) => Promise<void>} [wait] how the battery waits between calls
+ * @returns {Promise<ScoredCheck[]>}
+ */
+export async function runProBattery(
+  callTool,
+  debugPort,
+  report = () => {},
+  wait = pause,
+) {
+  const connect = await scored(connectCheck(debugPort), callTool);
+  report(connect);
+  const checks = [connect];
+  if (connect.verdict !== "PASS") return checks;
+  for (const check of afterConnect(wait)) {
+    const result = await scored(check, callTool);
+    report(result);
+    checks.push(result);
+  }
+  return checks;
+}
