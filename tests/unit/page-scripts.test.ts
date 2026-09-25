@@ -11,6 +11,7 @@ import {
   type PageArgument,
   pageScriptExpression,
   readModeMenuItems,
+  readPageAddress,
   readProseState,
 } from "../../src/page-scripts.js";
 
@@ -32,6 +33,16 @@ function markVisible(el: HTMLElement): void {
     },
   });
 }
+
+describe("readPageAddress", () => {
+  it("returns the address of the page it runs in", () => {
+    window.history.pushState({}, "", "/search/a-thread?q=1");
+
+    expect(readPageAddress()).toBe(
+      `${window.location.origin}/search/a-thread?q=1`,
+    );
+  });
+});
 
 describe("readProseState", () => {
   it("returns count=0 and empty lastText for an empty DOM", () => {

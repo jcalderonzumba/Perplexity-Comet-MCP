@@ -215,7 +215,6 @@ describe("PRO_KNOWN_FAILURES", () => {
       ["2.1", ASK_RELIABILITY],
       ["2.2", ASK_RELIABILITY],
       ["2.3", ASK_RELIABILITY],
-      ["2.4", ASK_RELIABILITY],
       ["2.5", ASK_RELIABILITY],
       ["2.6-whole-answer", ASK_RELIABILITY],
       ["3.1", AGENTIC_BROWSING],
@@ -226,6 +225,17 @@ describe("PRO_KNOWN_FAILURES", () => {
       ["6.3", AGENTIC_BROWSING],
       ["7.2-learn", "plan 11 (Learn mode)"],
     ]);
+  });
+
+  it("no longer lists [2.4], since a timed-out ask now says its answer may be incomplete", () => {
+    expect(PRO_KNOWN_FAILURES.map((entry) => entry.id)).not.toContain("2.4");
+  });
+
+  it("words a short answer run to its timeout as the ask's timeout result now reads", () => {
+    for (const id of ["1.5", "2.1", "2.3"]) {
+      const entry = PRO_KNOWN_FAILURES.find((known) => known.id === id);
+      expect(entry?.reason, id).toMatch(/says the answer may be incomplete$/);
+    }
   });
 
   it("gives [7.2-learn] the no-pro list's entry, as both batteries judge it alike", () => {

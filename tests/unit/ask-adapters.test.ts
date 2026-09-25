@@ -1,8 +1,11 @@
-// Both adapters' `comet_ask` take the one mode step, `reapplyModeBeforeAsk`,
-// after their own navigation and before the prompt is sent, and start every
-// result after it with its notice. The adapters start their transport on
-// import, so this reads their source; the step itself, its notice and the
-// wrapping of page text in it are pinned in `core/ask-mode.test.ts`.
+// Both adapters' `comet_ask` are translations over the one ask core: the
+// arguments in, one call into the core, and its outcome out in the
+// transport's shape, with page text wrapped by the shared UNTRUSTED wrapper.
+// The adapters start their transport on import, so this reads their source.
+// The ask itself (validation, shaping, the tab, the mode step after the
+// navigation and before sending, the completion rules, the timeout) is
+// pinned in `core/ask.test.ts`, the port in `cdp-ask-port.test.ts`, and each
+// adapter's rendering in `tool-results.test.ts`.
 
 import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
@@ -11,26 +14,36 @@ import { describe, expect, it } from "vitest";
 
 const SRC = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "src");
 
-const MODE_STEP = "const modeNotice = await reapplyModeBeforeAsk(modeTool);";
-
 interface AskAdapter {
   file: string;
   /** Where the adapter's `comet_ask` handler starts and where it ends. */
   from: string;
   to: string;
+  /** The function that puts a reply in the adapter's transport shape. */
+  shape: string;
 }
 
 const ADAPTERS: AskAdapter[] = [
-  { file: "index.ts", from: 'case "comet_ask": {', to: 'case "comet_poll":' },
+  {
+    file: "index.ts",
+    from: 'case "comet_ask":',
+    to: 'case "comet_poll":',
+    shape: "toStdioResult",
+  },
   {
     file: "http-bridge.ts",
     from: "async function handleAsk(",
     to: "async function handlePoll(",
+    shape: "toBridgeResult",
   },
 ];
 
+function sourceOf(file: string): string {
+  return readFileSync(join(SRC, file), "utf8");
+}
+
 function askHandlerOf({ file, from, to }: AskAdapter): string {
-  const source = readFileSync(join(SRC, file), "utf8");
+  const source = sourceOf(file);
   const start = source.indexOf(from);
   const end = source.indexOf(to, start);
   expect(start, `${file}: start of comet_ask`).toBeGreaterThan(-1);
@@ -38,76 +51,67 @@ function askHandlerOf({ file, from, to }: AskAdapter): string {
   return source.slice(start, end);
 }
 
-/**
- * Each `return { … };` statement in `code`, a result the handler returns.
- * Template literals are dropped first: page script pasted into one returns
- * in the page, not from the handler.
- */
-function resultReturns(code: string): string[] {
-  const handlerCode = code.replace(/`(?:\\[\s\S]|[^\\`])*`/g, "``");
-  return [...handlerCode.matchAll(/\breturn \{[\s\S]*?\n\s*\};/g)].map(
-    (m) => m[0],
-  );
-}
-
-function lastIndexOfAny(code: string, needles: string[]): number {
-  return Math.max(...needles.map((needle) => code.lastIndexOf(needle)));
-}
+/** What only an ask of its own would hold: sending, reading, waiting, shaping. */
+const ASK_OF_ITS_OWN = [
+  "sendPrompt",
+  "getAgentStatus",
+  "evaluate(",
+  "readProseState",
+  "isStable",
+  "hasStopButton",
+  "setTimeout",
+  ".replace(",
+  "navigate(",
+  "startComet",
+  "preOperationCheck",
+];
 
 describe.each(ADAPTERS)("the $file adapter's comet_ask", (adapter) => {
-  const source = readFileSync(join(SRC, adapter.file), "utf8");
+  const source = sourceOf(adapter.file);
   const handler = askHandlerOf(adapter);
-  const step = handler.indexOf(MODE_STEP);
-  const send = handler.indexOf("cometAI.sendPrompt(");
 
-  it("imports the shared mode step", () => {
+  it("makes one call into the ask core, with the tool's arguments", () => {
+    expect(handler.match(/askCore\.ask\(/g)).toHaveLength(1);
+    expect(handler).toMatch(/askCore\.ask\(args\)/);
+  });
+
+  it("words the outcome through the core, wrapping page text with the shared wrapper, in its transport's shape", () => {
+    expect(handler).toMatch(
+      new RegExp(
+        `${adapter.shape}\\(\\s*describeAskOutcome\\(\\s*await askCore\\.ask\\(args\\),\\s*wrapUntrustedPageContent,?\\s*\\),?\\s*\\)`,
+      ),
+    );
     expect(source).toContain(
-      'import { reapplyModeBeforeAsk, withModeNotice } from "./core/ask-mode.js";',
+      'import { wrapUntrustedPageContent } from "./untrusted.js";',
     );
   });
 
-  it("takes the mode step once, over its mode tool", () => {
-    expect(handler.split(MODE_STEP)).toHaveLength(2);
-  });
-
-  it("takes the mode step after its own navigation and reconnects", () => {
-    const beforeSend = handler.slice(0, send);
-    const lastMove = lastIndexOfAny(beforeSend, [
-      ".navigate(",
-      ".connect(",
-      "startComet(",
-    ]);
-
-    expect(lastMove).toBeGreaterThan(-1);
-    expect(step).toBeGreaterThan(lastMove);
-  });
-
-  it("takes the mode step before the prompt is sent", () => {
-    expect(send).toBeGreaterThan(-1);
-    expect(step).toBeGreaterThan(-1);
-    expect(step).toBeLessThan(send);
-  });
-
-  it("starts every result after the mode step with its notice", () => {
-    const returns = resultReturns(handler.slice(step));
-
-    expect(returns.length).toBeGreaterThan(0);
-    for (const statement of returns) {
-      expect(statement).toMatch(/withModeNotice\(\s*modeNotice,/);
+  it("holds no completion rule, prompt shaping, page script or recovery of its own", () => {
+    for (const needle of ASK_OF_ITS_OWN) {
+      expect(handler, needle).not.toContain(needle);
     }
   });
-});
 
-describe("the http-bridge.ts adapter's comet_ask", () => {
-  it("wraps Comet's answer in every result after the prompt is sent, as the stdio server does", () => {
-    const handler = askHandlerOf(ADAPTERS[1]);
-    const returns = resultReturns(
-      handler.slice(handler.indexOf("cometAI.sendPrompt(")),
+  it("builds its ask core once, over the CDP client, with its mode tool and the configured port", () => {
+    const builds = source.match(/createCdpAskCore\(\{[^}]*\}\)/g) ?? [];
+
+    expect(builds).toHaveLength(1);
+    expect(builds[0]).toMatch(/client:\s*cometClient\b/);
+    expect(builds[0]).toMatch(/comet:\s*cometAI\b/);
+    expect(builds[0]).toMatch(/mode:\s*modeTool\b/);
+    expect(builds[0]).toMatch(/cometPort:\s*DEFAULT_PORT\b/);
+    expect(source).toMatch(
+      /import \{[^}]*\bDEFAULT_PORT\b[^}]*\} from "\.\/cdp-client\.js";/,
     );
+  });
 
-    expect(returns.length).toBeGreaterThan(0);
-    for (const statement of returns) {
-      expect(statement).toContain("wrapUntrustedPageContent(");
-    }
+  it("pastes no prose-state script", () => {
+    expect(source).not.toContain('[class*="prose"]');
+    expect(source).not.toContain("readProseState");
+  });
+
+  it("follows the task the ask core keeps, not one of its own", () => {
+    expect(source).not.toMatch(/session-state\.js|\bstartNewTask\(/);
+    expect(source).toMatch(/askCore\.task\b/);
   });
 });

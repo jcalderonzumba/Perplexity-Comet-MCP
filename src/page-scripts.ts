@@ -440,3 +440,8 @@ export function locateModeMenuItem(label: string): PagePoint | null {
   const rect = item.getBoundingClientRect();
   return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
 }
+
+/** The address of the page, as the page itself reports it. */
+export function readPageAddress(): string {
+  return window.location.href;
+}

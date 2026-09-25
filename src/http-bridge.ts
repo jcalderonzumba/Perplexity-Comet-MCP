@@ -23,11 +23,16 @@
 import { timingSafeEqual } from "crypto";
 import http from "http";
 import { URL } from "url";
-import { cometClient } from "./cdp-client.js";
+import { createCdpAskCore } from "./cdp-ask-port.js";
+import { cometClient, DEFAULT_PORT } from "./cdp-client.js";
 import { createCdpModeTool } from "./cdp-mode-page.js";
 import { cometAI } from "./comet-ai.js";
-import { reapplyModeBeforeAsk, withModeNotice } from "./core/ask-mode.js";
+import { describeAskOutcome } from "./core/ask-reply.js";
 import { answerModeTool } from "./core/mode-tool.js";
+import {
+  type BridgeToolResult as ToolResult,
+  toBridgeResult,
+} from "./tool-results.js";
 import { wrapUntrustedPageContent } from "./untrusted.js";
 import {
   validateDomain,
@@ -64,58 +69,6 @@ if (!BRIDGE_TOKEN) {
 }
 
 // ============================================================================
-// Session State (same as index.ts)
-// ============================================================================
-
-interface SessionState {
-  currentTaskId: string | null;
-  taskStartTime: number | null;
-  lastPrompt: string | null;
-  lastResponse: string | null;
-  lastResponseTime: number | null;
-  steps: string[];
-  isActive: boolean;
-}
-
-const sessionState: SessionState = {
-  currentTaskId: null,
-  taskStartTime: null,
-  lastPrompt: null,
-  lastResponse: null,
-  lastResponseTime: null,
-  steps: [],
-  isActive: false,
-};
-
-function generateTaskId(): string {
-  return `task_${Date.now()}_${Math.random().toString(36).substring(2, 8)}`;
-}
-
-function startNewTask(prompt: string): string {
-  const taskId = generateTaskId();
-  sessionState.currentTaskId = taskId;
-  sessionState.taskStartTime = Date.now();
-  sessionState.lastPrompt = prompt;
-  sessionState.lastResponse = null;
-  sessionState.lastResponseTime = null;
-  sessionState.steps = [];
-  sessionState.isActive = true;
-  cometAI.resetStabilityTracking();
-  return taskId;
-}
-
-function completeTask(response: string): void {
-  sessionState.lastResponse = response;
-  sessionState.lastResponseTime = Date.now();
-  sessionState.isActive = false;
-}
-
-function isSessionStale(): boolean {
-  if (!sessionState.taskStartTime) return true;
-  return Date.now() - sessionState.taskStartTime > 5 * 60 * 1000;
-}
-
-// ============================================================================
 // Tool Handlers (extracted from index.ts for reuse)
 // ============================================================================
 
@@ -123,11 +76,15 @@ function isSessionStale(): boolean {
 // comet_ask for as long as the bridge runs.
 const modeTool = createCdpModeTool(cometClient, wrapUntrustedPageContent);
 
-type ToolResult = {
-  success: boolean;
-  content: string | { type: string; data?: string; mimeType?: string }[];
-  error?: string;
-};
+// The ask core, and the task comet_poll and comet_stop follow, for as long
+// as the bridge runs. It puts back the mode comet_mode last set, and starts
+// Comet on the configured debug port when the connection is lost.
+const askCore = createCdpAskCore({
+  client: cometClient,
+  comet: cometAI,
+  mode: modeTool,
+  cometPort: DEFAULT_PORT,
+});
 
 async function handleConnect(): Promise<ToolResult> {
   const startResult = await cometClient.startComet(9223);
@@ -158,261 +115,14 @@ async function handleConnect(): Promise<ToolResult> {
   };
 }
 
-const NO_RESPONSE = "Task timed out or no response received";
-
-async function handleAsk(args: {
-  prompt: string;
-  context?: string;
-  newChat?: boolean;
-  timeout?: number;
-}): Promise<ToolResult> {
-  let prompt = args.prompt;
-  const context = args.context;
-  const maxTimeout = args.timeout || 120000;
-  const newChat = args.newChat || false;
-
-  if (!prompt || prompt.trim().length === 0) {
-    return { success: false, content: "", error: "prompt cannot be empty" };
-  }
-
-  // Prepend context if provided
-  if (context && context.trim().length > 0) {
-    const contextPrefix = `Context for this task:\n\`\`\`\n${context.trim()}\n\`\`\`\n\nBased on the above context, `;
-    prompt = contextPrefix + prompt;
-  }
-
-  const taskId = startNewTask(prompt);
-  void taskId; // used for session state side-effects
-
-  // Pre-operation check
-  try {
-    await cometClient.preOperationCheck();
-  } catch {
-    try {
-      await cometClient.startComet(9223);
-      const targets = await cometClient.listTargets();
-      const page = targets.find((t) => t.type === "page");
-      if (page) await cometClient.connect(page.id);
-    } catch {
-      return {
-        success: false,
-        content: "",
-        error: "Failed to establish connection to Comet browser",
-      };
-    }
-  }
-
-  // Normalize prompt
-  prompt = prompt
-    .replace(/^[-*•]\s*/gm, "")
-    .replace(/\n+/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-
-  // Transform for agentic browsing
-  const hasUrl = /https?:\/\/[^\s]+/.test(prompt);
-  const hasWebsiteRef =
-    /\b(go to|visit|navigate|open|browse|check|look at|read from|click|fill|submit|login|sign in|download from)\b/i.test(
-      prompt,
-    );
-  const hasSiteNames =
-    /\b(\.com|\.org|\.io|\.net|\.ai|website|webpage|page|site)\b/i.test(prompt);
-  const needsAgenticBrowsing = hasUrl || hasWebsiteRef || hasSiteNames;
-
-  if (needsAgenticBrowsing) {
-    const alreadyAgentic =
-      /^(use your browser|using your browser|open a browser|navigate to|browse to)/i.test(
-        prompt,
-      );
-    if (!alreadyAgentic) {
-      if (hasUrl) {
-        const urlMatch = prompt.match(/https?:\/\/[^\s]+/);
-        if (urlMatch) {
-          const url = urlMatch[0];
-          const restOfPrompt = prompt.replace(url, "").trim();
-          prompt = `Use your browser to navigate to ${url} and ${restOfPrompt || "tell me what you find there"}`;
-        }
-      } else {
-        prompt = `Use your browser to ${prompt.toLowerCase().startsWith("go") ? "" : "go and "}${prompt}`;
-      }
-    }
-  }
-
-  // Handle newChat navigation
-  if (newChat) {
-    await cometClient.ensureConnection();
-    try {
-      await cometClient.navigate("https://www.perplexity.ai/", true);
-      await new Promise((resolve) => setTimeout(resolve, 2000));
-    } catch {
-      const targets = await cometClient.listTargets();
-      const mainTab = targets.find(
-        (t) => t.type === "page" && t.url.includes("perplexity"),
-      );
-      if (mainTab) {
-        await cometClient.connect(mainTab.id);
-      } else {
-        const anyPage = targets.find((t) => t.type === "page");
-        if (anyPage) {
-          await cometClient.connect(anyPage.id);
-          await cometClient.navigate("https://www.perplexity.ai/", true);
-        }
-      }
-      await new Promise((resolve) => setTimeout(resolve, 1500));
-    }
-  } else {
-    const tabs = await cometClient.listTabsCategorized();
-    if (tabs.main) {
-      await cometClient.connect(tabs.main.id);
-    }
-
-    const urlResult = await cometClient.evaluate("window.location.href");
-    const currentUrl = urlResult.result.value as string;
-    if (!currentUrl?.includes("perplexity.ai")) {
-      await cometClient.navigate("https://www.perplexity.ai/", true);
-      await new Promise((resolve) => setTimeout(resolve, 2000));
-    }
-  }
-
-  // Perplexity resets its mode on every navigation: put back the mode
-  // comet_mode last set. A failure does not stop the ask; its line starts
-  // the result instead.
-  const modeNotice = await reapplyModeBeforeAsk(modeTool);
-
-  cometAI.resetStabilityTracking();
-
-  // Capture old state
-  const oldStateResult = await cometClient.evaluate(`
-    (() => {
-      const proseEls = document.querySelectorAll('[class*="prose"]');
-      const lastProse = proseEls[proseEls.length - 1];
-      return {
-        count: proseEls.length,
-        lastText: lastProse ? lastProse.innerText.substring(0, 100) : ''
-      };
-    })()
-  `);
-  const oldState = oldStateResult.result.value as {
-    count: number;
-    lastText: string;
-  };
-
-  // Send prompt
-  await cometAI.sendPrompt(prompt);
-
-  // Smart polling
-  const startTime = Date.now();
-  const stepsCollected: string[] = [];
-  let sawNewResponse = false;
-  let lastActivityTime = Date.now();
-  let previousResponse = "";
-  const POLL_INTERVAL = 1500;
-  const IDLE_TIMEOUT = 6000;
-  let consecutiveErrors = 0;
-  const MAX_CONSECUTIVE_ERRORS = 5;
-
-  while (Date.now() - startTime < maxTimeout) {
-    await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL));
-
-    try {
-      const isOnPerplexity = await cometClient.isOnPerplexityTab();
-      if (!isOnPerplexity) {
-        const switched = await cometClient.ensureOnPerplexityTab();
-        if (!switched) {
-          consecutiveErrors++;
-          continue;
-        }
-      }
-
-      const currentStateResult = await cometClient.withAutoReconnect(
-        async () => {
-          return await cometClient.evaluate(`
-          (() => {
-            const proseEls = document.querySelectorAll('[class*="prose"]');
-            const lastProse = proseEls[proseEls.length - 1];
-            return {
-              count: proseEls.length,
-              lastText: lastProse ? lastProse.innerText.substring(0, 100) : ''
-            };
-          })()
-        `);
-        },
-      );
-      const currentState = currentStateResult.result.value as {
-        count: number;
-        lastText: string;
-      };
-
-      if (!sawNewResponse) {
-        if (
-          currentState.count > oldState.count ||
-          (currentState.lastText && currentState.lastText !== oldState.lastText)
-        ) {
-          sawNewResponse = true;
-        }
-      }
-
-      const status = await cometAI.getAgentStatus();
-      consecutiveErrors = 0;
-
-      if (status.response !== previousResponse) {
-        lastActivityTime = Date.now();
-        previousResponse = status.response;
-      }
-
-      for (const step of status.steps) {
-        if (!stepsCollected.includes(step)) {
-          stepsCollected.push(step);
-          lastActivityTime = Date.now();
-        }
-      }
-
-      sessionState.steps = stepsCollected;
-
-      if (status.status === "completed" && sawNewResponse) {
-        const response = status.response;
-        completeTask(response);
-        return {
-          success: true,
-          content: withModeNotice(
-            modeNotice,
-            wrapUntrustedPageContent(response),
-          ),
-        };
-      }
-
-      if (sawNewResponse && Date.now() - lastActivityTime > IDLE_TIMEOUT) {
-        const response = status.response || previousResponse;
-        completeTask(response);
-        return {
-          success: true,
-          content: withModeNotice(
-            modeNotice,
-            wrapUntrustedPageContent(response),
-          ),
-        };
-      }
-    } catch {
-      consecutiveErrors++;
-      if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
-        break;
-      }
-    }
-  }
-
-  const pageResponse = sessionState.lastResponse || previousResponse;
-  completeTask(pageResponse || NO_RESPONSE);
-  return {
-    success: true,
-    content: withModeNotice(
-      modeNotice,
-      pageResponse ? wrapUntrustedPageContent(pageResponse) : NO_RESPONSE,
-    ),
-  };
+async function handleAsk(args: Record<string, unknown>): Promise<ToolResult> {
+  return toBridgeResult(
+    describeAskOutcome(await askCore.ask(args), wrapUntrustedPageContent),
+  );
 }
 
 async function handlePoll(): Promise<ToolResult> {
-  if (isSessionStale()) {
+  if (askCore.task.isStale()) {
     return {
       success: true,
       content: "No active task (session stale or not started)",
@@ -420,22 +130,22 @@ async function handlePoll(): Promise<ToolResult> {
   }
 
   const status = await cometAI.getAgentStatus();
-  const allSteps = [...new Set([...sessionState.steps, ...status.steps])];
+  const allSteps = [...new Set([...askCore.task.steps, ...status.steps])];
 
   let output = "";
-  if (sessionState.isActive) {
-    output = `Status: working\nPrompt: ${sessionState.lastPrompt || "unknown"}\n`;
+  if (askCore.task.isActive) {
+    output = `Status: working\nPrompt: ${askCore.task.lastPrompt || "unknown"}\n`;
     if (status.response) {
       output += `\nPartial response:\n${status.response.substring(0, 500)}${status.response.length > 500 ? "..." : ""}`;
     }
   } else {
-    output = `Status: complete\nResponse:\n${sessionState.lastResponse || "No response"}`;
+    output = `Status: complete\nResponse:\n${askCore.task.lastResponse || "No response"}`;
   }
 
   if (allSteps.length > 0) {
     output += `\nSteps:\n${allSteps.map((s) => `  • ${s}`).join("\n")}\n`;
   }
-  if (status.status === "working" || sessionState.isActive) {
+  if (status.status === "working" || askCore.task.isActive) {
     output += `\n[Use comet_stop to interrupt, or comet_screenshot to see current page]`;
   }
 
@@ -445,7 +155,7 @@ async function handlePoll(): Promise<ToolResult> {
 async function handleStop(): Promise<ToolResult> {
   const stopped = await cometAI.stopAgent();
   if (stopped) {
-    sessionState.isActive = false;
+    askCore.task.isActive = false;
   }
   return {
     success: true,
@@ -655,10 +365,7 @@ async function handleUpload(args: {
 }
 
 async function handleMode(args: { mode?: unknown }): Promise<ToolResult> {
-  const reply = await answerModeTool(args.mode, modeTool);
-  return reply.isError
-    ? { success: false, content: "", error: reply.text }
-    : { success: true, content: reply.text };
+  return toBridgeResult(await answerModeTool(args.mode, modeTool));
 }
 
 // ============================================================================
@@ -867,14 +574,7 @@ async function executeToolByName(
     case "comet_connect":
       return handleConnect();
     case "comet_ask":
-      return handleAsk(
-        args as {
-          prompt: string;
-          context?: string;
-          newChat?: boolean;
-          timeout?: number;
-        },
-      );
+      return handleAsk(args);
     case "comet_poll":
       return handlePoll();
     case "comet_stop":

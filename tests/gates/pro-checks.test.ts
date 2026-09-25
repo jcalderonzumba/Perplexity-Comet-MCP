@@ -7,6 +7,7 @@ import {
 import { describeAskOutcome } from "../../src/core/ask-reply.js";
 import { ModeCore } from "../../src/core/mode.js";
 import { answerModeTool } from "../../src/core/mode-tool.js";
+import { toStdioResult } from "../../src/tool-results.js";
 import { wrapUntrustedPageContent } from "../../src/untrusted.js";
 import {
   batteryPassed,
@@ -63,7 +64,7 @@ import { declaredTools, schemaViolations } from "./support/declared-tools.js";
 /** An answer as the server returns it: page text in the UNTRUSTED markers. */
 const answer = (pageText: string) => ok(wrapUntrustedPageContent(pageText));
 
-/** Today's result when the ask runs out of time before the page answers. */
+/** The stdio server's timeout result before the ask core, which predicates must still read as not final. */
 const STILL_IN_PROGRESS = ok(
   "Task may still be in progress (max timeout reached).\nStatus: WORKING\n\nUse comet_poll to check progress or comet_stop to cancel.",
 );
@@ -320,8 +321,8 @@ describe("timeoutStated [2.4]", () => {
   });
 });
 
-describe("the ask predicates against the ask core's own replies", () => {
-  /** The reply `comet_ask` gives for the core's outcome of `args`. */
+describe("the ask predicates against the stdio server's own comet_ask replies", () => {
+  /** The reply the stdio server's `comet_ask` gives for the core's outcome of `args`. */
   async function askReply(
     after: PageReading[],
     args: Record<string, unknown>,
@@ -336,30 +337,28 @@ describe("the ask predicates against the ask core's own replies", () => {
       },
       cometPort: 9222,
     });
-    const { text, isError } = describeAskOutcome(
-      await core.ask(args),
-      wrapUntrustedPageContent,
+    return toStdioResult(
+      describeAskOutcome(await core.ask(args), wrapUntrustedPageContent),
     );
-    return isError ? error(text) : ok(text);
   }
 
   const RUNS_OUT = [
     reading("Rome was founded", { hasStopButton: true, steps: ["Writing"] }),
   ];
 
-  it("timeoutStated [2.4] holds on the core's timeout reply", async () => {
+  it("timeoutStated [2.4] holds on the timeout reply", async () => {
     const reply = await askReply(RUNS_OUT, { prompt: "essay", timeout: 3000 });
 
     expect(timeoutStated({ reply, elapsedMs: 4200 })).toBe(true);
   });
 
-  it("answered counts the core's timeout reply as not final", async () => {
+  it("answered counts the timeout reply as not final", async () => {
     const reply = await askReply(RUNS_OUT, { prompt: "essay", timeout: 3000 });
 
     expect(answered(reply)).toBe(false);
   });
 
-  it("answered and answerNames hold on the core's answer reply", async () => {
+  it("answered and answerNames hold on the answer reply", async () => {
     const reply = await askReply(
       [reading("VERI"), reading("VERIFIED", { status: "completed" })],
       { prompt: "Reply with exactly one word: VERIFIED" },
@@ -1076,10 +1075,29 @@ const COMPLETED = ok(
   `Status: COMPLETED (0s ago)\n\n${wrapUntrustedPageContent("octo/widgets")}`,
 );
 
+/**
+ * The stdio server's result when an ask runs out of time with the page
+ * showing `status` and `partialAnswer`, worded by the ask core.
+ */
+function timedOut(status: "working" | "idle", partialAnswer = ""): ToolReply {
+  return toStdioResult(
+    describeAskOutcome(
+      {
+        kind: "timed-out",
+        timeoutMs: 60000,
+        progress: { status, partialAnswer, currentStep: "", steps: [] },
+        notice: { line: null },
+      },
+      wrapUntrustedPageContent,
+    ),
+  );
+}
+
+/** A one-word answer the ask does not read as complete, run to its timeout. */
+const SHORT_ANSWER_TIMED_OUT = timedOut("working", "VERI");
+
 /** A short answer the ask does not read as complete, as [2.3]'s run showed. */
-const IDLE_STILL_IN_PROGRESS = ok(
-  `Task may still be in progress (max timeout reached).\nStatus: IDLE\n${wrapUntrustedPageContent("Steps")}`,
-);
+const IDLE_TIMED_OUT = timedOut("idle");
 
 /**
  * [3.4]'s reply as a run showed it: an earlier browsing ask's answer, run on
@@ -1091,18 +1109,18 @@ const EARLIER_ANSWER_RUN_ON = answer(
 
 /**
  * Comet as the Pro runs of 2026-09-24 and 2026-09-25 found it, each reply in
- * the shape the server gives today: the checks the known-failures list
- * names fail, and every other check holds.
+ * the shape the server gives today, a timeout in the ask core's words: the
+ * checks the known-failures list names fail, and every other check holds.
  */
 const TODAY: Replies = {
   [CALLS.connect]: ok("Comet already running with debug port: Chrome/152"),
-  [CALLS.session]: STILL_IN_PROGRESS,
-  [CALLS.capital]: STILL_IN_PROGRESS,
-  [CALLS.remember]: STILL_IN_PROGRESS,
+  [CALLS.session]: SHORT_ANSWER_TIMED_OUT,
+  [CALLS.capital]: SHORT_ANSWER_TIMED_OUT,
+  [CALLS.remember]: SHORT_ANSWER_TIMED_OUT,
   [CALLS.recall]: answer("NOTED"),
   [CALLS.rememberAgain]: answer("Got it: 9473."),
-  [CALLS.recallInNewChat]: IDLE_STILL_IN_PROGRESS,
-  [CALLS.essay]: answer("Rome was founded, according to legend, in 753 BC."),
+  [CALLS.recallInNewChat]: IDLE_TIMED_OUT,
+  [CALLS.essay]: timedOut("working", "Rome was founded, according to legend"),
   [CALLS.context]: error(
     "Error: Prompt text not found in input - typing may have failed",
   ),
@@ -1112,7 +1130,7 @@ const TODAY: Replies = {
   [CALLS.agentTab]: answer("The heading of example.org is Example Domain."),
   [CALLS.trending]: EARLIER_ANSWER_RUN_ON,
   [CALLS.poll]: [COMPLETED, answer("The featured article is about")],
-  [CALLS.slowTask]: STILL_IN_PROGRESS,
+  [CALLS.slowTask]: timedOut("working"),
   [CALLS.stop]: ok("Agent stopped"),
   [CALLS.screenshot]: IMAGE,
   [CALLS.visit]: [answer("Done."), answer("Done.")],
@@ -1213,7 +1231,7 @@ describe("runProBattery", () => {
       undefined,
       noWait,
     );
-    expect(summaryLine(checks)).toBe("Results: 16 passed, 0 failed, 14 known");
+    expect(summaryLine(checks)).toBe("Results: 17 passed, 0 failed, 13 known");
     expect(batteryPassed(checks)).toBe(true);
     expect(
       checks
@@ -1376,7 +1394,7 @@ describe("runProBattery", () => {
     const checks = await runProBattery(
       fakeServer({
         ...FIXED,
-        [CALLS.recallInNewChat]: IDLE_STILL_IN_PROGRESS,
+        [CALLS.recallInNewChat]: IDLE_TIMED_OUT,
         [CALLS.trending]: EARLIER_ANSWER_RUN_ON,
       }).callTool,
       LISTENING,

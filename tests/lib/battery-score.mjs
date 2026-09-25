@@ -46,7 +46,7 @@ export const NO_PRO_KNOWN_FAILURES = [LEARN_MODE_NOT_SWITCHED];
 
 /** One-word answers, which the ask does not read as complete. */
 const SHORT_ANSWER_NOT_READ =
-  "comet_ask does not read a one-word answer as complete, so it runs to its timeout and says the task may still be in progress";
+  "comet_ask does not read a one-word answer as complete, so it runs to its timeout and says the answer may be incomplete";
 
 /**
  * The Pro battery's known failures (`tests/run-all.mjs`), in the order its
@@ -65,13 +65,7 @@ export const PRO_KNOWN_FAILURES = [
   {
     id: "2.3",
     reason:
-      "comet_ask does not read the new chat's short answer as complete, so it runs to its timeout and says the task may still be in progress",
-    owningPlan: ASK_RELIABILITY,
-  },
-  {
-    id: "2.4",
-    reason:
-      "when comet_ask runs out of time, it returns the page's partial text as if it were the answer, or says only that the task may still be in progress, never that the answer may be incomplete",
+      "comet_ask does not read the new chat's short answer as complete, so it runs to its timeout and says the answer may be incomplete",
     owningPlan: ASK_RELIABILITY,
   },
   {
