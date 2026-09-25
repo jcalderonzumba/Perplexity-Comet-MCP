@@ -8,6 +8,7 @@
 import {
   chmodSync,
   existsSync,
+  mkdirSync,
   mkdtempSync,
   readFileSync,
   rmSync,
@@ -15,13 +16,15 @@ import {
 } from "node:fs";
 import { createServer, type Server } from "node:net";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { delimiter, join } from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import { GitSandbox, type Outcome, runProcess } from "./support/git-sandbox.ts";
 
 const NOTEBOOK_HOOKS_PATH = "../.githooks/notebook";
+/** Variables the hook reads, kept out of a commit unless a test sets them. */
+const HOOK_VARIABLES = ["GIT_SSH_COMMAND", "GIT_SSH", "GIT_TERMINAL_PROMPT"];
 const CONNECT_TIMEOUT_MS = 5_000;
 /** Each test runs several git commands, slow when the whole suite runs at once. */
 const GIT_HEAVY_TEST_MS = 30_000;
@@ -87,19 +90,25 @@ class Notebook {
   }
 
   /** Commits one change the way an agent does, hooks included. */
-  commit(): Outcome & { readonly elapsedMs: number } {
+  commit(
+    env: NodeJS.ProcessEnv = {},
+  ): Outcome & { readonly elapsedMs: number } {
     this.#commits += 1;
     this.#write("progress.md", `tick ${this.#commits}\n`);
     git(this.path, "add", "--all");
     const started = Date.now();
-    const outcome = runProcess("git", [
-      "-C",
-      this.path,
-      "commit",
-      "--quiet",
-      "--message",
-      `tick ${this.#commits}`,
-    ]);
+    const outcome = runProcess(
+      "git",
+      [
+        "-C",
+        this.path,
+        "commit",
+        "--quiet",
+        "--message",
+        `tick ${this.#commits}`,
+      ],
+      { env, unsetEnv: HOOK_VARIABLES.filter((name) => !(name in env)) },
+    );
     return { ...outcome, elapsedMs: Date.now() - started };
   }
 
@@ -114,6 +123,15 @@ class Notebook {
   #write(name: string, text: string): void {
     writeFileSync(join(this.path, name), text);
   }
+}
+
+/**
+ * An executable at `path` that appends one line to `log` (its arguments, or
+ * whatever `line` expands to in sh) and fails, as a remote that refuses would.
+ */
+function recordingStandIn(path: string, log: string, line = '"$*"'): void {
+  writeFileSync(path, `#!/bin/sh\necho ${line} >> '${log}'\nexit 1\n`);
+  chmodSync(path, 0o755);
 }
 
 /** A TCP listener that accepts connections and never says a word. */
@@ -172,7 +190,9 @@ describe("the notebook's post-commit hook", {
 
     const outcome = notebook.commit();
     expect(outcome.status).toBe(0);
-    expect(outcome.stderr).toContain("post-commit: could not push main");
+    expect(outcome.stderr).toContain(
+      "post-commit: could not push main: origin has commits this clone lacks",
+    );
     expect(remote.head()).toBe(theirs);
   });
 
@@ -206,14 +226,46 @@ describe("the notebook's post-commit hook", {
   it("keeps a configured SSH command and adds the timeout to it", () => {
     const log = join(clone.root, "ssh.log");
     const standIn = join(clone.root, "ssh-stand-in");
-    writeFileSync(standIn, `#!/bin/sh\necho "$*" >> '${log}'\nexit 255\n`);
-    chmodSync(standIn, 0o755);
+    recordingStandIn(standIn, log);
     git(notebook.path, "config", "core.sshCommand", standIn);
     notebook.setRemote("ssh://git@notebook.invalid/notebook.git");
 
     expect(notebook.commit().status).toBe(0);
     expect(existsSync(log)).toBe(true);
-    expect(readFileSync(log, "utf8")).toContain("-o ConnectTimeout=5");
+    const logged = readFileSync(log, "utf8");
+    expect(logged).toContain("-o ConnectTimeout=5");
+    expect(logged).toContain("-o BatchMode=yes");
+  });
+
+  it("keeps a GIT_SSH program and adds the timeout to it", () => {
+    const log = join(clone.root, "ssh.log");
+    const standIn = join(clone.root, "ssh stand-in");
+    recordingStandIn(standIn, log);
+    notebook.setRemote("ssh://git@notebook.invalid/notebook.git");
+
+    expect(notebook.commit({ GIT_SSH: standIn }).status).toBe(0);
+    expect(existsSync(log)).toBe(true);
+    const logged = readFileSync(log, "utf8");
+    expect(logged).toContain("-o ConnectTimeout=5");
+    expect(logged).toContain("-o BatchMode=yes");
+  });
+
+  it("never lets git ask for credentials on a terminal", () => {
+    const bin = join(clone.root, "bin");
+    const log = join(clone.root, "prompt.log");
+    mkdirSync(bin);
+    recordingStandIn(
+      join(bin, "git-remote-recorder"),
+      log,
+      '"GIT_TERMINAL_PROMPT=$GIT_TERMINAL_PROMPT"',
+    );
+    notebook.setRemote("recorder::notebook");
+
+    const path = `${bin}${delimiter}${process.env.PATH ?? ""}`;
+    const outcome = notebook.commit({ PATH: path });
+    expect(outcome.status).toBe(0);
+    expect(outcome.stderr).toContain("post-commit: could not push main");
+    expect(readFileSync(log, "utf8")).toContain("GIT_TERMINAL_PROMPT=0");
   });
 });
 
