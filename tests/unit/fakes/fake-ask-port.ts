@@ -4,7 +4,8 @@
 // Before the prompt is sent the page shows `before`. Once it is sent, each
 // read of the prose state is one poll: it moves to the next of `after`, and
 // the last one stays. An `Error` in `after` makes that poll's reads throw,
-// as a CDP call does when the page goes away. Time only passes through
+// as a CDP call does when the page goes away; an `Error` as `before` makes
+// the reads before sending throw. Time only passes through
 // `wait`. Every call is logged by name in `calls`, where a test can log
 // other steps too, so it can check their order.
 
@@ -75,7 +76,7 @@ export class FakeAskPort implements AskPort {
   public targets: AskTarget[] = [MAIN_TAB];
   /** The address of the tab the port is connected to. */
   public url = MAIN_TAB.url;
-  public before: PageReading = QUIET_PAGE;
+  public before: PageReading | Error = QUIET_PAGE;
   public after: Array<PageReading | Error> = [];
 
   public preCheckFails = false;
@@ -194,10 +195,14 @@ export class FakeAskPort implements AskPort {
   }
 
   private current(): PageReading {
-    if (!this.sent || this.after.length === 0) return this.before;
-    const index = Math.min(Math.max(this.poll, 0), this.after.length - 1);
-    const shown = this.after[index];
+    const shown = this.shown();
     if (shown instanceof Error) throw shown;
     return shown;
+  }
+
+  private shown(): PageReading | Error {
+    if (!this.sent || this.after.length === 0) return this.before;
+    const index = Math.min(Math.max(this.poll, 0), this.after.length - 1);
+    return this.after[index];
   }
 }

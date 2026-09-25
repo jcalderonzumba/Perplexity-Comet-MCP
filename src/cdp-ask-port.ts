@@ -10,6 +10,7 @@ import {
   type AskPort,
   type AskStatus,
   type AskTarget,
+  PageScriptFailed,
 } from "./core/ask.js";
 import type { ModeTool } from "./core/mode-tool.js";
 import {
@@ -123,9 +124,7 @@ class CdpAskPort implements AskPort {
     );
     if (response.exceptionDetails) {
       const { exception, text } = response.exceptionDetails;
-      throw new Error(
-        `${script.name} failed in the page: ${exception?.description ?? text}`,
-      );
+      throw new PageScriptFailed(script.name, exception?.description ?? text);
     }
     return response.result.value as R;
   }

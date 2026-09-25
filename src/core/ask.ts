@@ -43,7 +43,26 @@ export interface AskStatus {
   readonly agentBrowsingUrl: string;
 }
 
-/** What the ask core needs from the browser; each adapter supplies one. */
+/**
+ * A page script that threw in the page. Its message is the server's words;
+ * `pageDetail` is what the page's exception says, text the page chooses, so
+ * it reaches a reply only through the adapter's UNTRUSTED wrapper.
+ */
+export class PageScriptFailed extends Error {
+  constructor(
+    readonly scriptName: string,
+    readonly pageDetail: string,
+  ) {
+    super(`${scriptName} failed in the page`);
+    this.name = "PageScriptFailed";
+  }
+}
+
+/**
+ * What the ask core needs from the browser; each adapter supplies one. A read
+ * through a page script rejects with `PageScriptFailed` when the script
+ * throws in the page.
+ */
 export interface AskPort {
   /** Checks the connection is alive; throws when it is not. */
   preOperationCheck(): Promise<unknown>;
@@ -110,6 +129,8 @@ export type AskOutcome =
   | {
       readonly kind: "failed";
       readonly message: string;
+      /** The page's part of the failure, when a page script threw. */
+      readonly pageDetail?: string;
       readonly notice: ModeNotice;
     }
   | {
@@ -157,6 +178,16 @@ export type PollOutcome =
       readonly kind: "not-followed";
       readonly taskId: string | null;
       readonly progress: PollProgress;
+    }
+  /**
+   * A page script threw while this poll read the page for a task it
+   * follows. The task stays active; `pageDetail` is the page's text.
+   */
+  | {
+      readonly kind: "page-error";
+      readonly taskId: string | null;
+      readonly message: string;
+      readonly pageDetail: string;
     };
 
 export interface StopOutcome {
@@ -214,7 +245,7 @@ export class AskCore {
         notice,
       );
     } catch (error) {
-      return { kind: "failed", message: errorMessage(error), notice };
+      return failure(error, notice);
     }
   }
 
@@ -236,8 +267,20 @@ export class AskCore {
       };
     }
     await this.port.ensureOnPerplexityTab();
-    if (task.isActive && this.watch) return this.follow(this.watch);
+    if (task.isActive && this.watch) return this.followOrReport(this.watch);
     return this.pageStatusOnly();
+  }
+
+  /** `follow`, with a page script's failure reported as an outcome. */
+  private async followOrReport(watch: AnswerWatch): Promise<PollOutcome> {
+    try {
+      return await this.follow(watch);
+    } catch (error) {
+      if (!(error instanceof PageScriptFailed)) throw error;
+      const { message, pageDetail } = error;
+      const taskId = this.task.currentTaskId;
+      return { kind: "page-error", taskId, message, pageDetail };
+    }
   }
 
   /** Stops the answer in progress; the task ends when something stopped. */
@@ -529,6 +572,15 @@ function recoveryPage(targets: readonly AskTarget[]): AskTarget | undefined {
 
 function isPage(target: AskTarget): boolean {
   return target.type === "page";
+}
+
+/** A failed ask, with the page's part apart when a page script threw. */
+function failure(error: unknown, notice: ModeNotice): AskOutcome {
+  if (error instanceof PageScriptFailed) {
+    const { message, pageDetail } = error;
+    return { kind: "failed", message, pageDetail, notice };
+  }
+  return { kind: "failed", message: errorMessage(error), notice };
 }
 
 function errorMessage(error: unknown): string {

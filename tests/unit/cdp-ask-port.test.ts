@@ -2,7 +2,7 @@
 
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cdpAskPort, createCdpAskCore } from "../../src/cdp-ask-port.js";
-import type { AskTarget } from "../../src/core/ask.js";
+import { type AskTarget, PageScriptFailed } from "../../src/core/ask.js";
 import { ModeCore } from "../../src/core/mode.js";
 import {
   pageScriptExpression,
@@ -102,16 +102,23 @@ describe("cdpAskPort: reading the page", () => {
     expect(client.expressions).toEqual([pageScriptExpression(readPageAddress)]);
   });
 
-  it("rejects with the page's error when a page script fails", async () => {
+  it("rejects with the page's error, kept apart from its own words, when a page script fails", async () => {
     const { client, port } = rig();
     client.pageFailure = "TypeError: document is gone";
 
-    await expect(port.readProseState()).rejects.toThrow(
-      "readProseState failed in the page: TypeError: document is gone",
-    );
-    await expect(port.currentUrl()).rejects.toThrow(
-      "readPageAddress failed in the page: TypeError: document is gone",
-    );
+    const proseFailure = await port.readProseState().catch((error) => error);
+    const addressFailure = await port.currentUrl().catch((error) => error);
+
+    expect(proseFailure).toBeInstanceOf(PageScriptFailed);
+    expect(proseFailure).toMatchObject({
+      message: "readProseState failed in the page",
+      pageDetail: "TypeError: document is gone",
+    });
+    expect(addressFailure).toBeInstanceOf(PageScriptFailed);
+    expect(addressFailure).toMatchObject({
+      message: "readPageAddress failed in the page",
+      pageDetail: "TypeError: document is gone",
+    });
   });
 });
 

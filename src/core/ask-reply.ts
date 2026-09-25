@@ -15,6 +15,9 @@ import type {
 } from "./ask.js";
 import { withModeNotice } from "./ask-mode.js";
 
+const TASK_STILL_ACTIVE =
+  "The task is still active: use comet_poll to follow the answer until it is complete, or comet_stop to cancel it.";
+
 export interface AskReply {
   readonly text: string;
   readonly isError: boolean;
@@ -29,7 +32,10 @@ export function describeAskOutcome(
       return { text: `Error: ${outcome.reason}`, isError: true };
     case "failed":
       return {
-        text: withModeNotice(outcome.notice, `Error: ${outcome.message}`),
+        text: withModeNotice(
+          outcome.notice,
+          failureLine(outcome.message, outcome.pageDetail, quotePage),
+        ),
         isError: true,
       };
     case "answered":
@@ -48,6 +54,16 @@ export function describeAskOutcome(
   }
 }
 
+/** `Error: ` and the message, then the page's part quoted when there is one. */
+function failureLine(
+  message: string,
+  pageDetail: string | undefined,
+  quotePage: (pageText: string) => string,
+): string {
+  const line = `Error: ${message}`;
+  return pageDetail === undefined ? line : `${line}: ${quotePage(pageDetail)}`;
+}
+
 function describeTimeout(
   timeoutMs: number,
   progress: AskProgress,
@@ -62,9 +78,7 @@ function describeTimeout(
   ];
   const progressText = describeProgress(progress);
   if (progressText) lines.push("Progress:", quotePage(progressText), "");
-  lines.push(
-    "The task is still active: use comet_poll to follow the answer until it is complete, or comet_stop to cancel it.",
-  );
+  lines.push(TASK_STILL_ACTIVE);
   return lines.join("\n");
 }
 
@@ -80,7 +94,10 @@ export function describePollOutcome(
   outcome: PollOutcome,
   quotePage: (pageText: string) => string,
 ): AskReply {
-  return { text: pollText(outcome, quotePage), isError: false };
+  return {
+    text: pollText(outcome, quotePage),
+    isError: outcome.kind === "page-error",
+  };
 }
 
 export function describeStopOutcome({ stopped }: StopOutcome): AskReply {
@@ -107,6 +124,13 @@ function pollText(
       return describeWorking(outcome.taskId, outcome.progress, quotePage);
     case "not-followed":
       return describeNotFollowed(outcome.taskId, outcome.progress, quotePage);
+    case "page-error":
+      return [
+        ...statusLines("unknown", outcome.taskId),
+        failureLine(outcome.message, outcome.pageDetail, quotePage),
+        "",
+        TASK_STILL_ACTIVE,
+      ].join("\n");
   }
 }
 
