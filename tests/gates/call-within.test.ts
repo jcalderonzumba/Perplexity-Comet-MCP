@@ -1,5 +1,11 @@
-import type { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { ErrorCode, McpError } from "@modelcontextprotocol/sdk/types.js";
+import { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
+import { Server } from "@modelcontextprotocol/sdk/server/index.js";
+import {
+  CallToolRequestSchema,
+  ErrorCode,
+  McpError,
+} from "@modelcontextprotocol/sdk/types.js";
 import { describe, expect, it } from "vitest";
 
 import { callWithin } from "../lib/call-within.mjs";
@@ -70,5 +76,36 @@ describe("callWithin", () => {
     await expect(callWithin(client)("comet_tabs", {}, 10000)).rejects.toBe(
       crash,
     );
+  });
+});
+
+/**
+ * A real client connected in process to a real server whose one tool never
+ * answers, so a call can only end at the limit the client gives the SDK.
+ */
+async function clientOfAServerThatNeverAnswers() {
+  const server = new Server(
+    { name: "never-answers", version: "1.0.0" },
+    { capabilities: { tools: {} } },
+  );
+  server.setRequestHandler(CallToolRequestSchema, () => new Promise(() => {}));
+  const client = new Client({ name: "call-within", version: "1.0.0" });
+  const [clientTransport, serverTransport] =
+    InMemoryTransport.createLinkedPair();
+  await server.connect(serverTransport);
+  await client.connect(clientTransport);
+  return { client, close: () => client.close() };
+}
+
+describe("callWithin, against the installed SDK", () => {
+  it("rejects with TIMEOUT after the limit when the SDK gives up on the request", async () => {
+    const { client, close } = await clientOfAServerThatNeverAnswers();
+    try {
+      await expect(
+        callWithin(client)("comet_ask", { prompt: "p" }, 50),
+      ).rejects.toThrow(/^TIMEOUT after 50ms$/);
+    } finally {
+      await close();
+    }
   });
 });

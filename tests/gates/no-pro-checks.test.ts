@@ -8,7 +8,6 @@ import {
   summaryLine,
 } from "../lib/battery-score.mjs";
 import {
-  type CallTool,
   connected,
   type DebugPort,
   hasScreenshot,
@@ -21,26 +20,15 @@ import {
   tabsListed,
 } from "../lib/no-pro-checks.mjs";
 import { FakeModePage } from "../unit/fakes/fake-mode-page.js";
+import {
+  error,
+  fakeServer,
+  key,
+  modeReport,
+  ok,
+  type Replies,
+} from "./support/battery-replies.js";
 
-const ok = (text: string): ToolReply => ({
-  content: [{ type: "text", text }],
-});
-const error = (text: string): ToolReply => ({
-  content: [{ type: "text", text }],
-  isError: true,
-});
-
-const modeReport = (current: string) =>
-  [
-    `Current mode: ${current}`,
-    "",
-    "Available modes:",
-    "  search: Search",
-    "  research: Deep research",
-    "  labs: not available (not offered by Perplexity's current input bar)",
-    "  learn: not available (not supported yet)",
-    "",
-  ].join("\n");
 const MODE_REPORT = modeReport("search");
 const UNKNOWN_MODE_REPORT = modeReport(
   "unknown (no mode button found on the page)",
@@ -83,6 +71,21 @@ describe("hasScreenshot [5.1]", () => {
 
   it("fails on an empty reply", () => {
     expect(hasScreenshot({ content: [] })).toBe(false);
+  });
+
+  it("fails on an error result, even one whose text is long", () => {
+    const longError = `Error: Screenshot failed: ${"the page did not answer. ".repeat(8)}`;
+    expect(longError.length).toBeGreaterThan(100);
+    expect(hasScreenshot(error(longError))).toBe(false);
+  });
+
+  it("fails on an error result carrying an image", () => {
+    expect(
+      hasScreenshot({
+        content: [{ type: "image", data: "iVBOR", mimeType: "image/png" }],
+        isError: true,
+      }),
+    ).toBe(false);
   });
 });
 
@@ -236,11 +239,6 @@ describe("the mode predicates against the server's own comet_mode replies", () =
   });
 });
 
-type Replies = Record<string, ToolReply | Error>;
-
-const key = (name: string, args: Record<string, unknown>) =>
-  `${name} ${JSON.stringify(args)}`;
-
 const HEALTHY: Replies = {
   [key("comet_connect", {})]: ok(
     "Comet already running with debug port: Chrome/140\nConnected to Perplexity",
@@ -260,25 +258,6 @@ const HEALTHY: Replies = {
     "Invalid mode: invalid_mode_xyz. Use: search, research, labs, learn",
   ),
 };
-
-/** A stand-in for the server: answers from `replies`, in order of `calls`. */
-function fakeServer(replies: Replies, afterInvalidMode?: Error) {
-  const calls: string[] = [];
-  let invalidModeSeen = false;
-  const callTool: CallTool = async (name, args) => {
-    const call = key(name, args);
-    calls.push(call);
-    if (invalidModeSeen && afterInvalidMode) throw afterInvalidMode;
-    if (call === key("comet_mode", { mode: "invalid_mode_xyz" })) {
-      invalidModeSeen = true;
-    }
-    const reply = replies[call];
-    if (reply === undefined) throw new Error(`unexpected call ${call}`);
-    if (reply instanceof Error) throw reply;
-    return reply;
-  };
-  return { callTool, calls };
-}
 
 const LISTENING: DebugPort = { port: 9223, answers: async () => true };
 const SILENT: DebugPort = { port: 9223, answers: async () => false };
@@ -380,6 +359,20 @@ describe("runNoProBattery", () => {
     expect(batteryPassed(checks)).toBe(false);
   });
 
+  it("fails [5.1] when the screenshot is an error result", async () => {
+    const checks = await runNoProBattery(
+      fakeServer({
+        ...HEALTHY,
+        [key("comet_screenshot", {})]: error(
+          `Error: Screenshot failed: ${"the page did not answer. ".repeat(8)}`,
+        ),
+      }).callTool,
+      LISTENING,
+    );
+    expect(byId(checks, "5.1")?.verdict).toBe("FAIL");
+    expect(batteryPassed(checks)).toBe(false);
+  });
+
   it("fails a tab listing that returned an error", async () => {
     const checks = await runNoProBattery(
       fakeServer({
@@ -409,7 +402,10 @@ describe("runNoProBattery", () => {
 
   it("fails [9.4] when the server stops answering after the invalid mode", async () => {
     const checks = await runNoProBattery(
-      fakeServer(HEALTHY, new Error("TIMEOUT after 10000ms")).callTool,
+      fakeServer(HEALTHY, {
+        after: key("comet_mode", { mode: "invalid_mode_xyz" }),
+        error: new Error("TIMEOUT after 10000ms"),
+      }).callTool,
       LISTENING,
     );
     expect(byId(checks, "9.4")).toMatchObject({

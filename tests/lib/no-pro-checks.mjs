@@ -2,11 +2,16 @@
  * The no-pro battery's checks: which tool each calls, and the condition over
  * the tool's reply that decides whether it held. Every condition can fail.
  * The battery script supplies the server connection, each call's timeout and
- * the printing; scoring is `battery-score.mjs`'s. The Pro battery shares the
- * connect check and the reading of replies (`pro-checks.mjs`).
+ * the printing; scoring is `battery-score.mjs`'s. The Pro battery
+ * (`pro-checks.mjs`) shares the reading of replies, the connect check, and
+ * the screenshot, tab-listing and mode checks.
  */
 
-import { runCheck, scoreCheck } from "./battery-score.mjs";
+import {
+  NO_PRO_KNOWN_FAILURES,
+  runCheck,
+  scoreCheck,
+} from "./battery-score.mjs";
 
 /** @typedef {import("./battery-score.mjs").ProbeOutcome} ProbeOutcome */
 /** @typedef {import("./battery-score.mjs").ScoredCheck} ScoredCheck */
@@ -47,6 +52,15 @@ export function replyText(reply) {
 }
 
 /**
+ * The start of the reply's text, for a check's note.
+ * @param {ToolReply} reply
+ * @param {number} length
+ */
+export function excerpt(reply, length) {
+  return replyText(reply).slice(0, length);
+}
+
+/**
  * The reply is not an error result.
  * @param {ToolReply} reply
  */
@@ -65,14 +79,17 @@ export function connected(reply) {
 }
 
 /**
- * [5.1]: an image, or a text long enough to carry one.
+ * [5.1]: no error, and an image or a text long enough to carry one.
  * @param {ToolReply} reply
  */
 export function hasScreenshot(reply) {
-  return (reply.content ?? []).some(
-    (item) =>
-      item.type === "image" ||
-      (item.type === "text" && (item.text?.length ?? 0) > 100),
+  return (
+    succeeded(reply) &&
+    (reply.content ?? []).some(
+      (item) =>
+        item.type === "image" ||
+        (item.type === "text" && (item.text?.length ?? 0) > 100),
+    )
   );
 }
 
@@ -140,14 +157,8 @@ export function invalidModeHandled(invalidModeReply, nextReply) {
 }
 
 /**
- * @param {ToolReply} reply
- * @param {number} length
- */
-function excerpt(reply, length) {
-  return replyText(reply).slice(0, length);
-}
-
-/**
+ * A check of one tool call, judged on its reply. The Pro battery builds its
+ * single-call checks with it too.
  * @param {string} id
  * @param {string} tool
  * @param {Record<string, unknown>} args
@@ -155,7 +166,7 @@ function excerpt(reply, length) {
  * @param {(reply: ToolReply) => ProbeOutcome} judge
  * @returns {NoProCheck}
  */
-function singleCall(id, tool, args, timeoutMs, judge) {
+export function singleCall(id, tool, args, timeoutMs, judge) {
   return {
     id,
     probe: async (callTool) => judge(await callTool(tool, args, timeoutMs)),
@@ -204,8 +215,12 @@ export function connectCheck(debugPort) {
   };
 }
 
-/** @type {NoProCheck} */
-const INVALID_MODE_REJECTED = {
+/**
+ * [9.4]: the invalid mode is refused, and the server still reads the mode.
+ * The Pro battery runs it too.
+ * @type {NoProCheck}
+ */
+export const INVALID_MODE_REJECTED = {
   id: "9.4",
   probe: async (callTool) => {
     const invalid = await callTool("comet_mode", { mode: INVALID_MODE }, 15000);
@@ -218,28 +233,73 @@ const INVALID_MODE_REJECTED = {
 };
 
 /**
- * The checks after connect, in the order they run.
- * @type {readonly NoProCheck[]}
+ * [5.1]: a screenshot of the page. The Pro battery runs it too.
+ * @type {NoProCheck}
  */
-const AFTER_CONNECT = [
-  singleCall("5.1", "comet_screenshot", {}, 15000, (reply) => ({
+export const SCREENSHOT_TAKEN = singleCall(
+  "5.1",
+  "comet_screenshot",
+  {},
+  15000,
+  (reply) => ({
     held: hasScreenshot(reply),
     note: hasScreenshot(reply)
       ? "non-empty screenshot"
       : JSON.stringify(reply.content).slice(0, 80),
-  })),
-  singleCall("6.1", "comet_tabs", {}, 10000, (reply) => ({
+  }),
+);
+
+/**
+ * [6.1]: the tab listing. The Pro battery runs it too.
+ * @type {NoProCheck}
+ */
+export const TABS_LISTED = singleCall(
+  "6.1",
+  "comet_tabs",
+  {},
+  10000,
+  (reply) => ({
     held: tabsListed(reply),
     note: excerpt(reply, 80),
-  })),
-  singleCall("7.1", "comet_mode", {}, 15000, (reply) => ({
+  }),
+);
+
+/**
+ * [7.1]: the mode read from the page. The Pro battery runs it too.
+ * @type {NoProCheck}
+ */
+export const MODE_REPORTED = singleCall(
+  "7.1",
+  "comet_mode",
+  {},
+  15000,
+  (reply) => ({
     held: reportsMode(reply),
     note: excerpt(reply, 60),
-  })),
+  }),
+);
+
+/**
+ * [7.2-<mode>]: a switch to each mode, in the order they run. The Pro
+ * battery runs them too.
+ * @type {readonly NoProCheck[]}
+ */
+export const MODE_SWITCHES = [
   modeSwitch("research"),
   modeCall("labs", labsNotOffered),
   modeSwitch("learn"),
   modeSwitch("search"),
+];
+
+/**
+ * The checks after connect, in the order they run.
+ * @type {readonly NoProCheck[]}
+ */
+const AFTER_CONNECT = [
+  SCREENSHOT_TAKEN,
+  TABS_LISTED,
+  MODE_REPORTED,
+  ...MODE_SWITCHES,
   singleCall("7.3-reconnect", "comet_mode", {}, 10000, (reply) => ({
     held: reportsMode(reply),
     note: excerpt(reply, 60),
@@ -252,16 +312,18 @@ const AFTER_CONNECT = [
  * @param {CallTool} callTool
  */
 async function scored(check, callTool) {
-  return scoreCheck(await runCheck(check.id, () => check.probe(callTool)));
+  return scoreCheck(
+    await runCheck(check.id, () => check.probe(callTool)),
+    NO_PRO_KNOWN_FAILURES,
+  );
 }
 
 /** @param {NoProCheck} check */
 function notRun(check) {
-  return scoreCheck({
-    id: check.id,
-    held: false,
-    note: "not run: [1.2] connect failed",
-  });
+  return scoreCheck(
+    { id: check.id, held: false, note: "not run: [1.2] connect failed" },
+    NO_PRO_KNOWN_FAILURES,
+  );
 }
 
 /**
