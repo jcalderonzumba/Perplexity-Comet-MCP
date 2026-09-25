@@ -10,9 +10,12 @@
 # always exits 0, so it never fails a commit.
 #
 # ConnectTimeout bounds an SSH remote only: with an HTTPS remote the timeout
-# does not apply. Nothing waits on a prompt nobody sees: BatchMode stops ssh
-# asking, and GIT_TERMINAL_PROMPT=0 stops git asking an HTTPS remote's
-# credentials on the terminal. The ssh options are added to the command git
+# does not apply. The push never asks anyone for a password or passphrase:
+# BatchMode stops ssh asking, GIT_TERMINAL_PROMPT=0 stops git asking an HTTPS
+# remote's credentials on the terminal, and an empty GIT_ASKPASS stops git
+# calling an askpass program, whether GIT_ASKPASS, core.askPass or SSH_ASKPASS
+# names it. A configured credential helper still runs, so stored credentials
+# still reach an HTTPS remote. The ssh options are added to the command git
 # would run anyway: GIT_SSH_COMMAND, core.sshCommand, GIT_SSH, or ssh.
 
 readonly CONNECT_TIMEOUT_SECONDS=5
@@ -45,6 +48,7 @@ configured_ssh_command() {
 
 export GIT_SSH_COMMAND="$(configured_ssh_command) -o ConnectTimeout=$CONNECT_TIMEOUT_SECONDS -o BatchMode=yes"
 export GIT_TERMINAL_PROMPT=0
+export GIT_ASKPASS= # empty, so git skips core.askPass and SSH_ASKPASS too
 
 if ! push_errors=$(git push --quiet "$remote" "HEAD:$upstream" 2>&1 >/dev/null </dev/null); then
   printf '%s\n' "$push_errors" >&2
