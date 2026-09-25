@@ -1,0 +1,57 @@
+#!/usr/bin/env bash
+# Push every commit of the repository this hook runs in to its upstream, so no
+# commit stays on this machine alone. A repository opts in once per clone, for
+# the notebook: git -C .work config core.hooksPath ../.githooks/notebook
+#
+# It is a plain push of the current branch to the branch it tracks: never a
+# force push, never other refs. A push that fails prints a warning and leaves
+# the commit in place; the next commit's push takes it along, or, when the
+# remote has commits this clone lacks, the first push after a pull. The hook
+# always exits 0, so it never fails a commit.
+#
+# ConnectTimeout bounds an SSH remote only: with an HTTPS remote the timeout
+# does not apply. Nothing waits on a prompt nobody sees: BatchMode stops ssh
+# asking, and GIT_TERMINAL_PROMPT=0 stops git asking an HTTPS remote's
+# credentials on the terminal. The ssh options are added to the command git
+# would run anyway: GIT_SSH_COMMAND, core.sshCommand, GIT_SSH, or ssh.
+
+readonly CONNECT_TIMEOUT_SECONDS=5
+
+warn() {
+  echo "post-commit: $*" >&2
+}
+
+branch=$(git symbolic-ref --quiet --short HEAD) || exit 0 # detached: nothing to push
+remote=$(git config --get "branch.$branch.remote")
+upstream=$(git config --get "branch.$branch.merge")
+if [ -z "$remote" ] || [ -z "$upstream" ]; then
+  warn "$branch has no upstream, so this commit is not pushed."
+  exit 0
+fi
+
+# The command git would run for ssh, in git's own order of precedence. GIT_SSH
+# names a program, not a shell command, so it is quoted.
+configured_ssh_command() {
+  if [ -n "$GIT_SSH_COMMAND" ]; then
+    echo "$GIT_SSH_COMMAND"
+  elif git config --get core.sshCommand; then
+    :
+  elif [ -n "$GIT_SSH" ]; then
+    printf '%q\n' "$GIT_SSH"
+  else
+    echo ssh
+  fi
+}
+
+export GIT_SSH_COMMAND="$(configured_ssh_command) -o ConnectTimeout=$CONNECT_TIMEOUT_SECONDS -o BatchMode=yes"
+export GIT_TERMINAL_PROMPT=0
+
+if ! push_errors=$(git push --quiet "$remote" "HEAD:$upstream" 2>&1 >/dev/null </dev/null); then
+  printf '%s\n' "$push_errors" >&2
+  if [[ $push_errors == *"[rejected]"* ]]; then
+    warn "could not push $branch: $remote has commits this clone lacks. The commit is kept here; pull, and the next commit's push takes it along."
+  else
+    warn "could not push $branch to $remote. The commit is kept here, and the next commit's push takes it along."
+  fi
+fi
+exit 0
