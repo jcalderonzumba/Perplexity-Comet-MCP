@@ -14,7 +14,12 @@ import {
   it,
 } from "vitest";
 
-import { GitSandbox, type Outcome, pathWith } from "./support/git-sandbox.ts";
+import {
+  GIT_HEAVY_TEST_MS,
+  GitSandbox,
+  type Outcome,
+  pathWith,
+} from "./support/git-sandbox.ts";
 
 let sandbox: GitSandbox;
 let pathWithoutJq: string;
@@ -81,6 +86,7 @@ function decision(
 
 describe.each(["pr-gate.sh", "protect-main.sh"])(
   "%s fails closed",
+  { timeout: GIT_HEAVY_TEST_MS },
   (script) => {
     const command = script === "pr-gate.sh" ? "gh pr list" : "git status";
 
@@ -109,7 +115,7 @@ describe.each(["pr-gate.sh", "protect-main.sh"])(
   },
 );
 
-describe("pr-gate.sh", () => {
+describe("pr-gate.sh", { timeout: GIT_HEAVY_TEST_MS }, () => {
   beforeEach(() => {
     sandbox.git("switch", "--quiet", "--create", "feat/working-model-p9-x");
   });
@@ -178,7 +184,7 @@ describe("pr-gate.sh", () => {
   });
 });
 
-describe("protect-main.sh", () => {
+describe("protect-main.sh", { timeout: GIT_HEAVY_TEST_MS }, () => {
   it.each([
     "git commit -m x",
     "git merge feat/x",
@@ -217,7 +223,9 @@ describe("protect-main.sh", () => {
   });
 });
 
-describe("protect-main.sh and the private notebook", () => {
+describe("protect-main.sh and the private notebook", {
+  timeout: GIT_HEAVY_TEST_MS,
+}, () => {
   it.each([
     'git -C .work commit -m "docs(plan): tick 1.2"',
     "git -C .work push origin main",
@@ -247,7 +255,9 @@ describe("protect-main.sh and the private notebook", () => {
   });
 });
 
-describe("protect-main.sh and git's global options", () => {
+describe("protect-main.sh and git's global options", {
+  timeout: GIT_HEAVY_TEST_MS,
+}, () => {
   it.each([
     "git -c user.name=x commit -m x",
     "git -c core.hooksPath=/dev/null commit -m x",
@@ -295,7 +305,9 @@ describe("protect-main.sh and git's global options", () => {
   });
 });
 
-describe("protect-main.sh and git's environment variables", () => {
+describe("protect-main.sh and git's environment variables", {
+  timeout: GIT_HEAVY_TEST_MS,
+}, () => {
   it.each([
     "GIT_DIR=../.git GIT_WORK_TREE=.. git -C .work commit -m x",
     "GIT_WORK_TREE=.. git -C .work commit -m x",
@@ -324,7 +336,9 @@ describe("protect-main.sh and git's environment variables", () => {
   });
 });
 
-describe("protect-main.sh and quoted arguments", () => {
+describe("protect-main.sh and quoted arguments", {
+  timeout: GIT_HEAVY_TEST_MS,
+}, () => {
   it.each([
     'git --git-dir "../a b/.git" commit -m x',
     'git --git-dir="../a b/.git" commit -m x',
@@ -374,7 +388,9 @@ describe("protect-main.sh and quoted arguments", () => {
   });
 });
 
-describe("protect-main.sh without CLAUDE_PROJECT_DIR", () => {
+describe("protect-main.sh without CLAUDE_PROJECT_DIR", {
+  timeout: GIT_HEAVY_TEST_MS,
+}, () => {
   it("judges the branch of the working directory and denies a commit on main", () => {
     // PWD is removed too, so bash sets it from the child's real working directory
     // (the sandbox) instead of inheriting the test runner's.
