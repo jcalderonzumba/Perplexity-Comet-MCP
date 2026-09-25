@@ -111,6 +111,8 @@ Code, comments, commit messages, docs and tool output in English.
 
 First run: `npm ci`, then `git config core.hooksPath .githooks`, plus `codegraph init` once per machine if you want the code graph. See the README for prerequisites.
 
+With the notebook `.work/` in the clone, also run `git -C .work config core.hooksPath ../.githooks/notebook` once: `.githooks/notebook/post-commit` then pushes every notebook commit to the notebook's remote, and a push that fails (offline, or an SSH remote that does not answer within 5 seconds) warns without failing the commit, so the next commit pushes both. The hook is read from the public checkout, so it runs only while the checked-out branch contains it: a notebook commit made on an older branch is not pushed until the next commit made with the hook present.
+
 | Command | What |
 |---|---|
 | `npm run build` | `tsc` to `dist/` |

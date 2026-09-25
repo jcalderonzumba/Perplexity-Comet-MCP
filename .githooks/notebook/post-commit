@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+# Push every commit of the repository this hook runs in to its upstream, so no
+# commit stays on this machine alone. A repository opts in once per clone, for
+# the notebook: git -C .work config core.hooksPath ../.githooks/notebook
+#
+# It is a plain push of the current branch to the branch it tracks: never a
+# force push, never other refs. A push that fails prints a warning and leaves
+# the commit in place; the next commit's push takes it along. The hook always
+# exits 0, so it never fails a commit.
+#
+# ConnectTimeout bounds an SSH remote only: with an HTTPS remote the timeout
+# does not apply. BatchMode keeps ssh from waiting on a prompt nobody sees.
+
+readonly CONNECT_TIMEOUT_SECONDS=5
+
+warn() {
+  echo "post-commit: $*" >&2
+}
+
+branch=$(git symbolic-ref --quiet --short HEAD) || exit 0 # detached: nothing to push
+remote=$(git config --get "branch.$branch.remote")
+upstream=$(git config --get "branch.$branch.merge")
+if [ -z "$remote" ] || [ -z "$upstream" ]; then
+  warn "$branch has no upstream, so this commit is not pushed."
+  exit 0
+fi
+
+ssh_command=${GIT_SSH_COMMAND:-$(git config --get core.sshCommand || echo ssh)}
+export GIT_SSH_COMMAND="$ssh_command -o ConnectTimeout=$CONNECT_TIMEOUT_SECONDS -o BatchMode=yes"
+
+if ! git push --quiet "$remote" "HEAD:$upstream" </dev/null; then
+  warn "could not push $branch to $remote. The commit is kept here, and the next commit's push takes it along."
+fi
+exit 0
