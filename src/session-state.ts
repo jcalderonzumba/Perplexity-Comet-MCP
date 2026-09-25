@@ -1,7 +1,9 @@
-// Session state for tracking task progress and preventing stale responses
+// The stdio server's task state, one `AskTaskState` for the whole process,
+// behind the functions its handlers call. The ask core holds a task state of
+// its own; this module goes once the handlers use the core's.
 
-import { randomUUID } from "crypto";
 import { cometAI } from "./comet-ai.js";
+import { AskTaskState, generateTaskId as taskIdAt } from "./core/ask-task.js";
 
 export interface SessionState {
   currentTaskId: string | null;
@@ -13,46 +15,24 @@ export interface SessionState {
   isActive: boolean;
 }
 
-export const sessionState: SessionState = {
-  currentTaskId: null,
-  taskStartTime: null,
-  lastPrompt: null,
-  lastResponse: null,
-  lastResponseTime: null,
-  steps: [],
-  isActive: false,
-};
+const task = new AskTaskState();
+
+export const sessionState: SessionState = task;
 
 export function generateTaskId(): string {
-  // crypto.randomUUID gives ~122 bits of entropy — no collision risk even
-  // with concurrent callers in the same millisecond. The previous
-  // `Math.random().toString(36).substring(2, 8)` form yielded ~31 bits
-  // and relied on `Date.now()` to disambiguate, which fails under
-  // sub-ms-spaced calls.
-  return `task_${Date.now()}_${randomUUID()}`;
+  return taskIdAt(Date.now());
 }
 
 export function startNewTask(prompt: string): string {
-  const taskId = generateTaskId();
-  sessionState.currentTaskId = taskId;
-  sessionState.taskStartTime = Date.now();
-  sessionState.lastPrompt = prompt;
-  sessionState.lastResponse = null;
-  sessionState.lastResponseTime = null;
-  sessionState.steps = [];
-  sessionState.isActive = true;
+  const taskId = task.start(prompt);
   cometAI.resetStabilityTracking();
   return taskId;
 }
 
 export function completeTask(response: string): void {
-  sessionState.lastResponse = response;
-  sessionState.lastResponseTime = Date.now();
-  sessionState.isActive = false;
+  task.complete(response);
 }
 
 export function isSessionStale(): boolean {
-  if (!sessionState.taskStartTime) return true;
-  // Consider session stale if no activity for 5 minutes
-  return Date.now() - sessionState.taskStartTime > 5 * 60 * 1000;
+  return task.isStale();
 }

@@ -1,9 +1,10 @@
 import { describe, expect, it } from "vitest";
-
+import { AskCore } from "../../src/core/ask.js";
 import {
   reapplyModeBeforeAsk,
   withModeNotice,
 } from "../../src/core/ask-mode.js";
+import { describeAskOutcome } from "../../src/core/ask-reply.js";
 import { ModeCore } from "../../src/core/mode.js";
 import { answerModeTool } from "../../src/core/mode-tool.js";
 import { wrapUntrustedPageContent } from "../../src/untrusted.js";
@@ -39,6 +40,11 @@ import {
   UPLOAD_TEST_FILE,
   wholeAnswer,
 } from "../lib/pro-checks.mjs";
+import {
+  FakeAskPort,
+  type PageReading,
+  reading,
+} from "../unit/fakes/fake-ask-port.js";
 import { FakeModePage } from "../unit/fakes/fake-mode-page.js";
 import {
   error,
@@ -311,6 +317,56 @@ describe("timeoutStated [2.4]", () => {
         elapsedMs: 4200,
       }),
     ).toBe(false);
+  });
+});
+
+describe("the ask predicates against the ask core's own replies", () => {
+  /** The reply `comet_ask` gives for the core's outcome of `args`. */
+  async function askReply(
+    after: PageReading[],
+    args: Record<string, unknown>,
+  ): Promise<ToolReply> {
+    const port = new FakeAskPort();
+    port.after = after;
+    const core = new AskCore({
+      port,
+      mode: {
+        core: new ModeCore(new FakeModePage()),
+        quotePage: wrapUntrustedPageContent,
+      },
+      cometPort: 9222,
+    });
+    const { text, isError } = describeAskOutcome(
+      await core.ask(args),
+      wrapUntrustedPageContent,
+    );
+    return isError ? error(text) : ok(text);
+  }
+
+  const RUNS_OUT = [
+    reading("Rome was founded", { hasStopButton: true, steps: ["Writing"] }),
+  ];
+
+  it("timeoutStated [2.4] holds on the core's timeout reply", async () => {
+    const reply = await askReply(RUNS_OUT, { prompt: "essay", timeout: 3000 });
+
+    expect(timeoutStated({ reply, elapsedMs: 4200 })).toBe(true);
+  });
+
+  it("answered counts the core's timeout reply as not final", async () => {
+    const reply = await askReply(RUNS_OUT, { prompt: "essay", timeout: 3000 });
+
+    expect(answered(reply)).toBe(false);
+  });
+
+  it("answered and answerNames hold on the core's answer reply", async () => {
+    const reply = await askReply(
+      [reading("VERI"), reading("VERIFIED", { status: "completed" })],
+      { prompt: "Reply with exactly one word: VERIFIED" },
+    );
+
+    expect(answered(reply)).toBe(true);
+    expect(answerNames(reply, "VERIFIED")).toBe(true);
   });
 });
 

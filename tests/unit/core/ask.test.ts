@@ -1,0 +1,594 @@
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { describe, expect, it } from "vitest";
+import {
+  ASK_TIMING,
+  AskCore,
+  type AskOutcome,
+  PERPLEXITY_HOME,
+} from "../../../src/core/ask.js";
+import { ASK_DEFAULT_TIMEOUT_MS } from "../../../src/core/ask-input.js";
+import { ModeCore } from "../../../src/core/mode.js";
+import type { PageArgument } from "../../../src/page-scripts.js";
+import {
+  FakeAskPort,
+  MAIN_TAB,
+  type PageReading,
+  reading,
+  SIDECAR_TAB,
+  USER_TAB,
+} from "../fakes/fake-ask-port.js";
+import { FakeModePage } from "../fakes/fake-mode-page.js";
+
+const COMET_PORT = 9333;
+const quote = (pageText: string) => `<<${pageText}>>`;
+
+const PREVIOUS_ANSWER =
+  "The previous turn's answer, still on the page when the new prompt is sent.";
+const LONG_ANSWER =
+  "Paris is the capital of France. It has been the country's capital for most of its history, and it is its largest city.";
+
+/** A mode page that logs its reads in the port's call log. */
+class LoggedModePage extends FakeModePage {
+  constructor(private readonly log: string[]) {
+    super();
+  }
+
+  override run<A extends PageArgument[], R>(
+    script: (...args: A) => R,
+    ...args: A
+  ): Promise<R> {
+    this.log.push(`mode:${script.name}`);
+    return super.run(script, ...args);
+  }
+}
+
+interface Rig {
+  port: FakeAskPort;
+  modePage: LoggedModePage;
+  modeCore: ModeCore;
+  core: AskCore;
+}
+
+function rig(): Rig {
+  const port = new FakeAskPort();
+  const modePage = new LoggedModePage(port.calls);
+  const modeCore = new ModeCore(modePage);
+  const core = new AskCore({
+    port,
+    mode: { core: modeCore, quotePage: quote },
+    cometPort: COMET_PORT,
+  });
+  return { port, modePage, modeCore, core };
+}
+
+/** A rig whose page answers with `after`, poll by poll. */
+function answering(after: Array<PageReading | Error>): Rig {
+  const built = rig();
+  built.port.after = after;
+  return built;
+}
+
+function answerOf(outcome: AskOutcome): string {
+  if (outcome.kind !== "answered") {
+    throw new Error(`expected an answer, got ${JSON.stringify(outcome)}`);
+  }
+  return outcome.answer;
+}
+
+/** The answer streams in over two polls, then the page says it is complete. */
+const STREAMED_THEN_COMPLETED = [
+  reading("Paris is"),
+  reading(LONG_ANSWER),
+  reading(LONG_ANSWER, { status: "completed" }),
+];
+
+describe("AskCore.ask: input", () => {
+  it.each([
+    ["an empty prompt", { prompt: "   " }, /^prompt cannot be empty$/],
+    ["a text timeout", { prompt: "q", timeout: "soon" }, /^timeout must be/],
+    ["a negative timeout", { prompt: "q", timeout: -1 }, /^timeout must be/],
+    ["a string newChat", { prompt: "q", newChat: "false" }, /^newChat must be/],
+  ])("refuses %s before any port call", async (_, args, reason) => {
+    const { port, core } = answering(STREAMED_THEN_COMPLETED);
+
+    const outcome = await core.ask(args);
+
+    expect(outcome.kind).toBe("refused");
+    expect(outcome.kind === "refused" && outcome.reason).toMatch(reason);
+    expect(port.calls).toEqual([]);
+    expect(core.task.currentTaskId).toBeNull();
+  });
+
+  it("waits the default time when the timeout is absent or zero", async () => {
+    for (const timeout of [undefined, 0]) {
+      const { port, core } = answering([reading("Paris is")]);
+
+      const outcome = await core.ask({ prompt: "q", timeout });
+
+      expect(outcome.kind).toBe("timed-out");
+      expect(port.waitedMs).toBeGreaterThanOrEqual(ASK_DEFAULT_TIMEOUT_MS);
+      expect(port.waitedMs).toBeLessThan(
+        ASK_DEFAULT_TIMEOUT_MS + ASK_TIMING.pollMs * 2,
+      );
+    }
+  });
+
+  it("waits the number a numeric string names", async () => {
+    const { port, core } = answering([reading("Paris is")]);
+
+    await core.ask({ prompt: "q", timeout: "6000" });
+
+    expect(port.waitedMs).toBeGreaterThanOrEqual(6000);
+    expect(port.waitedMs).toBeLessThan(6000 + ASK_TIMING.pollMs * 2);
+  });
+});
+
+describe("AskCore.ask: the prompt sent", () => {
+  it("sends the context before the prompt, on one line", async () => {
+    const { port, core } = answering(STREAMED_THEN_COMPLETED);
+
+    const outcome = await core.ask({
+      prompt: "what is the project name?",
+      context: "name: comet\nlanguage: TypeScript",
+    });
+
+    expect(port.sentPrompts).toEqual([
+      "Context for this task: ``` name: comet language: TypeScript ``` Based on the above context, what is the project name?",
+    ]);
+    expect(answerOf(outcome)).toBe(LONG_ANSWER);
+  });
+
+  it("asks the browser to navigate to a URL the prompt names", async () => {
+    const { port, core } = answering(STREAMED_THEN_COMPLETED);
+
+    const outcome = await core.ask({ prompt: "https://example.com" });
+
+    expect(port.sentPrompts).toEqual([
+      "Use your browser to navigate to https://example.com and tell me what you find there",
+    ]);
+    expect(answerOf(outcome)).toBe(LONG_ANSWER);
+  });
+
+  it("asks the browser to go to a site the prompt names", async () => {
+    const { port, core } = answering(STREAMED_THEN_COMPLETED);
+
+    const outcome = await core.ask({
+      prompt: "What is on the example.com homepage?",
+    });
+
+    expect(port.sentPrompts).toEqual([
+      "Use your browser to go and What is on the example.com homepage?",
+    ]);
+    expect(answerOf(outcome)).toBe(LONG_ANSWER);
+  });
+
+  it("leaves a prompt that already asks for the browser alone", async () => {
+    const { port, core } = answering(STREAMED_THEN_COMPLETED);
+
+    const outcome = await core.ask({
+      prompt: "Use your browser to open example.com",
+    });
+
+    expect(port.sentPrompts).toEqual(["Use your browser to open example.com"]);
+    expect(answerOf(outcome)).toBe(LONG_ANSWER);
+  });
+
+  it("starts a task for the prompt with its context", async () => {
+    const { core } = answering(STREAMED_THEN_COMPLETED);
+
+    const outcome = await core.ask({ prompt: "q", context: "c" });
+
+    expect(core.task.lastPrompt).toBe(
+      "Context for this task:\n```\nc\n```\n\nBased on the above context, q",
+    );
+    expect(answerOf(outcome)).toBe(LONG_ANSWER);
+  });
+});
+
+describe("AskCore.ask: the tab it asks in", () => {
+  it("opens Perplexity's home page for a new chat", async () => {
+    const { port, core } = answering(STREAMED_THEN_COMPLETED);
+
+    const outcome = await core.ask({ prompt: "q", newChat: true });
+
+    expect(port.navigations).toEqual([PERPLEXITY_HOME]);
+    expect(answerOf(outcome)).toBe(LONG_ANSWER);
+  });
+
+  it("asks a follow-up in the main Perplexity tab, without navigating", async () => {
+    const { port, core } = answering(STREAMED_THEN_COMPLETED);
+    port.targets = [SIDECAR_TAB, MAIN_TAB];
+
+    const outcome = await core.ask({ prompt: "q" });
+
+    expect(port.connectedTo).toEqual([MAIN_TAB.id]);
+    expect(port.navigations).toEqual([]);
+    expect(answerOf(outcome)).toBe(LONG_ANSWER);
+  });
+
+  it("moves a follow-up to Perplexity when the tab is elsewhere", async () => {
+    const { port, core } = answering(STREAMED_THEN_COMPLETED);
+    port.targets = [USER_TAB];
+    port.url = USER_TAB.url;
+
+    const outcome = await core.ask({ prompt: "q" });
+
+    expect(port.navigations).toEqual([PERPLEXITY_HOME]);
+    expect(answerOf(outcome)).toBe(LONG_ANSWER);
+  });
+
+  it("connects to a Perplexity tab when a new chat's navigation fails", async () => {
+    const { port, core } = answering(STREAMED_THEN_COMPLETED);
+    port.navigationFails = true;
+    port.targets = [USER_TAB, MAIN_TAB];
+
+    const outcome = await core.ask({ prompt: "q", newChat: true });
+
+    expect(port.connectedTo).toEqual([MAIN_TAB.id]);
+    expect(answerOf(outcome)).toBe(LONG_ANSWER);
+  });
+
+  it("recovers a lost connection by starting Comet on the configured port and connecting to the main tab", async () => {
+    const { port, core } = answering(STREAMED_THEN_COMPLETED);
+    port.preCheckFails = true;
+    port.targets = [USER_TAB, SIDECAR_TAB, MAIN_TAB];
+
+    const outcome = await core.ask({ prompt: "q" });
+
+    expect(port.cometPorts).toEqual([COMET_PORT]);
+    expect(port.connectedTo[0]).toBe(MAIN_TAB.id);
+    expect(answerOf(outcome)).toBe(LONG_ANSWER);
+  });
+
+  it("fails without sending when the connection cannot be recovered", async () => {
+    const { port, core } = answering(STREAMED_THEN_COMPLETED);
+    port.preCheckFails = true;
+    port.recoveryFails = true;
+
+    const outcome = await core.ask({ prompt: "q" });
+
+    expect(outcome).toEqual({
+      kind: "failed",
+      message: "Failed to establish connection to Comet browser",
+      notice: { line: null },
+    });
+    expect(port.sentPrompts).toEqual([]);
+  });
+});
+
+describe("AskCore.ask: the mode step", () => {
+  async function rememberResearch({ modeCore, modePage, port }: Rig) {
+    await modeCore.switchMode("research");
+    port.onNavigate = () => modePage.navigateTo("Search");
+    port.calls.length = 0;
+  }
+
+  it("runs after the ask's navigation and before the prompt is sent", async () => {
+    const built = answering(STREAMED_THEN_COMPLETED);
+    await rememberResearch(built);
+
+    const outcome = await built.core.ask({ prompt: "q", newChat: true });
+
+    expect(answerOf(outcome)).toBe(LONG_ANSWER);
+    const { calls } = built.port;
+    const firstModeRead = calls.indexOf("mode:locateModeButton");
+    expect(firstModeRead).toBeGreaterThan(calls.lastIndexOf("navigate"));
+    expect(calls.lastIndexOf("mode:locateModeButton")).toBeLessThan(
+      calls.indexOf("sendPrompt"),
+    );
+    expect(built.modePage.checked).toBe("Deep research");
+  });
+
+  it("runs after the connection is recovered", async () => {
+    const built = answering(STREAMED_THEN_COMPLETED);
+    await rememberResearch(built);
+    built.port.preCheckFails = true;
+
+    const outcome = await built.core.ask({ prompt: "q" });
+
+    expect(answerOf(outcome)).toBe(LONG_ANSWER);
+    const { calls } = built.port;
+    expect(calls.indexOf("mode:locateModeButton")).toBeGreaterThan(
+      calls.lastIndexOf("connect"),
+    );
+  });
+
+  it("leaves the answer alone when the mode is applied", async () => {
+    const built = answering(STREAMED_THEN_COMPLETED);
+    await rememberResearch(built);
+
+    const outcome = await built.core.ask({ prompt: "q", newChat: true });
+
+    expect(outcome).toEqual({
+      kind: "answered",
+      answer: LONG_ANSWER,
+      notice: { line: null },
+    });
+  });
+
+  it("carries the failed step's line, quoted by the adapter, and still asks", async () => {
+    const built = answering(STREAMED_THEN_COMPLETED);
+    await rememberResearch(built);
+    built.modePage.selectionTakes = false;
+
+    const outcome = await built.core.ask({ prompt: "q", newChat: true });
+
+    expect(answerOf(outcome)).toBe(LONG_ANSWER);
+    expect(outcome.kind === "answered" && outcome.notice.line).toBe(
+      'Mode not applied: this answer may not be in research mode. Cannot switch to research mode: after selecting "Deep research" the menu has <<Search>> checked and the mode button reads <<Search>>',
+    );
+    expect(built.port.sentPrompts).toHaveLength(1);
+  });
+
+  it("carries the line on a timeout too", async () => {
+    const built = answering([reading("Paris is")]);
+    await rememberResearch(built);
+    built.modePage.selectionTakes = false;
+
+    const outcome = await built.core.ask({
+      prompt: "q",
+      newChat: true,
+      timeout: 3000,
+    });
+
+    expect(outcome.kind).toBe("timed-out");
+    expect(outcome.kind === "timed-out" && outcome.notice.line).toMatch(
+      /^Mode not applied:/,
+    );
+  });
+});
+
+describe("AskCore.ask: when the answer is complete", () => {
+  it("returns the answer once the page says it is completed", async () => {
+    const { core } = answering(STREAMED_THEN_COMPLETED);
+
+    const outcome = await core.ask({ prompt: "q" });
+
+    expect(answerOf(outcome)).toBe(LONG_ANSWER);
+  });
+
+  it("returns the answer once it is stable and no stop button shows", async () => {
+    const { port, core } = answering([
+      reading("Paris is", { hasStopButton: true }),
+      reading(LONG_ANSWER, { isStable: true, hasStopButton: true }),
+      reading(LONG_ANSWER, { isStable: true }),
+    ]);
+
+    const outcome = await core.ask({ prompt: "q" });
+
+    expect(answerOf(outcome)).toBe(LONG_ANSWER);
+    expect(port.polls).toBe(3);
+  });
+
+  it("returns a long answer once the page has been idle for a while", async () => {
+    const { port, core } = answering([
+      reading("Paris is"),
+      reading(LONG_ANSWER),
+    ]);
+
+    const outcome = await core.ask({ prompt: "q" });
+
+    expect(answerOf(outcome)).toBe(LONG_ANSWER);
+    const appearedAt = 2 * ASK_TIMING.pollMs;
+    expect(port.waitedMs - appearedAt).toBeGreaterThan(ASK_TIMING.idleMs);
+    expect(port.waitedMs - appearedAt).toBeLessThanOrEqual(
+      ASK_TIMING.idleMs + ASK_TIMING.pollMs,
+    );
+  });
+
+  it("completes the task with the answer", async () => {
+    const { core } = answering(STREAMED_THEN_COMPLETED);
+
+    await core.ask({ prompt: "q" });
+
+    expect(core.task.isActive).toBe(false);
+    expect(core.task.lastResponse).toBe(LONG_ANSWER);
+  });
+
+  it("collects the steps the page shows, once each", async () => {
+    const { core } = answering([
+      reading("", { steps: ["Searching"] }),
+      reading("Paris is", { steps: ["Searching", "Reading sources"] }),
+      reading(LONG_ANSWER, { status: "completed", steps: ["Reading sources"] }),
+    ]);
+
+    await core.ask({ prompt: "q" });
+
+    expect(core.task.steps).toEqual(["Searching", "Reading sources"]);
+  });
+
+  it("keeps waiting through a poll the page fails", async () => {
+    const { core } = answering([
+      reading("Paris is"),
+      new Error("Execution context was destroyed"),
+      reading(LONG_ANSWER, { status: "completed" }),
+    ]);
+
+    const outcome = await core.ask({ prompt: "q" });
+
+    expect(answerOf(outcome)).toBe(LONG_ANSWER);
+  });
+});
+
+describe("AskCore.ask: never the previous turn's answer", () => {
+  function onAPageShowing(after: PageReading[]): Rig {
+    const built = answering(after);
+    built.port.before = reading(PREVIOUS_ANSWER, {
+      status: "completed",
+      isStable: true,
+    });
+    return built;
+  }
+
+  it("does not return a response equal to the one on the page before sending", async () => {
+    const { core } = onAPageShowing([
+      reading(PREVIOUS_ANSWER, {
+        status: "completed",
+        isStable: true,
+        proseCount: 2,
+      }),
+    ]);
+
+    const outcome = await core.ask({ prompt: "q", timeout: 12000 });
+
+    expect(outcome.kind).toBe("timed-out");
+    expect(outcome.kind === "timed-out" && outcome.progress.partialAnswer).toBe(
+      "",
+    );
+  });
+
+  it("returns the new answer once it replaces the previous one", async () => {
+    const { core } = onAPageShowing([
+      reading(PREVIOUS_ANSWER, { status: "completed", proseCount: 2 }),
+      reading(LONG_ANSWER, { status: "completed", proseCount: 2 }),
+    ]);
+
+    const outcome = await core.ask({ prompt: "q" });
+
+    expect(answerOf(outcome)).toBe(LONG_ANSWER);
+  });
+
+  it("does not return an answer until the page shows a new response", async () => {
+    const { core } = onAPageShowing([
+      // The status reads a different text, but no new prose has appeared.
+      {
+        prose: { count: 1, lastText: PREVIOUS_ANSWER.slice(0, 100) },
+        status: reading(LONG_ANSWER, { status: "completed" }).status,
+      },
+    ]);
+
+    const outcome = await core.ask({ prompt: "q", timeout: 6000 });
+
+    expect(outcome.kind).toBe("timed-out");
+  });
+});
+
+describe("AskCore.ask: when time runs out", () => {
+  const STREAMING = [
+    reading("Rome was", { hasStopButton: true, steps: ["Searching"] }),
+    reading("Rome was founded", {
+      hasStopButton: true,
+      steps: ["Searching", "Writing"],
+      currentStep: "Writing",
+    }),
+  ];
+
+  it("says the answer may be incomplete, with the partial text and the progress", async () => {
+    const { core } = answering(STREAMING);
+
+    const outcome = await core.ask({ prompt: "q", timeout: 3000 });
+
+    expect(outcome).toEqual({
+      kind: "timed-out",
+      timeoutMs: 3000,
+      progress: {
+        status: "working",
+        partialAnswer: "Rome was founded",
+        currentStep: "Writing",
+        steps: ["Searching", "Writing"],
+      },
+      notice: { line: null },
+    });
+  });
+
+  it("returns within a poll of its time", async () => {
+    const { port, core } = answering(STREAMING);
+
+    await core.ask({ prompt: "q", timeout: 3000 });
+
+    expect(port.waitedMs).toBeGreaterThanOrEqual(3000);
+    expect(port.waitedMs).toBeLessThan(3000 + ASK_TIMING.pollMs);
+  });
+
+  it("returns a long partial text as partial, never as the answer", async () => {
+    const { core } = answering([reading(LONG_ANSWER, { hasStopButton: true })]);
+
+    const outcome = await core.ask({ prompt: "q", timeout: 3000 });
+
+    expect(outcome.kind).toBe("timed-out");
+    expect(outcome.kind === "timed-out" && outcome.progress.partialAnswer).toBe(
+      LONG_ANSWER,
+    );
+  });
+
+  it("keeps the task active, with its steps, so a poll can finish it", async () => {
+    const { core } = answering(STREAMING);
+
+    await core.ask({ prompt: "q", timeout: 3000 });
+
+    expect(core.task.isActive).toBe(true);
+    expect(core.task.lastResponse).toBeNull();
+    expect(core.task.steps).toEqual(["Searching", "Writing"]);
+  });
+
+  it("still times out, without page text, when the last read fails", async () => {
+    const { core } = answering([
+      reading("Rome was", { hasStopButton: true }),
+      new Error("Execution context was destroyed"),
+    ]);
+
+    const outcome = await core.ask({ prompt: "q", timeout: 3000 });
+
+    expect(outcome.kind).toBe("timed-out");
+    expect(outcome.kind === "timed-out" && outcome.progress).toEqual({
+      status: "unknown",
+      partialAnswer: "",
+      currentStep: "",
+      steps: [],
+    });
+  });
+});
+
+describe("AskCore.ask: failures", () => {
+  it("fails with the message when sending fails, keeping the mode line", async () => {
+    const built = answering(STREAMED_THEN_COMPLETED);
+    await built.modeCore.switchMode("research");
+    built.port.onNavigate = () => built.modePage.navigateTo("Search");
+    built.modePage.selectionTakes = false;
+    built.port.sendFailure = new Error("Could not find input element");
+
+    const outcome = await built.core.ask({ prompt: "q", newChat: true });
+
+    expect(outcome.kind).toBe("failed");
+    expect(outcome.kind === "failed" && outcome.message).toBe(
+      "Could not find input element",
+    );
+    expect(outcome.kind === "failed" && outcome.notice.line).toMatch(
+      /^Mode not applied:/,
+    );
+  });
+});
+
+describe("src/core/ask.ts and its siblings", () => {
+  const CORE = join(
+    dirname(fileURLToPath(import.meta.url)),
+    "..",
+    "..",
+    "..",
+    "src",
+    "core",
+  );
+  const FILES = ["ask.ts", "ask-input.ts", "ask-task.ts", "ask-reply.ts"];
+
+  it.each(FILES)(
+    "%s imports no adapter, CDP client or Comet module",
+    (file) => {
+      const source = readFileSync(join(CORE, file), "utf8");
+      const imports = [...source.matchAll(/from "([^"]+)"/g)].map((m) => m[1]);
+
+      for (const imported of imports) {
+        expect(imported).toMatch(
+          /^(\.\/(ask|ask-input|ask-task|ask-reply|ask-mode|mode|mode-tool)\.js|\.\.\/page-scripts\.js|\.\.\/modes\.js|node:crypto)$/,
+        );
+      }
+    },
+  );
+
+  it.each(FILES)("%s builds no script text", (file) => {
+    const source = readFileSync(join(CORE, file), "utf8");
+
+    expect(source).not.toMatch(/\bevaluate\b|\.toString\(\)|Runtime\./);
+  });
+});
