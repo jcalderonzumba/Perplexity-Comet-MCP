@@ -3,9 +3,12 @@
 # write to main. Reads the tool input JSON on stdin.
 #
 # Git commands aimed at the private notebook with `-C .work` (or `-C` any path
-# ending in /.work), with no other global option before the subcommand, are
-# exempt: .work/ is a repository of its own whose main is its only branch
-# (AGENTS.md, Where truth lives).
+# ending in /.work), with no other global option before the subcommand and no
+# GIT_ variable named before them, are exempt: .work/ is a repository of its own
+# whose main is its only branch (AGENTS.md, Where truth lives).
+#
+# It judges the command's text and never parses the shell: where the text could
+# be read either way, it refuses.
 #
 # It fails closed: without jq, or with a tool input jq cannot read, it cannot
 # tell a write to main from any other git command, so it refuses the command.
@@ -23,26 +26,47 @@ fi
 [ -z "$cmd" ] && exit 0
 root="${CLAUDE_PROJECT_DIR:-$PWD}"
 branch=$(git -C "$root" rev-parse --abbrev-ref HEAD 2>/dev/null || echo "")
+# A backslash-newline continues the shell line, so it is read as a space.
+continuation=$'\\\n'
+cmd=${cmd//"$continuation"/ }
+# One word of a git argument: quoted, backslash-escaped, or plain characters.
+quoted="\"[^\"]*\"|'[^']*'"
+word_part="${quoted}|\\\\.|[^[:space:]\"'\\\\]"
+separate_argument="(${quoted}|\\\\.|[^-[:space:]\"'\\\\])(${word_part})*"
 # git's global options that may come before the subcommand: -C and -c with their
-# argument (quoted or not), and any other long or short flag, a long one taking
-# at most one separate argument. No option names are listed, so an option git
-# adds later cannot walk past the rules; the cost is over-denying, never
-# under-denying.
-global_opts="([[:space:]]+(-[Cc][[:space:]]+(\"[^\"]*\"|'[^']*'|[^[:space:]]+)|--[a-z][a-z-]*(=[^[:space:]]*|[[:space:]]+[^-[:space:]][^[:space:]]*)?|-[a-zA-Z]))*"
+# argument, and any other long or short flag, a long one taking at most one
+# argument, separate or after `=`. An argument may be quoted or escaped, spaces
+# and all. No option names are listed, so an option git adds later cannot walk
+# past the rules; the cost is over-denying, never under-denying.
+global_opts="([[:space:]]+(-[Cc][[:space:]]+(${word_part})+|--[a-z][a-z-]*(=(${word_part})*|[[:space:]]+${separate_argument})?|-[a-zA-Z]))*"
+# Git also takes its repository, work tree and configuration from GIT_
+# variables (GIT_DIR, GIT_WORK_TREE, GIT_CONFIG_*, and more), and a variable set
+# earlier in the command (as a prefix, with env or with export) could point a
+# notebook command back here. So from the first GIT_ variable the command names
+# on, no git invocation is exempt.
+exemptable=$cmd
+judged_as_is=""
+git_variable='(^|[^[:alnum:]_])GIT_[A-Z0-9_]+'
+if [[ $cmd =~ $git_variable ]]; then
+  exemptable=${cmd%%"${BASH_REMATCH[0]}"*}
+  judged_as_is=${cmd:${#exemptable}}
+fi
 # A git invocation aimed at .work/, `git -C <…/.work> <subcommand>` with no other
 # global option, is rewritten to a word that no rule below matches, so only the
 # commands aimed at this repository are judged. Anything more (a second -C,
 # --git-dir, --work-tree) could point git back here, so it is judged too.
-public_cmd=$(printf '%s' "$cmd" | sed -E 's#(^|[^[:alnum:]_-])git[[:space:]]+-C[[:space:]]+([^[:space:]]*/)?\.work/?[[:space:]]+([a-z][a-z-]*)#\1notebook-git \3#g')
+public_cmd=$(printf '%s' "$exemptable" | sed -E 's#(^|[^[:alnum:]_-])git[[:space:]]+-C[[:space:]]+([^[:space:]]*/)?\.work/?[[:space:]]+([a-z][a-z-]*)#\1notebook-git \3#g')$judged_as_is
 if [ "$branch" = "main" ] && printf '%s' "$public_cmd" | grep -Eq "(^|[^[:alnum:]_-])git${global_opts}[[:space:]]+(commit|merge|rebase|cherry-pick|revert)([[:space:]]|\$)"; then
   deny "Direct writes to main are forbidden (AGENTS.md workflow). Create a branch: git switch -c feat/<plan>-p<phase>-<slug>"
 fi
 # Every push segment of the command is judged, one per line, and only its own
 # arguments, so the word "main" in a commit message or an echo elsewhere in a
-# compound command does not trigger. A leading + (a forced refspec) still names main.
+# compound command does not trigger. main counts as a ref wherever no character of
+# a ref name touches it: after a space, a `:`, a `/` or a forced refspec's `+`,
+# and beside a quote or a parenthesis.
 push_segments=$(printf '%s' "$public_cmd" | grep -oE "(^|[^[:alnum:]_-])git${global_opts}[[:space:]]+push([^&;|]*)")
 if [ -n "$push_segments" ]; then
-  if [ "$branch" = "main" ] || printf '%s\n' "$push_segments" | grep -Eq '(^|[[:space:]:/+])main([[:space:]]|$)'; then
+  if [ "$branch" = "main" ] || printf '%s\n' "$push_segments" | grep -Eq '(^|[^[:alnum:]_.-])main([^[:alnum:]_./:-]|$)'; then
     deny "Pushing to main is forbidden (AGENTS.md workflow). Push a feature branch and open a PR."
   fi
 fi

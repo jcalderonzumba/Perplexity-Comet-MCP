@@ -295,6 +295,85 @@ describe("protect-main.sh and git's global options", () => {
   });
 });
 
+describe("protect-main.sh and git's environment variables", () => {
+  it.each([
+    "GIT_DIR=../.git GIT_WORK_TREE=.. git -C .work commit -m x",
+    "GIT_WORK_TREE=.. git -C .work commit -m x",
+    "GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.worktree GIT_CONFIG_VALUE_0=.. git -C .work commit -m x",
+    "GIT_CONFIG_PARAMETERS=\"'core.worktree'='..'\" git -C .work push origin main",
+    // Any git variable, set anywhere before the notebook's git, not only these.
+    "GIT_COMMON_DIR=../.git git -C .work commit -m x",
+    "env GIT_DIR=../.git git -C .work commit -m x",
+    "export GIT_DIR=../.git; git -C .work commit -m x",
+    "export GIT_WORK_TREE=..\ngit -C .work commit -m x",
+  ])('denies "%s" on main', (command) => {
+    expect(decision(hook("protect-main.sh", toolInput(command)))).toMatchObject(
+      {
+        allowed: false,
+      },
+    );
+  });
+
+  it.each([
+    'git -C .work commit -m "docs: why GIT_DIR=.. is refused"',
+    "git -C .work add plans && git -C .work commit -m x",
+  ])('allows "%s" on main', (command) => {
+    expect(decision(hook("protect-main.sh", toolInput(command)))).toEqual({
+      allowed: true,
+    });
+  });
+});
+
+describe("protect-main.sh and quoted arguments", () => {
+  it.each([
+    'git --git-dir "../a b/.git" commit -m x',
+    'git --git-dir="../a b/.git" commit -m x',
+    "git --git-dir '../a b/.git' merge feat/x",
+    "git --work-tree='a b' commit -m x",
+    "git --work-tree a\\ b commit -m x",
+    "git --work-tree=a\\ b commit -m x",
+    'git -C "a b" commit -m x',
+    // A backslash-newline continues the shell line.
+    "git \\\ncommit -m x",
+    "git -c k=v \\\n  merge feat/x",
+  ])('denies "%s" on main', (command) => {
+    expect(decision(hook("protect-main.sh", toolInput(command)))).toMatchObject(
+      {
+        allowed: false,
+      },
+    );
+  });
+
+  it.each([
+    'git push origin "main"',
+    "git push origin 'main'",
+    'git push origin "HEAD:main"',
+    'git push origin HEAD:"main"',
+    "git push origin '+main'",
+    'git push origin "refs/heads/main"',
+    'git --git-dir "../a b/.git" push origin feat/x:main',
+    "(git push origin main)",
+  ])('denies "%s" from a branch', (command) => {
+    sandbox.git("switch", "--quiet", "--create", "feat/x");
+    expect(decision(hook("protect-main.sh", toolInput(command)))).toMatchObject(
+      {
+        allowed: false,
+      },
+    );
+  });
+
+  it.each([
+    'git push origin "feat/x"',
+    "git push origin feat/main-fix",
+    'git --git-dir "../a b/.git" push origin feat/x',
+  ])('allows "%s" from a branch', (command) => {
+    sandbox.git("switch", "--quiet", "--create", "feat/x");
+    expect(decision(hook("protect-main.sh", toolInput(command)))).toEqual({
+      allowed: true,
+    });
+  });
+});
+
 describe("protect-main.sh without CLAUDE_PROJECT_DIR", () => {
   it("judges the branch of the working directory and denies a commit on main", () => {
     // PWD is removed too, so bash sets it from the child's real working directory
