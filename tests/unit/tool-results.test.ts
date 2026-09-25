@@ -1,10 +1,14 @@
-// Each adapter's reply to a tool, in its transport's shape, and `comet_ask`'s
-// outcomes as each adapter renders them: the core's words, with page text
-// wrapped by the shared UNTRUSTED wrapper.
+// Each adapter's reply to a tool, in its transport's shape, and the outcomes
+// of `comet_ask`, `comet_poll` and `comet_stop` as each adapter renders them:
+// the core's words, with page text wrapped by the shared UNTRUSTED wrapper.
 
 import { describe, expect, it } from "vitest";
-import type { AskOutcome } from "../../src/core/ask.js";
-import { describeAskOutcome } from "../../src/core/ask-reply.js";
+import type { AskOutcome, PollOutcome } from "../../src/core/ask.js";
+import {
+  describeAskOutcome,
+  describePollOutcome,
+  describeStopOutcome,
+} from "../../src/core/ask-reply.js";
 import { toBridgeResult, toStdioResult } from "../../src/tool-results.js";
 import { wrapUntrustedPageContent } from "../../src/untrusted.js";
 
@@ -152,6 +156,74 @@ describe("comet_ask's refusal, as each adapter renders it", () => {
       success: false,
       content: "",
       error: "Error: prompt cannot be empty",
+    });
+  });
+});
+
+describe("comet_poll, as each adapter renders it", () => {
+  const STILL_WORKING: PollOutcome = {
+    kind: "working",
+    taskId: "task_1_abc",
+    progress: {
+      status: "working",
+      partialAnswer: "Rome was founded",
+      currentStep: "Writing",
+      steps: ["Searching"],
+      browsingUrl: "https://history.example/rome",
+    },
+  };
+  const COMPLETED_EARLIER: PollOutcome = {
+    kind: "completed",
+    answer: "Rome was founded in 753 BC.",
+    secondsAgo: 2,
+  };
+  const PROGRESS =
+    "Browsing: https://history.example/rome\nCurrent: Writing\nSteps:\n  • Searching";
+
+  const polled = (outcome: PollOutcome) =>
+    describePollOutcome(outcome, wrapUntrustedPageContent);
+
+  it("wraps, over the bridge, the partial response and the steps of a task still working, marked partial", () => {
+    const result = toBridgeResult(polled(STILL_WORKING));
+
+    expect(result.success).toBe(true);
+    expect(result.content).toMatch(/^Status: WORKING\n/);
+    expect(result.content).toContain("may be incomplete");
+    expect(result.content).toMatch(new RegExp(wrapped("Rome was founded")));
+    expect(result.content).toMatch(new RegExp(wrapped(PROGRESS)));
+  });
+
+  it("wraps, over the bridge, the last response of a completed task", () => {
+    const result = toBridgeResult(polled(COMPLETED_EARLIER));
+
+    expect(result).toEqual({ success: true, content: expect.any(String) });
+    expect(result.content).toMatch(
+      new RegExp(
+        `^Status: COMPLETED \\(2s ago\\)\\n\\n${wrapped("Rome was founded in 753 BC.")}$`,
+      ),
+    );
+  });
+
+  it("wraps the same page text over stdio", () => {
+    const working = textOf(toStdioResult(polled(STILL_WORKING)));
+    const completed = textOf(toStdioResult(polled(COMPLETED_EARLIER)));
+
+    expect(working).toMatch(new RegExp(wrapped("Rome was founded")));
+    expect(working).toMatch(new RegExp(wrapped(PROGRESS)));
+    expect(completed).toMatch(
+      new RegExp(wrapped("Rome was founded in 753 BC.")),
+    );
+  });
+});
+
+describe("comet_stop, as each adapter renders it", () => {
+  it("says what it stopped, as a success, over stdio and over the bridge", () => {
+    expect(toStdioResult(describeStopOutcome({ stopped: true }))).toEqual({
+      content: [{ type: "text", text: "Agent stopped" }],
+    });
+    expect(toBridgeResult(describeStopOutcome({ stopped: false }))).toEqual({
+      success: true,
+      content: "No active agent to stop",
     });
   });
 });

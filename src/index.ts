@@ -18,7 +18,11 @@ import { createCdpAskCore } from "./cdp-ask-port.js";
 import { cometClient, DEFAULT_PORT } from "./cdp-client.js";
 import { createCdpModeTool } from "./cdp-mode-page.js";
 import { cometAI } from "./comet-ai.js";
-import { describeAskOutcome } from "./core/ask-reply.js";
+import {
+  describeAskOutcome,
+  describePollOutcome,
+  describeStopOutcome,
+} from "./core/ask-reply.js";
 import { answerModeTool, COMET_MODE_TOOL } from "./core/mode-tool.js";
 import { toStdioResult } from "./tool-results.js";
 import { wrapUntrustedPageContent } from "./untrusted.js";
@@ -237,106 +241,13 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           describeAskOutcome(await askCore.ask(args), wrapUntrustedPageContent),
         );
 
-      case "comet_poll": {
-        // Check if there's an active task session
-        if (!askCore.task.isActive && !askCore.task.currentTaskId) {
-          return {
-            content: [
-              {
-                type: "text",
-                text: "Status: IDLE\nNo active task. Use comet_ask to start a new task.",
-              },
-            ],
-          };
-        }
+      case "comet_poll":
+        return toStdioResult(
+          describePollOutcome(await askCore.poll(), wrapUntrustedPageContent),
+        );
 
-        // Check for stale session (no activity for 5+ minutes)
-        if (askCore.task.isStale() && !askCore.task.isActive) {
-          return {
-            content: [
-              {
-                type: "text",
-                text: "Status: IDLE\nPrevious task session expired. Use comet_ask to start a new task.",
-              },
-            ],
-          };
-        }
-
-        // If task was already completed, return the cached response
-        if (!askCore.task.isActive && askCore.task.lastResponse) {
-          const timeSinceComplete = askCore.task.lastResponseTime
-            ? Math.round((Date.now() - askCore.task.lastResponseTime) / 1000)
-            : 0;
-          return {
-            content: [
-              {
-                type: "text",
-                text: `Status: COMPLETED (${timeSinceComplete}s ago)\n\n${wrapUntrustedPageContent(askCore.task.lastResponse)}`,
-              },
-            ],
-          };
-        }
-
-        // Active task - get fresh status from Perplexity
-        await cometClient.ensureOnPerplexityTab();
-        const status = await cometAI.getAgentStatus();
-
-        // If completed, update session state and return response
-        if (status.status === "completed" && status.response) {
-          askCore.task.complete(status.response);
-          return {
-            content: [
-              { type: "text", text: wrapUntrustedPageContent(status.response) },
-            ],
-          };
-        }
-
-        // Still working - return progress info. As in the comet_ask
-        // timeout path, `agentBrowsingUrl`, `currentStep`, and `steps`
-        // come from the Perplexity DOM and may carry indirect prompt
-        // injection. Wrap the page-derived block; leave server-
-        // controlled scaffolding outside the markers.
-        let output = `Status: ${status.status.toUpperCase()}\n`;
-        if (askCore.task.currentTaskId) {
-          output += `Task: ${askCore.task.currentTaskId}\n`;
-        }
-
-        const allSteps = [...new Set([...askCore.task.steps, ...status.steps])];
-        let pageDerived = "";
-        if (status.agentBrowsingUrl) {
-          pageDerived += `Browsing: ${status.agentBrowsingUrl}\n`;
-        }
-        if (status.currentStep) {
-          pageDerived += `Current: ${status.currentStep}\n`;
-        }
-        if (allSteps.length > 0) {
-          pageDerived += `\nSteps:\n${allSteps.map((s) => `  • ${s}`).join("\n")}\n`;
-        }
-        if (pageDerived) {
-          output += wrapUntrustedPageContent(pageDerived) + "\n";
-        }
-
-        if (status.status === "working" || askCore.task.isActive) {
-          output += `\n[Use comet_stop to interrupt, or comet_screenshot to see current page]`;
-        }
-
-        return { content: [{ type: "text", text: output }] };
-      }
-
-      case "comet_stop": {
-        const stopped = await cometAI.stopAgent();
-        if (stopped) {
-          askCore.task.isActive = false;
-        }
-        return {
-          content: [
-            {
-              type: "text",
-              text: stopped ? "Agent stopped" : "No active agent to stop",
-            },
-          ],
-        };
-      }
+      case "comet_stop":
+        return toStdioResult(describeStopOutcome(await askCore.stop()));
 
       case "comet_screenshot": {
         const result = await cometClient.screenshot("png");

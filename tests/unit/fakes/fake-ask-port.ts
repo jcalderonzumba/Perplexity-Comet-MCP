@@ -51,6 +51,7 @@ export function reading(
       response,
       hasStopButton: false,
       isStable: false,
+      agentBrowsingUrl: "",
       ...status,
     },
   };
@@ -82,6 +83,8 @@ export class FakeAskPort implements AskPort {
   public navigationFails = false;
   public sendFailure: Error | undefined;
   public onPerplexityTab = true;
+  /** Whether the page shows a control that stops the answer. */
+  public hasStopControl = true;
   /** Runs on every navigation, as a real one resets the page's mode. */
   public onNavigate: (() => void) | undefined;
 
@@ -150,11 +153,13 @@ export class FakeAskPort implements AskPort {
   }
 
   async readProseState(): Promise<ProseState> {
+    this.calls.push("readProseState");
     if (this.sent) this.poll++;
     return this.current().prose;
   }
 
   async readStatus(): Promise<AskStatus> {
+    this.calls.push("readStatus");
     return this.current().status;
   }
 
@@ -168,6 +173,11 @@ export class FakeAskPort implements AskPort {
     this.sentPrompts.push(prompt);
     this.sent = true;
     return "Prompt sent";
+  }
+
+  async stopAgent(): Promise<boolean> {
+    this.calls.push("stopAgent");
+    return this.hasStopControl;
   }
 
   now(): number {

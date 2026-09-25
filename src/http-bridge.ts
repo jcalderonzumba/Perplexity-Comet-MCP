@@ -27,7 +27,11 @@ import { createCdpAskCore } from "./cdp-ask-port.js";
 import { cometClient, DEFAULT_PORT } from "./cdp-client.js";
 import { createCdpModeTool } from "./cdp-mode-page.js";
 import { cometAI } from "./comet-ai.js";
-import { describeAskOutcome } from "./core/ask-reply.js";
+import {
+  describeAskOutcome,
+  describePollOutcome,
+  describeStopOutcome,
+} from "./core/ask-reply.js";
 import { answerModeTool } from "./core/mode-tool.js";
 import {
   type BridgeToolResult as ToolResult,
@@ -122,45 +126,13 @@ async function handleAsk(args: Record<string, unknown>): Promise<ToolResult> {
 }
 
 async function handlePoll(): Promise<ToolResult> {
-  if (askCore.task.isStale()) {
-    return {
-      success: true,
-      content: "No active task (session stale or not started)",
-    };
-  }
-
-  const status = await cometAI.getAgentStatus();
-  const allSteps = [...new Set([...askCore.task.steps, ...status.steps])];
-
-  let output = "";
-  if (askCore.task.isActive) {
-    output = `Status: working\nPrompt: ${askCore.task.lastPrompt || "unknown"}\n`;
-    if (status.response) {
-      output += `\nPartial response:\n${status.response.substring(0, 500)}${status.response.length > 500 ? "..." : ""}`;
-    }
-  } else {
-    output = `Status: complete\nResponse:\n${askCore.task.lastResponse || "No response"}`;
-  }
-
-  if (allSteps.length > 0) {
-    output += `\nSteps:\n${allSteps.map((s) => `  • ${s}`).join("\n")}\n`;
-  }
-  if (status.status === "working" || askCore.task.isActive) {
-    output += `\n[Use comet_stop to interrupt, or comet_screenshot to see current page]`;
-  }
-
-  return { success: true, content: output };
+  return toBridgeResult(
+    describePollOutcome(await askCore.poll(), wrapUntrustedPageContent),
+  );
 }
 
 async function handleStop(): Promise<ToolResult> {
-  const stopped = await cometAI.stopAgent();
-  if (stopped) {
-    askCore.task.isActive = false;
-  }
-  return {
-    success: true,
-    content: stopped ? "Agent stopped" : "No active agent to stop",
-  };
+  return toBridgeResult(describeStopOutcome(await askCore.stop()));
 }
 
 async function handleScreenshot(): Promise<ToolResult> {

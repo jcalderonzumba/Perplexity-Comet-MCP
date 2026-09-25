@@ -89,12 +89,15 @@ export const WORKING_STATUS: AskStatus = {
   response: "Paris is",
   hasStopButton: true,
   isStable: false,
+  agentBrowsingUrl: "",
 };
 
 export class FakeAskComet implements AskPortComet {
   public readonly calls: string[] = [];
   public status: AskStatus = WORKING_STATUS;
   public sendFailure: Error | undefined;
+  /** Whether the page shows a control that stops the answer. */
+  public hasStopControl = true;
 
   async getAgentStatus(): Promise<AskStatus> {
     this.calls.push("getAgentStatus");
@@ -109,5 +112,10 @@ export class FakeAskComet implements AskPortComet {
     this.calls.push(`sendPrompt ${prompt}`);
     if (this.sendFailure) throw this.sendFailure;
     return "Prompt sent";
+  }
+
+  async stopAgent(): Promise<boolean> {
+    this.calls.push("stopAgent");
+    return this.hasStopControl;
   }
 }

@@ -9,6 +9,7 @@ import {
   PERPLEXITY_HOME,
 } from "../../../src/core/ask.js";
 import { ASK_DEFAULT_TIMEOUT_MS } from "../../../src/core/ask-input.js";
+import { TASK_STALE_AFTER_MS } from "../../../src/core/ask-task.js";
 import { ModeCore } from "../../../src/core/mode.js";
 import type { PageArgument } from "../../../src/page-scripts.js";
 import {
@@ -558,6 +559,176 @@ describe("AskCore.ask: failures", () => {
     expect(outcome.kind === "failed" && outcome.notice.line).toMatch(
       /^Mode not applied:/,
     );
+  });
+});
+
+describe("AskCore.poll", () => {
+  const STREAMING = [
+    reading("Rome was", { hasStopButton: true, steps: ["Searching"] }),
+    reading("Rome was founded", {
+      hasStopButton: true,
+      steps: ["Searching", "Writing"],
+      currentStep: "Writing",
+      agentBrowsingUrl: "https://history.example/rome",
+    }),
+  ];
+
+  /** A rig whose ask ran out of time while the page was still streaming. */
+  async function timedOut(): Promise<Rig> {
+    const built = answering([...STREAMING]);
+    const outcome = await built.core.ask({ prompt: "q", timeout: 3000 });
+    expect(outcome.kind).toBe("timed-out");
+    return built;
+  }
+
+  it("reports no task when no ask has run, without reading the page", async () => {
+    const { port, core } = rig();
+
+    expect(await core.poll()).toEqual({ kind: "no-task" });
+    expect(port.calls).toEqual([]);
+  });
+
+  it("returns the answer the ask completed, and how long ago, without reading the page", async () => {
+    const { port, core } = answering(STREAMED_THEN_COMPLETED);
+    await core.ask({ prompt: "q" });
+    await port.wait(4000);
+    port.calls.length = 0;
+
+    expect(await core.poll()).toEqual({
+      kind: "completed",
+      answer: LONG_ANSWER,
+      secondsAgo: 4,
+    });
+    expect(port.calls).toEqual([]);
+  });
+
+  it("reports a finished task as expired once it is stale", async () => {
+    const { port, core } = answering(STREAMED_THEN_COMPLETED);
+    await core.ask({ prompt: "q" });
+    await port.wait(TASK_STALE_AFTER_MS);
+
+    expect(await core.poll()).toEqual({ kind: "expired" });
+  });
+
+  it("says a timed-out task still streaming is working, its text partial", async () => {
+    const { core } = await timedOut();
+
+    const outcome = await core.poll();
+
+    expect(outcome).toEqual({
+      kind: "working",
+      taskId: core.task.currentTaskId,
+      progress: {
+        status: "working",
+        partialAnswer: "Rome was founded",
+        currentStep: "Writing",
+        steps: ["Searching", "Writing"],
+        browsingUrl: "https://history.example/rome",
+      },
+    });
+    expect(core.task.isActive).toBe(true);
+  });
+
+  it("returns the answer once the page says it is completed, and ends the task", async () => {
+    const { port, core } = await timedOut();
+    port.after.push(reading(LONG_ANSWER, { status: "completed" }));
+
+    const outcome = await core.poll();
+
+    expect(outcome).toEqual({ kind: "answered", answer: LONG_ANSWER });
+    expect(core.task.isActive).toBe(false);
+    expect(core.task.lastResponse).toBe(LONG_ANSWER);
+  });
+
+  it("returns the answer once it is stable and no stop button shows", async () => {
+    const { port, core } = await timedOut();
+    port.after.push(reading(LONG_ANSWER, { isStable: true }));
+
+    expect(await core.poll()).toEqual({
+      kind: "answered",
+      answer: LONG_ANSWER,
+    });
+  });
+
+  it("does not return an answer while the stop button shows", async () => {
+    const { port, core } = await timedOut();
+    port.after.push(
+      reading(LONG_ANSWER, { isStable: true, hasStopButton: true }),
+    );
+
+    const outcome = await core.poll();
+
+    expect(outcome.kind).toBe("working");
+    expect(core.task.isActive).toBe(true);
+  });
+
+  it("never returns the response on the page before the ask sent its prompt", async () => {
+    const built = answering([
+      reading(PREVIOUS_ANSWER, { status: "completed", proseCount: 2 }),
+    ]);
+    built.port.before = reading(PREVIOUS_ANSWER, { status: "completed" });
+    await built.core.ask({ prompt: "q", timeout: 3000 });
+
+    const outcome = await built.core.poll();
+
+    expect(outcome.kind).toBe("working");
+    expect(outcome.kind === "working" && outcome.progress.partialAnswer).toBe(
+      "",
+    );
+    expect(built.core.task.isActive).toBe(true);
+  });
+
+  it("keeps the steps the ask saw and adds the new ones", async () => {
+    const { port, core } = await timedOut();
+    port.after.push(reading("Rome was founded in", { steps: ["Checking"] }));
+
+    await core.poll();
+
+    expect(core.task.steps).toEqual(["Searching", "Writing", "Checking"]);
+  });
+
+  it("never returns page text as the answer of a task it no longer follows", async () => {
+    const { port, core } = await timedOut();
+    await core.stop();
+    // The stopped page, whatever poll it would have been.
+    port.after = [
+      reading(LONG_ANSWER, { status: "completed", steps: ["Stopped"] }),
+    ];
+
+    const outcome = await core.poll();
+
+    expect(outcome).toEqual({
+      kind: "not-followed",
+      taskId: core.task.currentTaskId,
+      progress: {
+        status: "completed",
+        partialAnswer: "",
+        currentStep: "",
+        steps: ["Searching", "Writing", "Stopped"],
+        browsingUrl: "",
+      },
+    });
+    expect(core.task.lastResponse).toBeNull();
+  });
+});
+
+describe("AskCore.stop", () => {
+  it("stops the answer and ends the task", async () => {
+    const built = answering([reading("Rome was", { hasStopButton: true })]);
+    await built.core.ask({ prompt: "q", timeout: 3000 });
+
+    expect(await built.core.stop()).toEqual({ stopped: true });
+    expect(built.port.calls).toContain("stopAgent");
+    expect(built.core.task.isActive).toBe(false);
+  });
+
+  it("leaves the task active when there is nothing to stop", async () => {
+    const built = answering([reading("Rome was", { hasStopButton: true })]);
+    await built.core.ask({ prompt: "q", timeout: 3000 });
+    built.port.hasStopControl = false;
+
+    expect(await built.core.stop()).toEqual({ stopped: false });
+    expect(built.core.task.isActive).toBe(true);
   });
 });
 

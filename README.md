@@ -172,25 +172,40 @@ The mode `comet_mode` last set carries over to every ask. Perplexity puts the mo
 
 ### comet_poll
 
-Check status and progress of ongoing tasks. Returns the response if completed.
+Check the status of the task the last `comet_ask` started. Returns the answer once it is complete.
 
 ```
 Parameters: None
-Returns: Status (IDLE/WORKING/COMPLETED), steps taken, or final response
+Returns: Status (IDLE/WORKING/COMPLETED), the answer once complete, or the
+partial answer and the steps so far, said to be possibly incomplete
 ```
+
+The first line is always the status. With no task, or a finished task that started more than five minutes ago, it is `Status: IDLE`. A task whose answer is complete is `Status: COMPLETED`, followed by the answer. A poll applies the same rules as `comet_ask` to decide that an answer is complete, so the answer to a task whose ask ran out of time comes back only once Comet has finished it, and never as the answer that was on the page before the prompt was sent. Until then the poll reports `Status: WORKING` and says the answer may be incomplete, with the partial answer so far (or `No answer text yet.`), the tab the agent is browsing, the current step and the steps seen. After `comet_stop`, the poll reports what the page shows and no answer.
+
+Every piece of page text in the result, the answer, the partial answer, the browsing address and the steps, comes back wrapped in UNTRUSTED markers, over stdio and the HTTP bridge alike; the two run the same poll and give the same text.
 
 **Example:**
 ```
 > comet_poll
 Status: WORKING
+Task: task_1760000000000_…
+The answer may be incomplete: Comet is still answering.
+
+Partial answer so far:
+[BEGIN UNTRUSTED PAGE CONTENT …]
+The top-ranked repository today is
+[END UNTRUSTED PAGE CONTENT …]
+
+Progress:
+[BEGIN UNTRUSTED PAGE CONTENT …]
 Browsing: https://github.com/trending
 Current: Scrolling page
-
 Steps:
-  - Preparing to assist you
-  - Navigating to github.com
-  - Clicking on Trending
-  - Scrolling page
+  • Navigating to github.com
+  • Clicking on Trending
+[END UNTRUSTED PAGE CONTENT …]
+
+[Use comet_poll again to follow the answer until it is complete, comet_stop to interrupt, or comet_screenshot to see current page]
 ```
 
 ---
@@ -201,8 +216,11 @@ Halt the current agentic task if it goes off track.
 
 ```
 Parameters: None
-Returns: Confirmation message
+Returns: "Agent stopped", or "No active agent to stop" when the page shows
+nothing to stop
 ```
+
+When it stops the agent, the task ends: `comet_poll` no longer follows its answer.
 
 ---
 

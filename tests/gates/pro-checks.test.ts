@@ -1,10 +1,14 @@
 import { describe, expect, it } from "vitest";
-import { AskCore } from "../../src/core/ask.js";
+import { AskCore, type PollOutcome } from "../../src/core/ask.js";
 import {
   reapplyModeBeforeAsk,
   withModeNotice,
 } from "../../src/core/ask-mode.js";
-import { describeAskOutcome } from "../../src/core/ask-reply.js";
+import {
+  describeAskOutcome,
+  describePollOutcome,
+  describeStopOutcome,
+} from "../../src/core/ask-reply.js";
 import { ModeCore } from "../../src/core/mode.js";
 import { answerModeTool } from "../../src/core/mode-tool.js";
 import { toStdioResult } from "../../src/tool-results.js";
@@ -640,6 +644,49 @@ describe("agentStopped [4.3]", () => {
 
   it("fails on an error result", () => {
     expect(agentStopped(error("Agent stopped"))).toBe(false);
+  });
+});
+
+describe("the poll and stop predicates against the core's own replies", () => {
+  const pollReply = (outcome: PollOutcome) =>
+    toStdioResult(describePollOutcome(outcome, wrapUntrustedPageContent));
+
+  it("pollIdle [4.1] holds on the poll with no task and after a completed task", () => {
+    expect(pollIdle(pollReply({ kind: "no-task" }))).toBe(true);
+    expect(pollIdle(pollReply({ kind: "expired" }))).toBe(true);
+    expect(
+      pollIdle(
+        pollReply({ kind: "completed", answer: "Paris", secondsAgo: 3 }),
+      ),
+    ).toBe(true);
+    expect(pollIdle(pollReply({ kind: "answered", answer: "Paris" }))).toBe(
+      true,
+    );
+  });
+
+  it("pollIdle [4.1] fails on the poll of a task still working", () => {
+    const reply = pollReply({
+      kind: "working",
+      taskId: "task_1_abc",
+      progress: {
+        status: "working",
+        partialAnswer: "Rome was",
+        currentStep: "",
+        steps: [],
+        browsingUrl: "",
+      },
+    });
+
+    expect(pollIdle(reply)).toBe(false);
+  });
+
+  it("agentStopped [4.3] holds on the stop that stopped, and fails on the one that did not", () => {
+    expect(
+      agentStopped(toStdioResult(describeStopOutcome({ stopped: true }))),
+    ).toBe(true);
+    expect(
+      agentStopped(toStdioResult(describeStopOutcome({ stopped: false }))),
+    ).toBe(false);
   });
 });
 

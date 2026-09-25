@@ -1,7 +1,16 @@
 import { describe, expect, it } from "vitest";
-import type { AskOutcome, AskProgress } from "../../../src/core/ask.js";
+import type {
+  AskOutcome,
+  AskProgress,
+  PollOutcome,
+  PollProgress,
+} from "../../../src/core/ask.js";
 import type { ModeNotice } from "../../../src/core/ask-mode.js";
-import { describeAskOutcome } from "../../../src/core/ask-reply.js";
+import {
+  describeAskOutcome,
+  describePollOutcome,
+  describeStopOutcome,
+} from "../../../src/core/ask-reply.js";
 import { wrapUntrustedPageContent } from "../../../src/untrusted.js";
 
 const quote = (pageText: string) => `<<${pageText}>>`;
@@ -144,6 +153,175 @@ describe("describeAskOutcome: errors", () => {
     ).toEqual({
       text: `${NOT_APPLIED.line}\n\nError: Could not find input element`,
       isError: true,
+    });
+  });
+});
+
+const TASK_ID = "task_1_abc";
+
+function pollProgress(progress: Partial<PollProgress>): PollProgress {
+  return {
+    status: "working",
+    partialAnswer: "",
+    currentStep: "",
+    steps: [],
+    browsingUrl: "",
+    ...progress,
+  };
+}
+
+function working(progress: Partial<PollProgress>): PollOutcome {
+  return { kind: "working", taskId: TASK_ID, progress: pollProgress(progress) };
+}
+
+function notFollowed(progress: Partial<PollProgress>): PollOutcome {
+  return {
+    kind: "not-followed",
+    taskId: TASK_ID,
+    progress: pollProgress(progress),
+  };
+}
+
+describe("describePollOutcome: no task to report", () => {
+  it("reports idle when no ask has run", () => {
+    expect(describePollOutcome({ kind: "no-task" }, quote)).toEqual({
+      text: "Status: IDLE\nNo active task. Use comet_ask to start a new task.",
+      isError: false,
+    });
+  });
+
+  it("reports idle when the last task expired", () => {
+    expect(describePollOutcome({ kind: "expired" }, quote)).toEqual({
+      text: "Status: IDLE\nPrevious task session expired. Use comet_ask to start a new task.",
+      isError: false,
+    });
+  });
+});
+
+describe("describePollOutcome: an answer", () => {
+  it("reports an answer completed earlier, quoted, with how long ago", () => {
+    expect(
+      describePollOutcome(
+        { kind: "completed", answer: "Paris", secondsAgo: 4 },
+        quote,
+      ),
+    ).toEqual({
+      text: "Status: COMPLETED (4s ago)\n\n<<Paris>>",
+      isError: false,
+    });
+  });
+
+  it("reports an answer this poll found complete, quoted", () => {
+    expect(
+      describePollOutcome({ kind: "answered", answer: "Paris" }, quote),
+    ).toEqual({ text: "Status: COMPLETED\n\n<<Paris>>", isError: false });
+  });
+});
+
+describe("describePollOutcome: a task still working", () => {
+  it("says it is working and that its text is partial, quoted, and names comet_poll", () => {
+    const reply = describePollOutcome(
+      working({ partialAnswer: "Rome was founded" }),
+      quote,
+    );
+
+    expect(reply).toEqual({
+      text: [
+        "Status: WORKING",
+        `Task: ${TASK_ID}`,
+        "The answer may be incomplete: Comet is still answering.",
+        "",
+        "Partial answer so far:",
+        "<<Rome was founded>>",
+        "",
+        "[Use comet_poll again to follow the answer until it is complete, comet_stop to interrupt, or comet_screenshot to see current page]",
+      ].join("\n"),
+      isError: false,
+    });
+  });
+
+  it("says there is no answer text yet when the page shows none", () => {
+    const { text } = describePollOutcome(working({}), quote);
+
+    expect(text).toContain("\nNo answer text yet.\n");
+    expect(text).not.toContain("Partial answer so far:");
+  });
+
+  it("quotes the tab the agent browses, the current step and the steps", () => {
+    const { text } = describePollOutcome(
+      working({
+        browsingUrl: "https://history.example/rome",
+        currentStep: "Writing",
+        steps: ["Searching", "Writing"],
+      }),
+      quote,
+    );
+
+    expect(text).toContain(
+      "Progress:\n<<Browsing: https://history.example/rome\nCurrent: Writing\nSteps:\n  • Searching\n  • Writing>>\n",
+    );
+  });
+
+  it("wraps every page-derived string in the UNTRUSTED markers", () => {
+    const { text } = describePollOutcome(
+      working({
+        partialAnswer: "PARTIAL-TEXT",
+        browsingUrl: "https://history.example/rome",
+        steps: ["STEP-TEXT"],
+      }),
+      wrapUntrustedPageContent,
+    );
+
+    for (const pageText of ["PARTIAL-TEXT", "history.example", "STEP-TEXT"]) {
+      const at = text.indexOf(pageText);
+      expect(text.lastIndexOf("[BEGIN UNTRUSTED", at)).toBeGreaterThan(-1);
+      expect(text.indexOf("[END UNTRUSTED", at)).toBeGreaterThan(at);
+    }
+  });
+});
+
+describe("describePollOutcome: a task no longer followed", () => {
+  it("reports the page's status and progress, and no answer", () => {
+    const reply = describePollOutcome(
+      notFollowed({ status: "completed", steps: ["Searching"] }),
+      quote,
+    );
+
+    expect(reply).toEqual({
+      text: [
+        "Status: COMPLETED",
+        `Task: ${TASK_ID}`,
+        "No answer to follow: the task was stopped, or its prompt was never sent.",
+        "",
+        "Progress:",
+        "<<Steps:\n  • Searching>>",
+      ].join("\n"),
+      isError: false,
+    });
+  });
+
+  it("says how to interrupt while the page is working", () => {
+    const { text } = describePollOutcome(notFollowed({}), quote);
+
+    expect(text.split("\n")[0]).toBe("Status: WORKING");
+    expect(text).toMatch(
+      /\n\[Use comet_stop to interrupt, or comet_screenshot to see current page\]$/,
+    );
+  });
+});
+
+describe("describeStopOutcome", () => {
+  it("says the agent stopped", () => {
+    expect(describeStopOutcome({ stopped: true })).toEqual({
+      text: "Agent stopped",
+      isError: false,
+    });
+  });
+
+  it("says there was nothing to stop", () => {
+    expect(describeStopOutcome({ stopped: false })).toEqual({
+      text: "No active agent to stop",
+      isError: false,
     });
   });
 });

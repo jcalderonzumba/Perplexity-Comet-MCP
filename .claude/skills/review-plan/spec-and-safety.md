@@ -47,7 +47,7 @@ From spec §2: *any change that violates one of these is rejected by definition.
    *Code trigger:* tab close and switch code (`comet_tabs`, `Target.closeTarget`, `Page.close`); launching or killing the Comet process; reconnect logic in `src/cdp-client.ts`.
 7. **An answer is complete or says it is not.** A stale, partial or timed-out answer is never returned as final; the result states which it is.
    *Plan trigger:* `comet_ask` or `comet_poll`, completion detection, answer extraction, timeouts.
-   *Code trigger:* `src/comet-ai.ts`; `src/session-state.ts`; the `comet_ask` and `comet_poll` handlers and the text of their results, in either adapter.
+   *Code trigger:* `src/comet-ai.ts`; the ask core in `src/core/` (`ask.ts`, `ask-task.ts`, `ask-reply.ts`); the `comet_ask` and `comet_poll` handlers and the text of their results, in either adapter.
 8. **The tool contract is stable.** Tool names, parameters and result shapes change only additively. A breaking change needs a decision-log row and a major version.
    *Plan trigger:* any tool definition, parameter, default, result shape, environment variable or CLI entry point.
    *Code trigger:* the `name: "comet_…"` definitions and their `inputSchema` in `src/index.ts`; the bridge's routes and payloads; result text formats; any `process.env.` read; `bin` in `package.json`.

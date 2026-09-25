@@ -131,6 +131,18 @@ describe("cdpAskPort: the answer", () => {
   });
 });
 
+describe("cdpAskPort: stopping", () => {
+  it("stops the answer through the Comet module, and says whether it did", async () => {
+    const { comet, port } = rig();
+
+    expect(await port.stopAgent()).toBe(true);
+    comet.hasStopControl = false;
+    expect(await port.stopAgent()).toBe(false);
+
+    expect(comet.calls).toEqual(["stopAgent", "stopAgent"]);
+  });
+});
+
 describe("cdpAskPort: time", () => {
   it("tells the time by the system clock", () => {
     vi.useFakeTimers();

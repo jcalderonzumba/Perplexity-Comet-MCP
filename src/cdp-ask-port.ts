@@ -40,6 +40,7 @@ export interface AskPortComet {
   getAgentStatus(): Promise<AskStatus>;
   resetStabilityTracking(): void;
   sendPrompt(prompt: string): Promise<unknown>;
+  stopAgent(): Promise<boolean>;
 }
 
 class CdpAskPort implements AskPort {
@@ -102,6 +103,10 @@ class CdpAskPort implements AskPort {
 
   sendPrompt(prompt: string): Promise<unknown> {
     return this.comet.sendPrompt(prompt);
+  }
+
+  stopAgent(): Promise<boolean> {
+    return this.comet.stopAgent();
   }
 
   now(): number {

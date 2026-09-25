@@ -9,6 +9,11 @@
 // active, so the answer is never presented as complete before it is. The
 // outcome is data; `describeAskOutcome` words it, and the adapter wraps the
 // page text in it.
+//
+// `comet_poll` and `comet_stop` follow the same task. A poll of a task the
+// ask left running applies the ask's completion rules, against the page as
+// it was before the prompt was sent, so it returns the answer only once it
+// is complete and new, and otherwise says the task is still working.
 
 import type { ProseState } from "../page-scripts.js";
 import { readAskRequest, shapePrompt, withContext } from "./ask-input.js";
@@ -34,6 +39,8 @@ export interface AskStatus {
   readonly hasStopButton: boolean;
   /** The response has not changed over the last few reads. */
   readonly isStable: boolean;
+  /** The address of the tab the agent is browsing, or empty. */
+  readonly agentBrowsingUrl: string;
 }
 
 /** What the ask core needs from the browser; each adapter supplies one. */
@@ -58,6 +65,8 @@ export interface AskPort {
   /** Forgets the responses seen, before a new prompt is sent. */
   resetStabilityTracking(): void;
   sendPrompt(prompt: string): Promise<unknown>;
+  /** Stops the answer in progress; false when there was nothing to stop. */
+  stopAgent(): Promise<boolean>;
   /** Milliseconds, on the clock `wait` advances. */
   now(): number;
   wait(ms: number): Promise<void>;
@@ -115,6 +124,46 @@ export type AskOutcome =
       readonly notice: ModeNotice;
     };
 
+/** What a poll read on the page, for a task that has no answer yet. */
+export interface PollProgress extends AskProgress {
+  /** The address of the tab the agent is browsing, or empty. */
+  readonly browsingUrl: string;
+}
+
+export type PollOutcome =
+  | { readonly kind: "no-task" }
+  /** The last task finished too long ago to follow. */
+  | { readonly kind: "expired" }
+  /** The task completed before this poll, `secondsAgo` seconds ago. */
+  | {
+      readonly kind: "completed";
+      readonly answer: string;
+      readonly secondsAgo: number;
+    }
+  /** This poll found the answer complete, and ended the task. */
+  | { readonly kind: "answered"; readonly answer: string }
+  /** The task is followed and its answer is not complete yet. */
+  | {
+      readonly kind: "working";
+      readonly taskId: string | null;
+      readonly progress: PollProgress;
+    }
+  /**
+   * The task has no answer and is no longer followed: it was stopped, or its
+   * prompt was never sent. The page's status is reported, never its text as
+   * the answer.
+   */
+  | {
+      readonly kind: "not-followed";
+      readonly taskId: string | null;
+      readonly progress: PollProgress;
+    };
+
+export interface StopOutcome {
+  /** False when the page showed nothing to stop. */
+  readonly stopped: boolean;
+}
+
 export interface AskCoreOptions {
   readonly port: AskPort;
   /** The mode tool whose remembered mode the ask puts back. */
@@ -137,6 +186,8 @@ interface PageBefore {
 export class AskCore {
   readonly task: AskTaskState;
   private readonly port: AskPort;
+  /** The completion rules of the task's answer, once its prompt is sent. */
+  private watch: AnswerWatch | null = null;
 
   constructor(private readonly options: AskCoreOptions) {
     this.port = options.port;
@@ -149,6 +200,7 @@ export class AskCore {
     const { request } = reading;
     const prompt = withContext(request.prompt, request.context);
     this.task.start(prompt);
+    this.watch = null;
     let notice = NO_NOTICE;
     try {
       if (!(await this.connectOrRecover())) {
@@ -164,6 +216,69 @@ export class AskCore {
     } catch (error) {
       return { kind: "failed", message: errorMessage(error), notice };
     }
+  }
+
+  /**
+   * The task's state: its answer once complete, or what the page shows of
+   * it. The page is read only for a task that has no answer yet.
+   */
+  async poll(): Promise<PollOutcome> {
+    const { task } = this;
+    if (!task.isActive && task.currentTaskId === null) {
+      return { kind: "no-task" };
+    }
+    if (!task.isActive && task.isStale()) return { kind: "expired" };
+    if (!task.isActive && task.lastResponse !== null) {
+      return {
+        kind: "completed",
+        answer: task.lastResponse,
+        secondsAgo: this.secondsSince(task.lastResponseTime),
+      };
+    }
+    await this.port.ensureOnPerplexityTab();
+    if (task.isActive && this.watch) return this.follow(this.watch);
+    return this.pageStatusOnly();
+  }
+
+  /** Stops the answer in progress; the task ends when something stopped. */
+  async stop(): Promise<StopOutcome> {
+    const stopped = await this.port.stopAgent();
+    if (stopped) this.task.isActive = false;
+    return { stopped };
+  }
+
+  /** One read of the page, judged by the ask's completion rules. */
+  private async follow(watch: AnswerWatch): Promise<PollOutcome> {
+    const prose = await this.port.readProseState();
+    const status = await this.port.readStatus();
+    const now = this.port.now();
+    watch.observe(prose, status, now);
+    this.task.steps = [...watch.steps];
+    if (watch.isComplete(status, now)) {
+      this.task.complete(status.response);
+      return { kind: "answered", answer: status.response };
+    }
+    return {
+      kind: "working",
+      taskId: this.task.currentTaskId,
+      progress: {
+        ...pollProgress(status, this.task.steps),
+        partialAnswer: watch.newResponse(status.response),
+      },
+    };
+  }
+
+  private async pageStatusOnly(): Promise<PollOutcome> {
+    const status = await this.port.readStatus();
+    return {
+      kind: "not-followed",
+      taskId: this.task.currentTaskId,
+      progress: pollProgress(status, this.task.steps),
+    };
+  }
+
+  private secondsSince(then: number | null): number {
+    return then === null ? 0 : Math.round((this.port.now() - then) / 1000);
   }
 
   /** True when connected, after starting Comet again if the check failed. */
@@ -225,7 +340,8 @@ export class AskCore {
     this.port.resetStabilityTracking();
     const before = await this.readPageBefore();
     await this.port.sendPrompt(prompt);
-    return this.waitForAnswer(before, timeoutMs, notice);
+    this.watch = new AnswerWatch(before, this.port.now());
+    return this.waitForAnswer(this.watch, timeoutMs, notice);
   }
 
   private async readPageBefore(): Promise<PageBefore> {
@@ -239,12 +355,11 @@ export class AskCore {
   }
 
   private async waitForAnswer(
-    before: PageBefore,
+    watch: AnswerWatch,
     timeoutMs: number,
     notice: ModeNotice,
   ): Promise<AskOutcome> {
     const startedAt = this.port.now();
-    const watch = new AnswerWatch(before, startedAt);
     let errors = 0;
     while (this.port.now() - startedAt < timeoutMs) {
       await this.port.wait(ASK_TIMING.pollMs);
@@ -271,7 +386,7 @@ export class AskCore {
     return {
       kind: "timed-out",
       timeoutMs,
-      progress: await this.progressSoFar(before, watch),
+      progress: await this.progressSoFar(watch),
       notice,
     };
   }
@@ -306,16 +421,12 @@ export class AskCore {
   }
 
   /** What the page shows now, for a result that is not the answer. */
-  private async progressSoFar(
-    before: PageBefore,
-    watch: AnswerWatch,
-  ): Promise<AskProgress> {
+  private async progressSoFar(watch: AnswerWatch): Promise<AskProgress> {
     try {
       const status = await this.port.readStatus();
       return {
         status: status.status,
-        partialAnswer:
-          status.response === before.response ? "" : status.response,
+        partialAnswer: watch.newResponse(status.response),
         currentStep: status.currentStep,
         steps: [...watch.steps],
       };
@@ -379,9 +490,28 @@ class AnswerWatch {
     );
   }
 
+  /** The response when it is new, or empty when it is the one from before. */
+  newResponse(response: string): string {
+    return this.isFresh(response) ? response : "";
+  }
+
   private isFresh(response: string): boolean {
     return response !== "" && response !== this.before.response;
   }
+}
+
+/** The page's status and steps, with none of its text as a partial answer. */
+function pollProgress(
+  status: AskStatus,
+  taskSteps: readonly string[],
+): PollProgress {
+  return {
+    status: status.status,
+    partialAnswer: "",
+    currentStep: status.currentStep,
+    steps: [...new Set([...taskSteps, ...status.steps])],
+    browsingUrl: status.agentBrowsingUrl,
+  };
 }
 
 /** The tab to reconnect to: Perplexity's main tab, its sidecar, or any page. */
