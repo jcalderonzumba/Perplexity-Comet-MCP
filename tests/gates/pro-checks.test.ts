@@ -19,6 +19,7 @@ import {
   agentStopped,
   answered,
   answerNames,
+  answerNamesWithoutEcho,
   contextReset,
   emptyPromptRefused,
   fileNotFound,
@@ -86,7 +87,7 @@ describe("answered", () => {
   });
 });
 
-describe("answerNames [1.5] [2.1] [2.5] [3.1]", () => {
+describe("answerNames [2.1] [3.1]", () => {
   it("holds when the answer names the word, in any case", () => {
     expect(answerNames(answer("VERIFIED"), "VERIFIED")).toBe(true);
     expect(answerNames(answer("paris."), "Paris")).toBe(true);
@@ -127,6 +128,62 @@ describe("answerNames [1.5] [2.1] [2.5] [3.1]", () => {
         "VERIFIED",
       ),
     ).toBe(false);
+  });
+});
+
+describe("answerNamesWithoutEcho [1.5] [2.5]", () => {
+  const SESSION_PROMPT = "Reply with exactly one word: VERIFIED";
+  const CONTEXT_PROMPT = "What is the project name?";
+
+  it("holds when the answer names the word and does not read the prompt back", () => {
+    expect(
+      answerNamesWithoutEcho(answer("VERIFIED"), "VERIFIED", SESSION_PROMPT),
+    ).toBe(true);
+    expect(
+      answerNamesWithoutEcho(
+        answer("The project is Artemis."),
+        "Artemis",
+        CONTEXT_PROMPT,
+      ),
+    ).toBe(true);
+  });
+
+  it("fails on the prompt read back, which names the word itself", () => {
+    expect(
+      answerNamesWithoutEcho(
+        answer(SESSION_PROMPT),
+        "VERIFIED",
+        SESSION_PROMPT,
+      ),
+    ).toBe(false);
+  });
+
+  it("fails on the question as the thread shows it, context first", () => {
+    expect(
+      answerNamesWithoutEcho(
+        answer(
+          `Context for this task:\nProject name: Artemis\n\nBased on the above context, ${CONTEXT_PROMPT}`,
+        ),
+        "Artemis",
+        CONTEXT_PROMPT,
+      ),
+    ).toBe(false);
+  });
+
+  it("fails on the prompt read back across lines or in another case", () => {
+    expect(
+      answerNamesWithoutEcho(
+        answer("reply with exactly\n  one word: verified"),
+        "VERIFIED",
+        SESSION_PROMPT,
+      ),
+    ).toBe(false);
+  });
+
+  it("fails where answerNames fails", () => {
+    expect(answerNamesWithoutEcho(LOGIN_PAGE, "VERIFIED", SESSION_PROMPT)).toBe(
+      false,
+    );
   });
 });
 
@@ -268,6 +325,28 @@ describe("wholeAnswer [2.6-whole-answer]", () => {
 
   it("fails when only the last paragraph comes back", () => {
     expect(wholeAnswer(answer("CHARLIE opens the third."))).toBe(false);
+  });
+
+  it("holds when a paragraph's opener follows spaces at the line's start", () => {
+    expect(
+      wholeAnswer(answer("  ALPHA one.\n\n  BRAVO two.\n\n  CHARLIE three.")),
+    ).toBe(true);
+  });
+
+  it("fails on the prompt read back, which names the openers in order", () => {
+    expect(
+      wholeAnswer(
+        answer(
+          "Write three short paragraphs about the sea. Start the first with the word ALPHA, the second with the word BRAVO and the third with the word CHARLIE.",
+        ),
+      ),
+    ).toBe(false);
+  });
+
+  it("fails when an opener only comes mid-line", () => {
+    expect(
+      wholeAnswer(answer("ALPHA one.\n\nThen BRAVO two.\n\nCHARLIE three.")),
+    ).toBe(false);
   });
 
   it("fails when the paragraphs come back out of order", () => {
@@ -1159,6 +1238,29 @@ describe("runProBattery", () => {
       "8.3": "FAIL",
       "8.4": "FAIL",
       "9.2": "FAIL",
+    });
+  });
+
+  it("scores a prompt read back as a failure, never as an unexpected pass", async () => {
+    const checks = await runProBattery(
+      fakeServer({
+        ...FIXED,
+        [CALLS.session]: answer("Reply with exactly one word: VERIFIED"),
+        [CALLS.context]: answer(
+          "Context for this task:\nProject name: Artemis\n\nBased on the above context, What is the project name?",
+        ),
+        [CALLS.paragraphs]: answer(
+          "Write three short paragraphs about the sea. Start the first with the word ALPHA, the second with the word BRAVO and the third with the word CHARLIE.",
+        ),
+      }).callTool,
+      LISTENING,
+      undefined,
+      noWait,
+    );
+    expect(verdicts(checks)).toMatchObject({
+      "1.5": "KNOWN",
+      "2.5": "KNOWN",
+      "2.6-whole-answer": "KNOWN",
     });
   });
 

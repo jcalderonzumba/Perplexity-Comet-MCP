@@ -50,6 +50,12 @@ const NAMES_POLL = /\bcomet_poll\b/;
 /** A timed-out ask must return well within this, although it asked for 3 s. */
 const TIMEOUT_BOUND_MS = 8000;
 
+/** [1.5]'s prompt, which names the word its answer must name. */
+const SESSION_PROMPT = "Reply with exactly one word: VERIFIED";
+
+/** [2.5]'s prompt, sent after its context, which names the project. */
+const CONTEXT_PROMPT = "What is the project name?";
+
 /** The words the first turn of [2.2] answers with and the follow-up asks for. */
 const NOTED = "NOTED";
 const REMEMBERED_NUMBER = "9473";
@@ -115,13 +121,43 @@ export function answered(reply) {
 }
 
 /**
- * [1.5], [2.1], [2.5], [3.1]: the final answer names the word asked for. A
+ * [2.1], [3.1]: the final answer names the word asked for. A
  * login page, an error or a result still in progress fails.
  * @param {ToolReply} reply
  * @param {string} word
  */
 export function answerNames(reply, word) {
   return answered(reply) && namesWord(replyText(reply), word);
+}
+
+/**
+ * The text, with its runs of whitespace made single spaces, in lower case.
+ * @param {string} text
+ */
+function normalised(text) {
+  return text.replace(/\s+/g, " ").trim().toLowerCase();
+}
+
+/**
+ * The reply holds the prompt, read back from the page, in any case and
+ * however its lines were broken.
+ * @param {ToolReply} reply
+ * @param {string} prompt
+ */
+function echoes(reply, prompt) {
+  return normalised(replyText(reply)).includes(normalised(prompt));
+}
+
+/**
+ * [1.5], [2.5]: the final answer names the word, and does not hold the
+ * prompt, which names the word itself: a reply that reads the question back
+ * from the page could pass on the question alone.
+ * @param {ToolReply} reply
+ * @param {string} word
+ * @param {string} prompt
+ */
+export function answerNamesWithoutEcho(reply, word, prompt) {
+  return answerNames(reply, word) && !echoes(reply, prompt);
 }
 
 /**
@@ -166,15 +202,24 @@ export function timeoutStated({ reply, elapsedMs }) {
 }
 
 /**
+ * The word opening a line, after any spaces, whole and in any case.
+ * @param {string} word
+ */
+function lineOpenerPattern(word) {
+  return new RegExp(`^[ \\t]*${escapeRegExp(word)}\\b`, "im");
+}
+
+/**
  * [2.6-whole-answer]: the final answer holds every paragraph asked for, in
- * order, not only the last.
+ * order, not only the last. Each paragraph's word opens a line: the prompt
+ * names the words mid-sentence, so a reply that reads it back fails.
  * @param {ToolReply} reply
  */
 export function wholeAnswer(reply) {
   if (!answered(reply)) return false;
   const said = replyText(reply);
   const positions = PARAGRAPH_OPENERS.map((word) =>
-    said.search(wordPattern(word)),
+    said.search(lineOpenerPattern(word)),
   );
   return positions.every(
     (position, index) =>
@@ -719,11 +764,8 @@ function afterConnect(wait) {
   const browsed = shared(listTabsAroundAgentAsk);
   const stopped = shared((callTool) => stopSlowTask(callTool, wait));
   return [
-    askCheck(
-      "1.5",
-      ANSWER,
-      { prompt: "Reply with exactly one word: VERIFIED" },
-      (reply) => answerNames(reply, "VERIFIED"),
+    askCheck("1.5", ANSWER, { prompt: SESSION_PROMPT }, (reply) =>
+      answerNamesWithoutEcho(reply, "VERIFIED", SESSION_PROMPT),
     ),
     askCheck(
       "2.1",
@@ -737,11 +779,8 @@ function afterConnect(wait) {
     askCheck(
       "2.5",
       ANSWER,
-      {
-        prompt: "What is the project name?",
-        context: "Project name: Artemis",
-      },
-      (reply) => answerNames(reply, "Artemis"),
+      { prompt: CONTEXT_PROMPT, context: "Project name: Artemis" },
+      (reply) => answerNamesWithoutEcho(reply, "Artemis", CONTEXT_PROMPT),
     ),
     askCheck(
       "2.6-whole-answer",
