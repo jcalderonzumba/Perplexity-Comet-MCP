@@ -63,6 +63,12 @@ export const PRO_KNOWN_FAILURES = [
     owningPlan: ASK_RELIABILITY,
   },
   {
+    id: "2.3",
+    reason:
+      "comet_ask does not read the new chat's short answer as complete, so it runs to its timeout and says the task may still be in progress",
+    owningPlan: ASK_RELIABILITY,
+  },
+  {
     id: "2.4",
     reason:
       "when comet_ask runs out of time, it returns the page's partial text as if it were the answer, or says only that the task may still be in progress, never that the answer may be incomplete",

@@ -66,8 +66,23 @@ const PARAGRAPH_OPENERS = ["ALPHA", "BRAVO", "CHARLIE"];
 /** The site the agent is asked to open in [3.2-agent-tab]. */
 const AGENT_SITE = "example.org";
 
-/** A repository's `owner/name`, and a star count near the word `star`. */
-const REPOSITORY = /\b[\w.-]+\/[\w.-]+\b/;
+/** The site the tab checks, and [3.1] before them, send the agent to. */
+const VISITED_SITE = "example.com";
+
+/**
+ * The sites the browsing asks before [3.4] name. [3.4]'s own prompt names
+ * neither, so its reply naming one carries an earlier ask's answer.
+ */
+const EARLIER_BROWSING_SITES = [VISITED_SITE, AGENT_SITE];
+
+/**
+ * A GitHub repository's `owner/name`, on its own or in its github.com
+ * address. An owner has no dots, so a web address's path (`news.site/x`)
+ * is not one.
+ */
+const REPOSITORY = /(?:\bgithub\.com\/|(?<![\w./-]))[\w-]+\/[\w.-]+/i;
+
+/** A star count near the word `star`. */
 const STAR_COUNT =
   /\d[\d,.]*\s*[kKmM]?\+?\s*(?:github\s+)?stars?\b|\bstars?\W{0,3}\d/i;
 
@@ -299,12 +314,27 @@ function tabsGone({ before, after }) {
 }
 
 /**
- * [3.4]: the final answer names a repository and its star count.
+ * The text names a site one of the browsing asks before [3.4] named.
+ * @param {string} text
+ */
+function namesEarlierBrowsingSite(text) {
+  return EARLIER_BROWSING_SITES.some((site) => namesWord(text, site));
+}
+
+/**
+ * [3.4]: the final answer names a GitHub repository and its star count, and
+ * carries no earlier browsing ask's answer, which a reply run on from it
+ * could hold beside text that looks like a repository.
  * @param {ToolReply} reply
  */
 export function trendingRepoNamed(reply) {
   const said = replyText(reply);
-  return answered(reply) && REPOSITORY.test(said) && STAR_COUNT.test(said);
+  return (
+    answered(reply) &&
+    !namesEarlierBrowsingSite(said) &&
+    REPOSITORY.test(said) &&
+    STAR_COUNT.test(said)
+  );
 }
 
 /**
@@ -504,9 +534,6 @@ export const RESEARCH_WORKFLOW = {
 export const UPLOAD_TEST_FILE = "/tmp/comet-test-upload.txt";
 const MISSING_FILE = "/tmp/file-that-does-not-exist-xyzabc.txt";
 const MISSING_SELECTOR = "#does-not-exist-xyzabc";
-
-/** The site the tab checks visit, switch to and close. */
-const VISITED_SITE = "example.com";
 
 /**
  * How long the server may take over an ask (its `timeout`), and how long

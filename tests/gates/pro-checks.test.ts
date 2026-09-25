@@ -492,6 +492,44 @@ describe("trendingRepoNamed [3.4]", () => {
     ).toBe(false);
   });
 
+  it("holds on the repository's GitHub address", () => {
+    expect(
+      trendingRepoNamed(
+        answer(
+          "Top today: https://github.com/octo-labs/widgets.js (812 stars)",
+        ),
+      ),
+    ).toBe(true);
+  });
+
+  it("fails on an earlier browsing ask's answer run on into a repository and a star count", () => {
+    expect(
+      trendingRepoNamed(
+        answer(
+          "The page heading at \nexample.com\nis “Example Domain”. Trending today: octo/widgets, 12,345 stars.",
+        ),
+      ),
+    ).toBe(false);
+    expect(
+      trendingRepoNamed(
+        answer(
+          "Example Domain is the heading of www.example.org. octo/widgets has 12,345 stars.",
+        ),
+      ),
+    ).toBe(false);
+  });
+
+  it("fails on a web address's path, which names no GitHub owner", () => {
+    expect(
+      trendingRepoNamed(
+        answer("See news.site/trending for today's list: 12,345 stars."),
+      ),
+    ).toBe(false);
+    expect(
+      trendingRepoNamed(answer("The list at some.host/x counts 900 stars.")),
+    ).toBe(false);
+  });
+
   it("fails on a repository without its star count", () => {
     expect(
       trendingRepoNamed(answer("The top repository is octo/widgets.")),
@@ -982,10 +1020,23 @@ const COMPLETED = ok(
   `Status: COMPLETED (0s ago)\n\n${wrapUntrustedPageContent("octo/widgets")}`,
 );
 
+/** A short answer the ask does not read as complete, as [2.3]'s run showed. */
+const IDLE_STILL_IN_PROGRESS = ok(
+  `Task may still be in progress (max timeout reached).\nStatus: IDLE\n${wrapUntrustedPageContent("Steps")}`,
+);
+
 /**
- * Comet as the Pro runs of 2026-09-24 found it, each reply in the shape
- * the server gives today: the checks the known-failures list names fail,
- * and every other check holds.
+ * [3.4]'s reply as a run showed it: an earlier browsing ask's answer, run on
+ * into text that names a repository and a star count.
+ */
+const EARLIER_ANSWER_RUN_ON = answer(
+  "The page heading at \nexample.com\nis “Example Domain”. Trending: octo/widgets, 12,345 stars.",
+);
+
+/**
+ * Comet as the Pro runs of 2026-09-24 and 2026-09-25 found it, each reply in
+ * the shape the server gives today: the checks the known-failures list
+ * names fail, and every other check holds.
  */
 const TODAY: Replies = {
   [CALLS.connect]: ok("Comet already running with debug port: Chrome/152"),
@@ -994,7 +1045,7 @@ const TODAY: Replies = {
   [CALLS.remember]: STILL_IN_PROGRESS,
   [CALLS.recall]: answer("NOTED"),
   [CALLS.rememberAgain]: answer("Got it: 9473."),
-  [CALLS.recallInNewChat]: answer("You have not asked me to remember one."),
+  [CALLS.recallInNewChat]: IDLE_STILL_IN_PROGRESS,
   [CALLS.essay]: answer("Rome was founded, according to legend, in 753 BC."),
   [CALLS.context]: error(
     "Error: Prompt text not found in input - typing may have failed",
@@ -1003,7 +1054,7 @@ const TODAY: Replies = {
   [CALLS.heading]: answer("I can certainly help you with an overview."),
   [CALLS.tabs]: [NO_TABS, NO_TABS, NO_TABS],
   [CALLS.agentTab]: answer("The heading of example.org is Example Domain."),
-  [CALLS.trending]: answer("The heading of example.org is Example Domain."),
+  [CALLS.trending]: EARLIER_ANSWER_RUN_ON,
   [CALLS.poll]: [COMPLETED, answer("The featured article is about")],
   [CALLS.slowTask]: STILL_IN_PROGRESS,
   [CALLS.stop]: ok("Agent stopped"),
@@ -1047,6 +1098,7 @@ const FIXED: Replies = {
   [CALLS.capital]: answer("Paris"),
   [CALLS.remember]: answer("NOTED"),
   [CALLS.recall]: answer("9473"),
+  [CALLS.recallInNewChat]: answer("You have not asked me to remember one."),
   [CALLS.essay]: MAY_BE_INCOMPLETE,
   [CALLS.context]: answer("The project is Artemis."),
   [CALLS.paragraphs]: answer("ALPHA one.\n\nBRAVO two.\n\nCHARLIE three."),
@@ -1105,7 +1157,7 @@ describe("runProBattery", () => {
       undefined,
       noWait,
     );
-    expect(summaryLine(checks)).toBe("Results: 17 passed, 0 failed, 13 known");
+    expect(summaryLine(checks)).toBe("Results: 16 passed, 0 failed, 14 known");
     expect(batteryPassed(checks)).toBe(true);
     expect(
       checks
@@ -1230,7 +1282,7 @@ describe("runProBattery", () => {
     expect(verdicts(checks)).toMatchObject({
       "1.5": "KNOWN",
       "2.2": "KNOWN",
-      "2.3": "FAIL",
+      "2.3": "KNOWN",
       "4.1": "FAIL",
       "4.3": "FAIL",
       "4.3b": "KNOWN",
@@ -1261,6 +1313,27 @@ describe("runProBattery", () => {
       "1.5": "KNOWN",
       "2.5": "KNOWN",
       "2.6-whole-answer": "KNOWN",
+    });
+  });
+
+  it("scores [2.3]'s short answer run to its timeout, and [3.4]'s earlier answer run on, as known", async () => {
+    const checks = await runProBattery(
+      fakeServer({
+        ...FIXED,
+        [CALLS.recallInNewChat]: IDLE_STILL_IN_PROGRESS,
+        [CALLS.trending]: EARLIER_ANSWER_RUN_ON,
+      }).callTool,
+      LISTENING,
+      undefined,
+      noWait,
+    );
+    expect(byId(checks, "2.3")).toMatchObject({
+      verdict: "KNOWN",
+      known: { owningPlan: "plan 3 (comet_ask reliability)" },
+    });
+    expect(byId(checks, "3.4")).toMatchObject({
+      verdict: "KNOWN",
+      known: { owningPlan: "plan 12 (Agentic browsing)" },
     });
   });
 
