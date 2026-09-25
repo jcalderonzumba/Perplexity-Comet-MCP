@@ -390,6 +390,75 @@ describe("protect-main.sh and quoted arguments", {
   });
 });
 
+describe("protect-main.sh reads quoting as the shell does", {
+  timeout: GIT_HEAVY_TEST_MS,
+}, () => {
+  it.each([
+    // An escaped quote inside double quotes does not end the argument.
+    'git -c "a=b\\" c" commit -m x',
+    'git --work-tree="a\\" b" commit -m x',
+    'git --git-dir "x\\" y" merge feat/x',
+    'git -C "x\\" y" commit -m x',
+    // ANSI-C quoting, where \' does not end the argument either.
+    "git -c $'a\\' b' commit -m x",
+    // A newline inside quotes is part of the argument.
+    'git -c "user.name=a\nb" commit -m x',
+    "git -c 'user.name=a\nb' commit -m x",
+    // Quotes removed, the words are git and commit.
+    '"git" commit -m x',
+    "g'it' com\\mit -m x",
+  ])('denies "%s" on main', (command) => {
+    expect(decision(hook("protect-main.sh", toolInput(command)))).toMatchObject(
+      {
+        allowed: false,
+      },
+    );
+  });
+
+  it.each([
+    'git -c "a\\" b" push origin main',
+    'git -c "a\\" b" push origin "main"',
+    'git -c "a\nb" push origin main',
+    // A quoted or escaped ; & | is part of a word, not the end of the push.
+    'git push origin "a;b" main',
+    "git push origin a\\;b main",
+    "git push origin 'a|b' main",
+    // ANSI-C escapes are decoded: \x6d, \155 and m are all "m".
+    "git push origin $'\\x6dain'",
+    "git push origin $'\\155ain'",
+    "git push origin $'\\u006dain'",
+  ])('denies "%s" from a branch', (command) => {
+    sandbox.git("switch", "--quiet", "--create", "feat/x");
+    expect(decision(hook("protect-main.sh", toolInput(command)))).toMatchObject(
+      {
+        allowed: false,
+      },
+    );
+  });
+
+  it.each([
+    'git commit -m "say \\"push to main\\" later"',
+    "git commit -m $'it\\'s for main, not now'",
+    "git push origin $'feat/x'",
+    'git push origin "feat/x;y"',
+  ])('allows "%s" on a branch', (command) => {
+    sandbox.git("switch", "--quiet", "--create", "feat/x");
+    expect(decision(hook("protect-main.sh", toolInput(command)))).toEqual({
+      allowed: true,
+    });
+  });
+
+  it.each([
+    'git -C .work commit -m "say \\"hi\\" to main"',
+    "git -C .work commit -m $'it\\'s done'",
+    'git -C .work commit -m "two\nlines"',
+  ])('allows the notebook\'s "%s" on main', (command) => {
+    expect(decision(hook("protect-main.sh", toolInput(command)))).toEqual({
+      allowed: true,
+    });
+  });
+});
+
 describe("protect-main.sh without CLAUDE_PROJECT_DIR", {
   timeout: GIT_HEAVY_TEST_MS,
 }, () => {

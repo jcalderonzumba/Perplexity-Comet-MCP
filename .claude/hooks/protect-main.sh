@@ -7,8 +7,12 @@
 # GIT_ variable named before them, are exempt: .work/ is a repository of its own
 # whose main is its only branch (AGENTS.md, Where truth lives).
 #
-# It judges the command's text and never parses the shell: where the text could
-# be read either way, it refuses.
+# It judges the command's text twice: as written, and with its quoting read as
+# the shell reads it (double, single and $'…' quotes, backslash escapes, and
+# newlines inside quotes). It refuses when either reading writes to main, so
+# where the text could be read either way, it refuses. It never runs the text:
+# a word made at run time (a variable's value, a command substitution) is not
+# expanded, and the git hooks still refuse what it passes.
 #
 # It fails closed: without jq, or with a tool input jq cannot read, it cannot
 # tell a write to main from any other git command, so it refuses the command.
@@ -44,30 +48,104 @@ global_opts="([[:space:]]+(-[Cc][[:space:]]+(${word_part})+|--[a-z][a-z-]*(=(${w
 # earlier in the command (as a prefix, with env or with export) could point a
 # notebook command back here. So from the first GIT_ variable the command names
 # on, no git invocation is exempt.
-exemptable=$cmd
-judged_as_is=""
 git_variable='(^|[^[:alnum:]_])GIT_[A-Z0-9_]+'
-if [[ $cmd =~ $git_variable ]]; then
-  exemptable=${cmd%%"${BASH_REMATCH[0]}"*}
-  judged_as_is=${cmd:${#exemptable}}
-fi
-# A git invocation aimed at .work/, `git -C <…/.work> <subcommand>` with no other
-# global option, is rewritten to a word that no rule below matches, so only the
-# commands aimed at this repository are judged. Anything more (a second -C,
-# --git-dir, --work-tree) could point git back here, so it is judged too.
-public_cmd=$(printf '%s' "$exemptable" | sed -E 's#(^|[^[:alnum:]_-])git[[:space:]]+-C[[:space:]]+([^[:space:]]*/)?\.work/?[[:space:]]+([a-z][a-z-]*)#\1notebook-git \3#g')$judged_as_is
-if [ "$branch" = "main" ] && printf '%s' "$public_cmd" | grep -Eq "(^|[^[:alnum:]_-])git${global_opts}[[:space:]]+(commit|merge|rebase|cherry-pick|revert)([[:space:]]|\$)"; then
-  deny "Direct writes to main are forbidden (AGENTS.md workflow). Create a branch: git switch -c feat/<plan>-p<phase>-<slug>"
-fi
-# Every push segment of the command is judged, one per line, and only its own
-# arguments, so the word "main" in a commit message or an echo elsewhere in a
-# compound command does not trigger. main counts as a ref wherever no character of
-# a ref name touches it: after a space, a `:`, a `/` or a forced refspec's `+`,
-# and beside a quote or a parenthesis.
-push_segments=$(printf '%s' "$public_cmd" | grep -oE "(^|[^[:alnum:]_-])git${global_opts}[[:space:]]+push([^&;|]*)")
-if [ -n "$push_segments" ]; then
-  if [ "$branch" = "main" ] || printf '%s\n' "$push_segments" | grep -Eq '(^|[^[:alnum:]_.-])main([^[:alnum:]_./:-]|$)'; then
-    deny "Pushing to main is forbidden (AGENTS.md workflow). Push a feature branch and open a PR."
+
+# Denies the command when this reading of its text writes to main.
+judge() {
+  local text=$1 exemptable=$1 judged_as_is="" public_cmd push_segments
+  if [[ $text =~ $git_variable ]]; then
+    exemptable=${text%%"${BASH_REMATCH[0]}"*}
+    judged_as_is=${text:${#exemptable}}
   fi
-fi
+  # A git invocation aimed at .work/, `git -C <…/.work> <subcommand>` with no
+  # other global option, is rewritten to a word that no rule below matches, so
+  # only the commands aimed at this repository are judged. Anything more (a
+  # second -C, --git-dir, --work-tree) could point git back here, so it is
+  # judged too.
+  public_cmd=$(printf '%s' "$exemptable" | sed -E 's#(^|[^[:alnum:]_-])git[[:space:]]+-C[[:space:]]+([^[:space:]]*/)?\.work/?[[:space:]]+([a-z][a-z-]*)#\1notebook-git \3#g')$judged_as_is
+  if [ "$branch" = "main" ] && printf '%s' "$public_cmd" | grep -Eq "(^|[^[:alnum:]_-])git${global_opts}[[:space:]]+(commit|merge|rebase|cherry-pick|revert)([[:space:]]|\$)"; then
+    deny "Direct writes to main are forbidden (AGENTS.md workflow). Create a branch: git switch -c feat/<plan>-p<phase>-<slug>"
+  fi
+  # Every push segment of the command is judged, one per line, and only its own
+  # arguments, so the word "main" in a commit message or an echo elsewhere in a
+  # compound command does not trigger. main counts as a ref wherever no
+  # character of a ref name touches it: after a space, a `:`, a `/` or a forced
+  # refspec's `+`, and beside a quote or a parenthesis.
+  push_segments=$(printf '%s' "$public_cmd" | grep -oE "(^|[^[:alnum:]_-])git${global_opts}[[:space:]]+push([^&;|]*)")
+  if [ -n "$push_segments" ]; then
+    if [ "$branch" = "main" ] || printf '%s\n' "$push_segments" | grep -Eq '(^|[^[:alnum:]_.-])main([^[:alnum:]_./:-]|$)'; then
+      deny "Pushing to main is forbidden (AGENTS.md workflow). Push a feature branch and open a PR."
+    fi
+  fi
+}
+
+# The command's words as the shell reads them. Each quoted span ("…" with its
+# escapes, '…', $'…') and each backslash escape becomes the characters it
+# stands for, and those that the rules above take as a boundary (a blank, a
+# quote, a backslash, ; & |) become `_`. A quoted argument is then one plain
+# word whatever it holds, while a quoted `main` still reads as main.
+q="'"
+unquoted_run="^[^\"${q}\\\\\$]+"
+double_quoted="^\"(([^\"\\\\]|\\\\.)*)\\\\?(\"|\$)"
+single_quoted="^${q}([^${q}]*)(${q}|\$)"
+ansi_c_quoted="^\\\$${q}(([^${q}\\\\]|\\\\.)*)\\\\?(${q}|\$)"
+escaped_character='^\\(.|$)'
+literal_boundary="[[:space:]\"${q}\\\\;&|]"
+
+read_as_shell() {
+  local rest=$1 words="" decoded
+  while [ -n "$rest" ]; do
+    if [[ $rest =~ $unquoted_run ]]; then
+      words+=${BASH_REMATCH[0]}
+    elif [[ $rest =~ $double_quoted ]] || [[ $rest =~ $single_quoted ]] || [[ $rest =~ $escaped_character ]]; then
+      words+=${BASH_REMATCH[1]//$literal_boundary/_}
+    elif [[ $rest =~ $ansi_c_quoted ]]; then
+      decoded=$(decode_ansi_c "${BASH_REMATCH[1]}")
+      words+=${decoded//$literal_boundary/_}
+    else
+      # A `$` that opens no $'…' span is a character of its own.
+      [[ $rest =~ ^. ]]
+      words+=${BASH_REMATCH[0]}
+    fi
+    rest=${rest:${#BASH_REMATCH[0]}}
+  done
+  printf '%s' "$words"
+}
+
+# The characters the inside of a $'…' span stands for. A numeric escape (\xHH,
+# \nnn, \uHHHH, \UHHHHHHHH) is decoded when it names a printable ASCII
+# character, so an escaped `main` still reads as main; any other character it
+# names, and every control-character escape, becomes `_`.
+ansi_c_escape='^([^\\]*)\\(x[[:xdigit:]]{1,2}|u[[:xdigit:]]{1,4}|U[[:xdigit:]]{1,8}|[0-7]{1,3}|c.|.)'
+decode_ansi_c() {
+  local rest=$1 decoded=""
+  while [[ $rest =~ $ansi_c_escape ]]; do
+    decoded+=${BASH_REMATCH[1]}$(ansi_c_character "${BASH_REMATCH[2]}")
+    rest=${rest:${#BASH_REMATCH[0]}}
+  done
+  printf '%s' "$decoded$rest"
+}
+
+ansi_c_character() {
+  local escape=$1 code octal
+  case $escape in
+    x* | u* | U*) code=$((16#${escape:1})) ;;
+    [0-7]*) code=$((8#$escape)) ;;
+    [abeEfnrtv] | c?) printf _; return ;;
+    ["$q"\"\\?]) printf '%s' "$escape"; return ;;
+    *) printf '\\%s' "$escape"; return ;;
+  esac
+  if [ "$code" -gt 32 ] && [ "$code" -lt 127 ]; then
+    printf -v octal '%03o' "$code"
+    printf '%b' "\\0$octal"
+  else
+    printf _
+  fi
+}
+
+# Read as written first, so a command quoted for `bash -c` or `eval` is still
+# judged, then read as the shell reads it, so no quoting hides an argument's
+# end: either reading that writes to main is refused.
+judge "$cmd"
+judge "$(read_as_shell "$cmd")"
 exit 0
