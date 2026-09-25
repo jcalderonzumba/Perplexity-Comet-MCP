@@ -74,3 +74,43 @@ describe("the Pro battery", () => {
     expect(source).toContain("RESEARCH_WORKFLOW.probe(");
   });
 });
+
+describe("the batteries' helpers", () => {
+  const BATTERY_SOURCES = [
+    "run-no-pro.mjs",
+    "run-all.mjs",
+    "lib/battery-score.mjs",
+    "lib/call-within.mjs",
+    "lib/no-pro-checks.mjs",
+    "lib/pro-checks.mjs",
+    "lib/server-under-test.mjs",
+    "gates/battery-score.test.ts",
+    "gates/battery-wiring.test.ts",
+    "gates/call-within.test.ts",
+    "gates/no-pro-checks.test.ts",
+    "gates/pro-checks.test.ts",
+    "gates/support/battery-replies.ts",
+  ];
+
+  /** The files among the batteries' sources that define `name`. */
+  function definersOf(name: string): string[] {
+    const definition = new RegExp(
+      `(?:function\\s+${name}\\s*\\(|(?:const|let)\\s+${name}\\s*[:=])`,
+    );
+    return BATTERY_SOURCES.filter((file) => definition.test(sourceOf(file)));
+  }
+
+  it.each(["replyText", "excerpt"])(
+    "define the reply reader %s once, with the predicates",
+    (reader) => {
+      expect(definersOf(reader)).toEqual(["lib/no-pro-checks.mjs"]);
+    },
+  );
+
+  it.each(["ok", "error", "modeReport", "key", "fakeServer"])(
+    "define the reply builder %s once, in the shared test helper",
+    (builder) => {
+      expect(definersOf(builder)).toEqual(["gates/support/battery-replies.ts"]);
+    },
+  );
+});

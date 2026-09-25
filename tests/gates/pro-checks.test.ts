@@ -6,33 +6,20 @@ import {
 } from "../../src/core/ask-mode.js";
 import { ModeCore } from "../../src/core/mode.js";
 import { answerModeTool } from "../../src/core/mode-tool.js";
-import type { CallTool, ToolReply } from "../lib/no-pro-checks.mjs";
 import {
   RESEARCH_PROMPT,
   RESEARCH_WORKFLOW,
   researchWorkflowHeld,
 } from "../lib/pro-checks.mjs";
 import { FakeModePage } from "../unit/fakes/fake-mode-page.js";
-
-const ok = (text: string): ToolReply => ({
-  content: [{ type: "text", text }],
-});
-const error = (text: string): ToolReply => ({
-  content: [{ type: "text", text }],
-  isError: true,
-});
-
-const modeReport = (current: string) =>
-  [
-    `Current mode: ${current}`,
-    "",
-    "Available modes:",
-    "  search: Search",
-    "  research: Deep research",
-    "  labs: not available (not offered by Perplexity's current input bar)",
-    "  learn: not available (not supported yet)",
-    "",
-  ].join("\n");
+import {
+  error,
+  fakeServer,
+  key,
+  modeReport,
+  ok,
+  type Replies,
+} from "./support/battery-replies.js";
 
 const ANSWER =
   "[BEGIN UNTRUSTED PAGE CONTENT nonce=abc]\nRESEARCHED\n[END UNTRUSTED PAGE CONTENT nonce=abc]";
@@ -151,11 +138,6 @@ describe("researchWorkflowHeld against the server's own replies", () => {
   });
 });
 
-type Replies = Record<string, ToolReply | Error>;
-
-const key = (name: string, args: Record<string, unknown>) =>
-  `${name} ${JSON.stringify(args)}`;
-
 const SWITCH = key("comet_mode", { mode: "research" });
 const ASK = key("comet_ask", {
   prompt: RESEARCH_PROMPT,
@@ -171,19 +153,6 @@ const HEALTHY: Replies = {
   [READ]: PASSING.read,
   [RESTORE]: ok("Switched to search mode"),
 };
-
-function fakeServer(replies: Replies) {
-  const calls: string[] = [];
-  const callTool: CallTool = async (name, args) => {
-    const call = key(name, args);
-    calls.push(call);
-    const reply = replies[call];
-    if (reply === undefined) throw new Error(`unexpected call ${call}`);
-    if (reply instanceof Error) throw reply;
-    return reply;
-  };
-  return { callTool, calls };
-}
 
 describe("RESEARCH_WORKFLOW", () => {
   it("sets research, asks in a new chat, reads the mode, then puts search back", async () => {

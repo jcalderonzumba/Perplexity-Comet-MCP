@@ -8,6 +8,7 @@
 import { runCheck } from "./battery-score.mjs";
 import {
   currentMode,
+  excerpt,
   replyText,
   succeeded,
   switchedTo,
@@ -59,14 +60,6 @@ export function researchWorkflowHeld({ switched, asked, read }) {
     succeeded(read) &&
     currentMode(read) === "research"
   );
-}
-
-/**
- * @param {ToolReply} reply
- * @param {number} length
- */
-function excerpt(reply, length) {
-  return replyText(reply).slice(0, length);
 }
 
 /**

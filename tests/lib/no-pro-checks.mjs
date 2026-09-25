@@ -47,6 +47,15 @@ export function replyText(reply) {
 }
 
 /**
+ * The start of the reply's text, for a check's note.
+ * @param {ToolReply} reply
+ * @param {number} length
+ */
+export function excerpt(reply, length) {
+  return replyText(reply).slice(0, length);
+}
+
+/**
  * The reply is not an error result.
  * @param {ToolReply} reply
  */
@@ -140,14 +149,6 @@ export function invalidModeHandled(invalidModeReply, nextReply) {
     succeeded(nextReply) &&
     reportsMode(nextReply)
   );
-}
-
-/**
- * @param {ToolReply} reply
- * @param {number} length
- */
-function excerpt(reply, length) {
-  return replyText(reply).slice(0, length);
 }
 
 /**
