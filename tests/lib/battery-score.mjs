@@ -77,7 +77,7 @@ export const PRO_KNOWN_FAILURES = [
   {
     id: "2.6-whole-answer",
     reason:
-      "comet_ask may return only the end of a multi-paragraph answer, as an earlier release did, and no run has shown it whole yet",
+      "comet_ask may return only the end of a multi-paragraph answer, as another Comet MCP server was seen to do, and no run has shown it whole yet",
     owningPlan: ASK_RELIABILITY,
   },
   {
