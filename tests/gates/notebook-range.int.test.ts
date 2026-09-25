@@ -10,14 +10,13 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
 import {
+  GIT_HEAVY_TEST_MS,
   GitSandbox,
   type Outcome,
   repoRoot,
   runProcess,
 } from "./support/git-sandbox.ts";
 
-/** Each test runs several git commands, slow when the whole suite runs at once. */
-const GIT_HEAVY_TEST_MS = 30_000;
 const BRANCH = "feat/demo-p1-range";
 /** The second the branch is created in; the other times are relative to it. */
 const CREATED = 1_800_000_000;

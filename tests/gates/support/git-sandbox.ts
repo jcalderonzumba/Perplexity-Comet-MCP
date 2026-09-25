@@ -23,6 +23,13 @@ export const repoRoot = resolve(
   "../../..",
 );
 
+/**
+ * The time limit of a test that runs git or a gate script several times.
+ * Vitest's 5-second default leaves such a test no margin when the whole
+ * suite runs at once on a loaded machine.
+ */
+export const GIT_HEAVY_TEST_MS = 30_000;
+
 export type Outcome = {
   readonly status: number | null;
   readonly stdout: string;

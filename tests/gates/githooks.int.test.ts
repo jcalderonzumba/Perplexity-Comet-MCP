@@ -7,7 +7,7 @@ import { join } from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { GitSandbox } from "./support/git-sandbox.ts";
+import { GIT_HEAVY_TEST_MS, GitSandbox } from "./support/git-sandbox.ts";
 
 let sandbox: GitSandbox;
 
@@ -21,7 +21,7 @@ afterEach(() => {
 
 const OTHER_SHA = "a".repeat(40);
 
-describe("pre-commit", () => {
+describe("pre-commit", { timeout: GIT_HEAVY_TEST_MS }, () => {
   it("refuses a commit on main", () => {
     const outcome = sandbox.run(".githooks/pre-commit");
     expect(outcome.status).toBe(1);
@@ -37,7 +37,7 @@ describe("pre-commit", () => {
 describe.each([
   ["review-check.sh", "review-ok", "the phase review has not approved HEAD"],
   ["preflight-check.sh", "preflight-ok", "preflight has not passed on HEAD"],
-] as const)("%s", (script, stamp, refusal) => {
+] as const)("%s", { timeout: GIT_HEAVY_TEST_MS }, (script, stamp, refusal) => {
   const check = () => sandbox.run(`.githooks/${script}`, [sandbox.root]);
 
   it("refuses when there is no stamp", () => {
@@ -80,7 +80,9 @@ describe.each([
   });
 });
 
-describe("preflight-check.sh in a repository with no preflight script", () => {
+describe("preflight-check.sh in a repository with no preflight script", {
+  timeout: GIT_HEAVY_TEST_MS,
+}, () => {
   it("has nothing to gate", () => {
     sandbox.git("rm", "--quiet", "package.json");
     sandbox.commit("docs only");
@@ -90,7 +92,7 @@ describe("preflight-check.sh in a repository with no preflight script", () => {
   });
 });
 
-describe("review-withdraw.sh", () => {
+describe("review-withdraw.sh", { timeout: GIT_HEAVY_TEST_MS }, () => {
   const stampFile = () => join(sandbox.root, ".git", "review-ok");
   const withdraw = () =>
     sandbox.run(".githooks/review-withdraw.sh", [sandbox.root]);
@@ -119,7 +121,7 @@ describe("review-withdraw.sh", () => {
   });
 });
 
-describe("pre-push", () => {
+describe("pre-push", { timeout: GIT_HEAVY_TEST_MS }, () => {
   const push = (remoteRef: string) =>
     sandbox.run(
       ".githooks/pre-push",

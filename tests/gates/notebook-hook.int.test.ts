@@ -22,7 +22,12 @@ import { delimiter, join } from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { GitSandbox, type Outcome, runProcess } from "./support/git-sandbox.ts";
+import {
+  GIT_HEAVY_TEST_MS,
+  GitSandbox,
+  type Outcome,
+  runProcess,
+} from "./support/git-sandbox.ts";
 
 const NOTEBOOK_HOOKS_PATH = "../.githooks/notebook";
 /** Variables the hook reads, kept out of a commit unless a test sets them. */
@@ -34,8 +39,6 @@ const HOOK_VARIABLES = [
   "SSH_ASKPASS",
 ];
 const CONNECT_TIMEOUT_MS = 5_000;
-/** Each test runs several git commands, slow when the whole suite runs at once. */
-const GIT_HEAVY_TEST_MS = 30_000;
 
 function git(directory: string, ...args: string[]): string {
   const outcome = runProcess("git", ["-C", directory, ...args]);
