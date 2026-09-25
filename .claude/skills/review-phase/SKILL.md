@@ -1,6 +1,6 @@
 ---
 name: review-phase
-description: Run the phase review gate on the current PR branch — after the phase is complete (code, tests, README, CHANGELOG, plan ticks, PR draft) and before npm run preflight, on every branch that will become a PR, docs-only included. Prepares the brief, dispatches the phase-reviewer subagent with fresh context, runs the fix loop for up to three rounds, records the Code-review verdict in the PR description draft, runs npm run preflight, opens the PR after one owner confirmation, and writes the plan's DONE marker once the PR exists. /run-phase invokes it when a phase's last unit is done; on a branch /run-phase built, a fresh phase-builder fixes each round's findings.
+description: Run the phase review gate on the current PR branch — after the phase is complete (code, tests, README, CHANGELOG, plan ticks, PR draft) and before npm run preflight, on every branch that will become a PR, docs-only included. Prepares the brief, dispatches the phase-reviewer subagent with fresh context, runs the fix loop for up to three rounds, records the Code-review verdict in the PR description draft, runs npm run preflight, opens the PR after one owner confirmation, and writes the plan's DONE marker and its row of the spec's plan status table once the PR exists. /run-phase invokes it when a phase's last unit is done; on a branch /run-phase built, a fresh phase-builder fixes each round's findings.
 
 ---
 
@@ -174,22 +174,31 @@ After every dispatch run:
    - disputes and the owner's rulings;
    - skills invoked, skills skipped with reasons, Context7 docs fetched, research notes read (by date and topic), whether CodeGraph ran.
 2. Run `npm run preflight`, unless `.githooks/preflight-check.sh "$(git rev-parse --show-toplevel)"` already passes for HEAD. It needs the same clean HEAD the reviewer stamped and drives the owner's local Comet for up to ten minutes, so run it in the background and wait for it to finish. Record its result in the draft's *Verification* section. **A failing preflight stops the finish.** Show the owner the failing step and its output, and fix nothing: a code failure there is a new commit, which needs a new review round, and the remaining failures are usually about the environment (Comet not running or not signed in).
-3. **Ask the owner once** before anything is published, with AskUserQuestion. Show the PR title (a conventional commit title) and the draft's full text. The first option, recommended, pushes the branch and opens the PR; the second is *not yet*, which leaves both stamps in place for a later invocation.
-4. On the owner's yes, push the branch with `git push -u origin <branch name>`, then open the PR: `gh pr create --title "<conventional commit title>" --body-file .git/review/<branch>/pr-body.md`.
-5. On a phase branch, write the DONE marker (§9).
+3. **The Pro battery, when the draft still waits for it.** A phase that touches ask, poll, mode or agentic behaviour may reach review with the line `Pro battery: pending, the owner runs it` in *Verification* ([`/run-phase` §7](../run-phase/SKILL.md#7-finishing-the-phase) writes it), and the reviewer accepts it there. The PR never opens with it. The run spends the owner's Pro queries, so ask first, with AskUserQuestion: the first option, recommended, runs it now; the second is *not yet*, which leaves both stamps in place for a later invocation. On the owner's yes, run `npm run build`, then `npm run test:live:pro` with the `COMET_PORT` preflight used, in the background, and wait for it to finish. Replace the pending line with the run: HEAD's short sha, the date, its `Results:` line, and each failed check with its note. Record a failure as it ran and fix nothing here. The owner weighs each failure at the next step: one the phase's code causes is fixed by a new commit, which needs a new review round (§5) and a new preflight.
+4. **Ask the owner once to publish**, before anything is published, with AskUserQuestion. Show the PR title (a conventional commit title) and the draft's full text. The first option, recommended, pushes the branch and opens the PR; the second is *not yet*, which leaves both stamps in place for a later invocation.
+5. On the owner's yes, push the branch with `git push -u origin <branch name>`, then open the PR: `gh pr create --title "<conventional commit title>" --body-file .git/review/<branch>/pr-body.md`.
+6. On a phase branch, write the DONE marker and bring the spec's status table up to date (§9).
 
 Merge with the `land-pr` skill.
 
 ## 9. The DONE marker
 
-On a phase branch, after `gh pr create` prints the PR's URL, take its number N from the URL and append `— ✅ DONE (PR #N)` to the plan's `## Phase <n>` heading in `.work/`. When it is the plan's last phase, move the plan in the same commit, keeping the filename:
+On a phase branch, after `gh pr create` prints the PR's URL, take its number N from the URL and append `— ✅ DONE (PR #N)` to the plan's `## Phase <n>` heading in `.work/`. When it is the plan's last phase, move the plan in the same commit, keeping the filename.
+
+In that same commit, bring the plan's row of the **§12 status table** of the spec (`.work/specs/`) up to date, so the table never waits for someone to remember it:
+
+- **The row** is the one whose *File* column names the plan's file, or else the one whose *Plan* column names the plan. When no row names it, add one above the row of plans not started, and take the plan out of that row's list.
+- **Its *Status*** names each phase done so far with its PR, and what remains: for example `phases 1 and 2 done in PR #5 and PR #9; phase 3 not built`. On the plan's last phase it reads `done:`, followed by every phase and its PR, as `done: phase 1 in PR #1, phase 2 in PR #2`. Keep the decision ids the row already cites, such as `(D16)`; a clause that only said what the plan waited for goes once the wait is over.
+- **Its *File*** is `plans/<file>`, and `plans/done/<file>` once the plan has moved.
+
+The row records progress D15 already decided the table keeps, so the commit adds no decision-log row and names D15 in its message instead:
 
 ```sh
 git -C .work mv plans/<file> plans/done/<file>   # last phase only
-git -C .work commit -am "docs(plan): <plan> phase <n> done (PR #N)"
+git -C .work commit -am "docs(plan): <plan> phase <n> done (PR #N); §12 status (D15)"
 ```
 
-The marker lives in the private notebook, never in the public commit the reviewer stamped, so writing it needs no new review round and no new preflight. It carries no commit sha: the PR number leads to the merge commit.
+The marker and the row live in the private notebook, never in the public commit the reviewer stamped, so writing them needs no new review round and no new preflight. They carry no commit sha: the PR number leads to the merge commit.
 
 ## 10. The stamp is not yours
 
