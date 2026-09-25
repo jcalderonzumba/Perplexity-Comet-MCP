@@ -48,8 +48,55 @@ describe.each(["run-no-pro.mjs", "run-all.mjs"])(
       expect(source).toContain("callWithin(client)");
       expect(source).not.toContain(".callTool(");
     });
+
+    it("prints each check's verdict line and the summary from the scoring module", () => {
+      expect(source).toMatch(
+        /import \{[^}]*\breportLine\b[^}]*\bsummaryLine\b[^}]*\} from "\.\/lib\/battery-score\.mjs";/,
+      );
+      expect(source).toContain("console.log(reportLine(check))");
+      expect(source).toContain("console.log(summaryLine(checks))");
+    });
+
+    it("fails the run on a FAIL or an UNEXPECTED PASS, and exits no other way but the fatal one", () => {
+      expect(source).toMatch(
+        /import \{[^}]*\bbatteryPassed\b[^}]*\} from "\.\/lib\/battery-score\.mjs";/,
+      );
+      expect(source.match(/process\.exit\((?:[^()]|\([^()]*\))*\)/g)).toEqual([
+        "process.exit(batteryPassed(checks) ? 0 : 1)",
+        "process.exit(1)",
+      ]);
+      expect(source).toMatch(
+        /\.catch\(\(e\) => \{\s*console\.error\("Fatal:", e\);\s*process\.exit\(1\);\s*\}\);\s*$/,
+      );
+    });
   },
 );
+
+describe.each([
+  [
+    "no-pro",
+    "lib/no-pro-checks.mjs",
+    "NO_PRO_KNOWN_FAILURES",
+    "PRO_KNOWN_FAILURES",
+  ],
+  ["Pro", "run-all.mjs", "PRO_KNOWN_FAILURES", "NO_PRO_KNOWN_FAILURES"],
+])("the %s battery's scoring", (_battery, scorer, ownList, otherList) => {
+  const source = sourceOf(scorer);
+
+  it("scores against its own known-failures list, never the other battery's", () => {
+    expect(source).toMatch(
+      new RegExp(
+        `import \\{[^}]*\\b${ownList}\\b[^}]*\\} from "\\./(?:lib/)?battery-score\\.mjs";`,
+      ),
+    );
+    const scorings = source.match(/\bscoreCheck\([^;]*;/g) ?? [];
+    expect(scorings.length).toBeGreaterThan(0);
+    for (const call of scorings) {
+      expect(call).toMatch(new RegExp(`\\b${ownList}\\b`));
+    }
+    expect(source).not.toMatch(new RegExp(`(?<![A-Z_])${otherList}\\b`));
+  });
+});
 
 describe("the Pro battery", () => {
   const source = sourceOf("run-all.mjs");
@@ -61,10 +108,40 @@ describe("the Pro battery", () => {
 
   it("calls no other tool before the connect check, and none after it fails", () => {
     const connect = source.indexOf("connectCheck(debugPort(server.port))");
-    const stop = source.indexOf("if (!connect.held)");
+    const stop = source.indexOf('if (connect.verdict !== "PASS")');
     expect(stop).toBeGreaterThan(connect);
-    const firstToolCall = source.search(/await call\(\s*client,/);
+    const firstToolCall = source.search(/callTool\(\s*"/);
     expect(firstToolCall).toBeGreaterThan(stop);
+  });
+
+  it("runs every check through runCheck and scores it against the Pro list", () => {
+    expect(source).toMatch(
+      /import \{[^}]*\brunCheck\b[^}]*\bscoreCheck\b[^}]*\} from "\.\/lib\/battery-score\.mjs";/,
+    );
+    expect(source).toContain(
+      "scoreCheck(await runCheck(id, probe), PRO_KNOWN_FAILURES)",
+    );
+    expect(source.match(/\brunCheck\(/g)).toHaveLength(1);
+    expect(source.match(/\bscoreCheck\(/g)).toHaveLength(1);
+  });
+
+  it("keeps no verdicts or counters of its own", () => {
+    expect(source).not.toMatch(/✅|❌|⏭|\bSKIP\b/);
+    expect(source).not.toMatch(/\bfunction log\(/);
+    expect(source).not.toMatch(/\b(?:passed|failed|skipped)\+\+/);
+  });
+
+  it("has no call(client, …) forwarding to callWithin", () => {
+    expect(source).not.toMatch(/\bcall\(\s*client\b/);
+    expect(source).not.toMatch(/\bfunction call\(/);
+  });
+
+  it("judges its screenshots with the no-pro battery's predicate", () => {
+    expect(source).toMatch(
+      /import \{[^}]*\bhasScreenshot\b[^}]*\} from "\.\/lib\/no-pro-checks\.mjs";/,
+    );
+    expect(source.match(/hasScreenshot\(/g)?.length).toBeGreaterThanOrEqual(2);
+    expect(source).not.toMatch(/c\.type === "image"/);
   });
 
   it("runs the research workflow check", () => {
@@ -106,6 +183,10 @@ describe("the batteries' helpers", () => {
       expect(definersOf(reader)).toEqual(["lib/no-pro-checks.mjs"]);
     },
   );
+
+  it("define no reply reader of their own under another name", () => {
+    expect(definersOf("text")).toEqual([]);
+  });
 
   it.each(["ok", "error", "modeReport", "key", "fakeServer"])(
     "define the reply builder %s once, in the shared test helper",

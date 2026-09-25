@@ -1,21 +1,33 @@
 /**
- * MCP Test Runner
- * Spawns the built MCP server (dist/index.js) on the debug port it checks and
- * runs the live Pro battery against the local Comet (README, Development).
- * Spends Perplexity Pro queries. Comet must already answer on the server's
- * port (COMET_PORT, 9223 by default): otherwise no tool is called.
+ * The live Pro battery: spawns the built MCP server (dist/index.js) on the
+ * debug port it checks, drives the local Comet through it (README,
+ * Development), scores each check against the Pro battery's own known
+ * failures, and exits non-zero when the battery fails. Spends Perplexity Pro
+ * queries. Comet must already answer on the server's port (COMET_PORT, 9223
+ * by default): otherwise no tool is called.
  * Usage: npm run test:live:pro
  */
 
+import { writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js";
-import { spawn } from "child_process";
-import { existsSync, writeFileSync } from "fs";
-import { runCheck } from "./lib/battery-score.mjs";
+import {
+  batteryPassed,
+  PRO_KNOWN_FAILURES,
+  reportLine,
+  runCheck,
+  scoreCheck,
+  summaryLine,
+} from "./lib/battery-score.mjs";
 import { callWithin } from "./lib/call-within.mjs";
-import { connectCheck } from "./lib/no-pro-checks.mjs";
+import {
+  connectCheck,
+  excerpt,
+  hasScreenshot,
+  replyText,
+} from "./lib/no-pro-checks.mjs";
 import { RESEARCH_WORKFLOW } from "./lib/pro-checks.mjs";
 import { debugPort, serverUnderTest } from "./lib/server-under-test.mjs";
 
@@ -24,33 +36,32 @@ const DIST_ENTRY = resolve(
   "../dist/index.js",
 );
 const COMET_TEST_FILE = "/tmp/comet-test-upload.txt";
-const PASS = "✅ PASS";
-const FAIL = "❌ FAIL";
-const SKIP = "⏭  SKIP";
 
-let passed = 0,
-  failed = 0,
-  skipped = 0;
-const results = [];
+/** Every check scored so far, in the order it ran. */
+const checks = [];
 
-function log(id, status, note = "") {
-  const line = `${status} [${id}]${note ? " — " + note : ""}`;
-  console.log(line);
-  results.push({ id, status, note });
-  if (status === PASS) passed++;
-  else if (status === FAIL) failed++;
-  else skipped++;
+/**
+ * Runs one check's probe, scores it against the Pro battery's known
+ * failures, and prints its verdict line. A probe that throws is a check
+ * whose condition did not hold.
+ * @param {string} id
+ * @param {() => Promise<{ held: boolean, note: string }>} probe
+ */
+async function score(id, probe) {
+  const check = scoreCheck(await runCheck(id, probe), PRO_KNOWN_FAILURES);
+  console.log(reportLine(check));
+  checks.push(check);
+  return check;
 }
 
-async function call(client, toolName, args = {}, timeoutMs = 60000) {
-  return callWithin(client)(toolName, args, timeoutMs);
+/** @param {unknown} error */
+function messageOf(error) {
+  return error instanceof Error ? error.message : String(error);
 }
 
-function text(result) {
-  if (!result?.content) return "";
-  return result.content
-    .map((c) => (c.type === "text" ? c.text : ""))
-    .join("\n");
+/** @param {number} ms */
+function pause(ms) {
+  return new Promise((done) => setTimeout(done, ms));
 }
 
 async function main() {
@@ -73,32 +84,32 @@ async function main() {
   // 1.2 — Comet already answers on the server's debug port, and connect
   // succeeds. Nothing else runs without it: any tool call would make the
   // server launch Comet, or kill and relaunch one on another port.
-  const connect = await runCheck("1.2", () =>
+  const connect = await score("1.2", () =>
     connectCheck(debugPort(server.port)).probe(callTool),
   );
-  log("1.2", connect.held ? PASS : FAIL, connect.note);
-  if (!connect.held) {
+  if (connect.verdict !== "PASS") {
     console.log("\nNo other check is run: [1.2] connect failed.");
     return finish(client);
   }
 
   // 1.5 — Session persistence: ask a simple question to confirm we're logged in
-  try {
-    const r = await call(
-      client,
-      "comet_ask",
-      { prompt: "Reply with exactly one word: VERIFIED" },
-      60000,
+  await score("1.5", async () => {
+    const t = replyText(
+      await callTool(
+        "comet_ask",
+        { prompt: "Reply with exactly one word: VERIFIED" },
+        60000,
+      ),
     );
-    const t = text(r);
     if (t.toUpperCase().includes("VERIFIED"))
-      log("1.5", PASS, "session token decrypted, no login redirect");
-    else if (t.match(/login|sign.?in|auth/i))
-      log("1.5", FAIL, "redirected to login page — session not persisting");
-    else log("1.5", PASS, `response: ${t.slice(0, 80)}`);
-  } catch (e) {
-    log("1.5", FAIL, e.message);
-  }
+      return { held: true, note: "session token decrypted, no login redirect" };
+    if (t.match(/login|sign.?in|auth/i))
+      return {
+        held: false,
+        note: "redirected to login page — session not persisting",
+      };
+    return { held: true, note: `response: ${t.slice(0, 80)}` };
+  });
 
   // ─────────────────────────────────────────────
   // GROUP 2: comet_ask — Basic Queries
@@ -106,103 +117,95 @@ async function main() {
   console.log("\n── Group 2: comet_ask — Basic Queries ──");
 
   // 2.1 — Simple factual question
-  try {
-    const r = await call(
-      client,
-      "comet_ask",
-      { prompt: "What is the capital of France? Reply in one word." },
-      60000,
+  await score("2.1", async () => {
+    const t = replyText(
+      await callTool(
+        "comet_ask",
+        { prompt: "What is the capital of France? Reply in one word." },
+        60000,
+      ),
     );
-    const t = text(r);
-    if (t.match(/paris/i)) log("2.1", PASS);
-    else log("2.1", FAIL, `got: ${t.slice(0, 80)}`);
-  } catch (e) {
-    log("2.1", FAIL, e.message);
-  }
+    return t.match(/paris/i)
+      ? { held: true, note: "" }
+      : { held: false, note: `got: ${t.slice(0, 80)}` };
+  });
 
   // 2.2 — newChat continuity
-  try {
-    await call(
-      client,
+  await score("2.2", async () => {
+    await callTool(
       "comet_ask",
       { prompt: "Remember the number 9473.", newChat: true },
       60000,
     );
-    const r2 = await call(
-      client,
-      "comet_ask",
-      { prompt: "What number did I ask you to remember?" },
-      60000,
+    const t = replyText(
+      await callTool(
+        "comet_ask",
+        { prompt: "What number did I ask you to remember?" },
+        60000,
+      ),
     );
-    const t = text(r2);
-    if (t.includes("9473")) log("2.2", PASS);
-    else log("2.2", FAIL, `expected 9473, got: ${t.slice(0, 80)}`);
-  } catch (e) {
-    log("2.2", FAIL, e.message);
-  }
+    return t.includes("9473")
+      ? { held: true, note: "" }
+      : { held: false, note: `expected 9473, got: ${t.slice(0, 80)}` };
+  });
 
   // 2.3 — newChat resets context
-  try {
-    await call(
-      client,
+  await score("2.3", async () => {
+    await callTool(
       "comet_ask",
       { prompt: "Remember the number 9473.", newChat: true },
       60000,
     );
-    const r2 = await call(
-      client,
-      "comet_ask",
-      { prompt: "What number did I ask you to remember?", newChat: true },
-      60000,
+    const t = replyText(
+      await callTool(
+        "comet_ask",
+        { prompt: "What number did I ask you to remember?", newChat: true },
+        60000,
+      ),
     );
-    const t = text(r2);
-    if (!t.includes("9473")) log("2.3", PASS, "context correctly reset");
-    else log("2.3", FAIL, "new chat incorrectly retained prior context");
-  } catch (e) {
-    log("2.3", FAIL, e.message);
-  }
+    return !t.includes("9473")
+      ? { held: true, note: "context correctly reset" }
+      : { held: false, note: "new chat incorrectly retained prior context" };
+  });
 
   // 2.4 — Timeout respected
-  try {
+  await score("2.4", async () => {
     const start = Date.now();
-    await call(
-      client,
-      "comet_ask",
-      {
-        prompt: "Write a 10000 word essay on the history of Rome.",
-        timeout: 3000,
-      },
-      10000,
-    );
+    try {
+      await callTool(
+        "comet_ask",
+        {
+          prompt: "Write a 10000 word essay on the history of Rome.",
+          timeout: 3000,
+        },
+        10000,
+      );
+    } catch (e) {
+      const message = messageOf(e);
+      return { held: !message.includes("TIMEOUT"), note: message.slice(0, 80) };
+    }
     const elapsed = Date.now() - start;
-    if (elapsed < 8000) log("2.4", PASS, `returned in ${elapsed}ms`);
-    else log("2.4", FAIL, `took ${elapsed}ms — timeout not respected`);
-  } catch (e) {
-    const elapsed = e.message.includes("TIMEOUT") ? ">10000ms" : "error";
-    log(
-      "2.4",
-      e.message.includes("TIMEOUT") ? FAIL : PASS,
-      e.message.slice(0, 80),
-    );
-  }
+    return elapsed < 8000
+      ? { held: true, note: `returned in ${elapsed}ms` }
+      : { held: false, note: `took ${elapsed}ms — timeout not respected` };
+  });
 
   // 2.5 — Context injection
-  try {
-    const r = await call(
-      client,
-      "comet_ask",
-      {
-        prompt: "What is the project name?",
-        context: "Project name: Artemis",
-      },
-      60000,
+  await score("2.5", async () => {
+    const t = replyText(
+      await callTool(
+        "comet_ask",
+        {
+          prompt: "What is the project name?",
+          context: "Project name: Artemis",
+        },
+        60000,
+      ),
     );
-    const t = text(r);
-    if (t.match(/artemis/i)) log("2.5", PASS);
-    else log("2.5", FAIL, `got: ${t.slice(0, 80)}`);
-  } catch (e) {
-    log("2.5", FAIL, e.message);
-  }
+    return t.match(/artemis/i)
+      ? { held: true, note: "" }
+      : { held: false, note: `got: ${t.slice(0, 80)}` };
+  });
 
   // ─────────────────────────────────────────────
   // GROUP 3: comet_ask — Agentic Browsing
@@ -210,74 +213,63 @@ async function main() {
   console.log("\n── Group 3: comet_ask — Agentic Browsing ──");
 
   // 3.1 — URL navigation
-  try {
-    const r = await call(
-      client,
-      "comet_ask",
-      { prompt: "Go to example.com and tell me the page heading." },
-      90000,
+  await score("3.1", async () => {
+    const t = replyText(
+      await callTool(
+        "comet_ask",
+        { prompt: "Go to example.com and tell me the page heading." },
+        90000,
+      ),
     );
-    const t = text(r);
-    if (t.match(/example.domain/i)) log("3.1", PASS);
-    else if (t.match(/example/i))
-      log("3.1", PASS, `navigated, response: ${t.slice(0, 80)}`);
-    else log("3.1", FAIL, t.slice(0, 120));
-  } catch (e) {
-    log("3.1", FAIL, e.message);
-  }
+    if (t.match(/example.domain/i)) return { held: true, note: "" };
+    if (t.match(/example/i))
+      return { held: true, note: `navigated, response: ${t.slice(0, 80)}` };
+    return { held: false, note: t.slice(0, 120) };
+  });
 
   // 3.2 — tabPolicy=preserve
-  try {
-    await call(
-      client,
+  await score("3.2", async () => {
+    await callTool(
       "comet_ask",
       { prompt: "Go to example.com.", tabPolicy: "preserve" },
       90000,
     );
-    const r = await call(client, "comet_tabs", {}, 15000);
-    const t = text(r);
-    if (t.match(/example\.com/i)) log("3.2", PASS, "example.com tab preserved");
-    else log("3.2", FAIL, `tabs: ${t.slice(0, 120)}`);
-  } catch (e) {
-    log("3.2", FAIL, e.message);
-  }
+    const t = replyText(await callTool("comet_tabs", {}, 15000));
+    return t.match(/example\.com/i)
+      ? { held: true, note: "example.com tab preserved" }
+      : { held: false, note: `tabs: ${t.slice(0, 120)}` };
+  });
 
   // 3.3 — tabPolicy=cleanup
-  try {
-    await call(
-      client,
+  await score("3.3", async () => {
+    await callTool(
       "comet_ask",
       { prompt: "Go to example.com.", tabPolicy: "cleanup" },
       90000,
     );
-    const r = await call(client, "comet_tabs", {}, 15000);
-    const t = text(r);
-    if (!t.match(/example\.com/i))
-      log("3.3", PASS, "example.com tab cleaned up");
-    else log("3.3", FAIL, `tab still open: ${t.slice(0, 120)}`);
-  } catch (e) {
-    log("3.3", FAIL, e.message);
-  }
+    const t = replyText(await callTool("comet_tabs", {}, 15000));
+    return !t.match(/example\.com/i)
+      ? { held: true, note: "example.com tab cleaned up" }
+      : { held: false, note: `tab still open: ${t.slice(0, 120)}` };
+  });
 
   // 3.4 — Multi-step agentic task (qualitative)
-  try {
-    const r = await call(
-      client,
-      "comet_ask",
-      {
-        prompt:
-          "Go to github.com/trending, find the top-ranked repository today, and tell me its name and star count.",
-      },
-      120000,
+  await score("3.4", async () => {
+    const t = replyText(
+      await callTool(
+        "comet_ask",
+        {
+          prompt:
+            "Go to github.com/trending, find the top-ranked repository today, and tell me its name and star count.",
+        },
+        120000,
+      ),
     );
-    const t = text(r);
     // Just check something came back that looks like a repo name
-    if (t.match(/[a-zA-Z0-9_-]+\/[a-zA-Z0-9_-]+|star|\d+k/i))
-      log("3.4", PASS, t.slice(0, 100));
-    else log("3.4", FAIL, t.slice(0, 120));
-  } catch (e) {
-    log("3.4", FAIL, e.message);
-  }
+    return t.match(/[a-zA-Z0-9_-]+\/[a-zA-Z0-9_-]+|star|\d+k/i)
+      ? { held: true, note: t.slice(0, 100) }
+      : { held: false, note: t.slice(0, 120) };
+  });
 
   // ─────────────────────────────────────────────
   // GROUP 4: comet_poll and comet_stop
@@ -285,21 +277,20 @@ async function main() {
   console.log("\n── Group 4: comet_poll and comet_stop ──");
 
   // 4.1 — Poll while idle
-  try {
-    const r = await call(client, "comet_poll", {}, 10000);
-    const t = text(r);
-    if (t.match(/idle|no.active|complete|done/i))
-      log("4.1", PASS, t.slice(0, 80));
-    else log("4.1", PASS, `poll response: ${t.slice(0, 80)}`); // any non-error response is fine
-  } catch (e) {
-    log("4.1", FAIL, e.message);
-  }
+  await score("4.1", async () => {
+    const t = replyText(await callTool("comet_poll", {}, 10000));
+    // any non-error response is fine
+    return t.match(/idle|no.active|complete|done/i)
+      ? { held: true, note: t.slice(0, 80) }
+      : { held: true, note: `poll response: ${t.slice(0, 80)}` };
+  });
 
   // 4.3 — Stop active task (fire and immediately stop)
-  try {
+  /** @type {Promise<unknown> | undefined} */
+  let slowAsk;
+  await score("4.3", async () => {
     // Start a very slow task without awaiting
-    const askPromise = call(
-      client,
+    slowAsk = callTool(
       "comet_ask",
       {
         prompt:
@@ -309,26 +300,23 @@ async function main() {
       130000,
     ).catch(() => {});
 
-    await new Promise((r) => setTimeout(r, 3000)); // give it 3s to start
+    await pause(3000); // give it 3s to start
 
-    const stopResult = await call(client, "comet_stop", {}, 10000);
-    const stopText = text(stopResult);
-    if (stopText.match(/stopped|halted|cancelled|idle|no.task/i))
-      log("4.3", PASS, stopText.slice(0, 80));
-    else log("4.3", PASS, `stop response: ${stopText.slice(0, 80)}`);
+    const stopText = replyText(await callTool("comet_stop", {}, 10000));
+    return stopText.match(/stopped|halted|cancelled|idle|no.task/i)
+      ? { held: true, note: stopText.slice(0, 80) }
+      : { held: true, note: `stop response: ${stopText.slice(0, 80)}` };
+  });
 
-    // Poll should now be idle
-    await new Promise((r) => setTimeout(r, 1000));
-    const pollAfter = await call(client, "comet_poll", {}, 10000);
-    const pollText = text(pollAfter);
-    if (pollText.match(/idle|no.active|complete|done/i))
-      log("4.3b", PASS, "confirmed idle after stop");
-    else log("4.3b", FAIL, `still active?: ${pollText.slice(0, 80)}`);
-
-    await askPromise; // let it resolve/reject cleanly
-  } catch (e) {
-    log("4.3", FAIL, e.message);
-  }
+  // 4.3b — Poll should now be idle
+  await score("4.3b", async () => {
+    await pause(1000);
+    const pollText = replyText(await callTool("comet_poll", {}, 10000));
+    return pollText.match(/idle|no.active|complete|done/i)
+      ? { held: true, note: "confirmed idle after stop" }
+      : { held: false, note: `still active?: ${pollText.slice(0, 80)}` };
+  });
+  await slowAsk; // let it resolve/reject cleanly
 
   // ─────────────────────────────────────────────
   // GROUP 5: comet_screenshot
@@ -336,31 +324,27 @@ async function main() {
   console.log("\n── Group 5: comet_screenshot ──");
 
   // 5.1 — Screenshot while idle
-  try {
-    const r = await call(client, "comet_screenshot", {}, 15000);
-    const hasImage = r?.content?.some(
-      (c) => c.type === "image" || (c.type === "text" && c.text.length > 100),
-    );
-    if (hasImage) log("5.1", PASS, "non-empty screenshot returned");
-    else
-      log("5.1", FAIL, `content: ${JSON.stringify(r?.content).slice(0, 120)}`);
-  } catch (e) {
-    log("5.1", FAIL, e.message);
-  }
+  await score("5.1", async () => {
+    const r = await callTool("comet_screenshot", {}, 15000);
+    return hasScreenshot(r)
+      ? { held: true, note: "non-empty screenshot returned" }
+      : {
+          held: false,
+          note: `content: ${JSON.stringify(r.content).slice(0, 120)}`,
+        };
+  });
 
   // 5.2 — Screenshot after navigation
-  try {
-    await call(client, "comet_ask", { prompt: "Go to example.com." }, 60000);
-    const r = await call(client, "comet_screenshot", {}, 15000);
-    const hasImage = r?.content?.some(
-      (c) => c.type === "image" || (c.type === "text" && c.text.length > 100),
-    );
-    if (hasImage) log("5.2", PASS, "screenshot after navigation returned");
-    else
-      log("5.2", FAIL, `content: ${JSON.stringify(r?.content).slice(0, 120)}`);
-  } catch (e) {
-    log("5.2", FAIL, e.message);
-  }
+  await score("5.2", async () => {
+    await callTool("comet_ask", { prompt: "Go to example.com." }, 60000);
+    const r = await callTool("comet_screenshot", {}, 15000);
+    return hasScreenshot(r)
+      ? { held: true, note: "screenshot after navigation returned" }
+      : {
+          held: false,
+          note: `content: ${JSON.stringify(r.content).slice(0, 120)}`,
+        };
+  });
 
   // ─────────────────────────────────────────────
   // GROUP 6: comet_tabs
@@ -368,50 +352,43 @@ async function main() {
   console.log("\n── Group 6: comet_tabs ──");
 
   // 6.1 — List tabs
-  try {
-    const r = await call(client, "comet_tabs", {}, 10000);
-    const t = text(r);
-    log("6.1", PASS, t.slice(0, 100));
-  } catch (e) {
-    log("6.1", FAIL, e.message);
-  }
+  await score("6.1", async () => ({
+    held: true,
+    note: excerpt(await callTool("comet_tabs", {}, 10000), 100),
+  }));
 
   // 6.3 — Switch to tab by domain (need example.com open first)
-  try {
-    await call(
-      client,
+  await score("6.3", async () => {
+    await callTool(
       "comet_ask",
       { prompt: "Go to example.com.", tabPolicy: "preserve" },
       60000,
     );
-    const r = await call(
-      client,
-      "comet_tabs",
-      { action: "switch", domain: "example.com" },
-      10000,
+    const t = replyText(
+      await callTool(
+        "comet_tabs",
+        { action: "switch", domain: "example.com" },
+        10000,
+      ),
     );
-    const t = text(r);
-    if (t.match(/switch|focus|active|example/i))
-      log("6.3", PASS, t.slice(0, 80));
-    else log("6.3", FAIL, t.slice(0, 120));
-  } catch (e) {
-    log("6.3", FAIL, e.message);
-  }
+    return t.match(/switch|focus|active|example/i)
+      ? { held: true, note: t.slice(0, 80) }
+      : { held: false, note: t.slice(0, 120) };
+  });
 
   // 6.4 — Close tab by domain
-  try {
-    const r = await call(
-      client,
-      "comet_tabs",
-      { action: "close", domain: "example.com" },
-      10000,
+  await score("6.4", async () => {
+    const t = replyText(
+      await callTool(
+        "comet_tabs",
+        { action: "close", domain: "example.com" },
+        10000,
+      ),
     );
-    const t = text(r);
-    if (t.match(/close|closed|removed/i)) log("6.4", PASS, t.slice(0, 80));
-    else log("6.4", PASS, `close response: ${t.slice(0, 80)}`);
-  } catch (e) {
-    log("6.4", FAIL, e.message);
-  }
+    return t.match(/close|closed|removed/i)
+      ? { held: true, note: t.slice(0, 80) }
+      : { held: true, note: `close response: ${t.slice(0, 80)}` };
+  });
 
   // ─────────────────────────────────────────────
   // GROUP 7: comet_mode
@@ -419,35 +396,24 @@ async function main() {
   console.log("\n── Group 7: comet_mode ──");
 
   // 7.1 — Read current mode
-  try {
-    const r = await call(client, "comet_mode", {}, 15000);
-    const t = text(r);
-    if (t.match(/search|research|labs|learn/i))
-      log("7.1", PASS, `mode: ${t.slice(0, 60)}`);
-    else log("7.1", FAIL, t.slice(0, 100));
-  } catch (e) {
-    log("7.1", FAIL, e.message);
-  }
+  await score("7.1", async () => {
+    const t = replyText(await callTool("comet_mode", {}, 15000));
+    return t.match(/search|research|labs|learn/i)
+      ? { held: true, note: `mode: ${t.slice(0, 60)}` }
+      : { held: false, note: t.slice(0, 100) };
+  });
 
   // 7.2 — Switch through each mode
   for (const mode of ["research", "labs", "learn", "search"]) {
-    try {
-      const r = await call(client, "comet_mode", { mode }, 20000);
-      const t = text(r);
-      log(
-        `7.2-${mode}`,
-        t.match(/error|fail|invalid/i) ? FAIL : PASS,
-        t.slice(0, 60),
-      );
-    } catch (e) {
-      log(`7.2-${mode}`, FAIL, e.message);
-    }
+    await score(`7.2-${mode}`, async () => {
+      const t = replyText(await callTool("comet_mode", { mode }, 20000));
+      return { held: !t.match(/error|fail|invalid/i), note: t.slice(0, 60) };
+    });
   }
 
   // 7.4 — The owner's workflow: research set with comet_mode survives the
   // new chat comet_ask opens. Spends one Deep research query.
-  const workflow = await RESEARCH_WORKFLOW.probe(callTool);
-  log(RESEARCH_WORKFLOW.id, workflow.held ? PASS : FAIL, workflow.note);
+  await score(RESEARCH_WORKFLOW.id, () => RESEARCH_WORKFLOW.probe(callTool));
 
   // ─────────────────────────────────────────────
   // GROUP 8: comet_upload
@@ -455,42 +421,49 @@ async function main() {
   console.log("\n── Group 8: comet_upload ──");
 
   // 8.3 — Upload to non-existent selector (no navigation needed, just wrong selector)
-  try {
-    const r = await call(
-      client,
-      "comet_upload",
-      {
-        filePath: COMET_TEST_FILE,
-        selector: "#does-not-exist-xyzabc",
-      },
-      15000,
-    );
-    const t = text(r);
+  await score("8.3", async () => {
+    let t;
+    try {
+      t = replyText(
+        await callTool(
+          "comet_upload",
+          { filePath: COMET_TEST_FILE, selector: "#does-not-exist-xyzabc" },
+          15000,
+        ),
+      );
+    } catch (e) {
+      return {
+        held: true,
+        note: `threw as expected: ${messageOf(e).slice(0, 60)}`,
+      };
+    }
     // Should return an error about selector not found
-    if (t.match(/not found|no.element|error|failed/i))
-      log("8.3", PASS, t.slice(0, 80));
-    else log("8.3", FAIL, `expected error, got: ${t.slice(0, 80)}`);
-  } catch (e) {
-    log("8.3", PASS, `threw as expected: ${e.message.slice(0, 60)}`);
-  }
+    return t.match(/not found|no.element|error|failed/i)
+      ? { held: true, note: t.slice(0, 80) }
+      : { held: false, note: `expected error, got: ${t.slice(0, 80)}` };
+  });
 
   // 8.4 — Upload non-existent file
-  try {
-    const r = await call(
-      client,
-      "comet_upload",
-      {
-        filePath: "/tmp/file-that-does-not-exist-xyzabc.txt",
-      },
-      15000,
-    );
-    const t = text(r);
-    if (t.match(/not found|no.file|error|failed|exist/i))
-      log("8.4", PASS, t.slice(0, 80));
-    else log("8.4", FAIL, `expected error, got: ${t.slice(0, 80)}`);
-  } catch (e) {
-    log("8.4", PASS, `threw as expected: ${e.message.slice(0, 60)}`);
-  }
+  await score("8.4", async () => {
+    let t;
+    try {
+      t = replyText(
+        await callTool(
+          "comet_upload",
+          { filePath: "/tmp/file-that-does-not-exist-xyzabc.txt" },
+          15000,
+        ),
+      );
+    } catch (e) {
+      return {
+        held: true,
+        note: `threw as expected: ${messageOf(e).slice(0, 60)}`,
+      };
+    }
+    return t.match(/not found|no.file|error|failed|exist/i)
+      ? { held: true, note: t.slice(0, 80) }
+      : { held: false, note: `expected error, got: ${t.slice(0, 80)}` };
+  });
 
   // ─────────────────────────────────────────────
   // GROUP 9: Edge Cases
@@ -498,50 +471,44 @@ async function main() {
   console.log("\n── Group 9: Edge Cases ──");
 
   // 9.2 — Empty prompt
-  try {
-    const r = await call(client, "comet_ask", { prompt: "" }, 30000);
-    const t = text(r);
-    log("9.2", PASS, `empty prompt handled: ${t.slice(0, 80)}`);
-  } catch (e) {
-    log("9.2", PASS, `graceful error: ${e.message.slice(0, 80)}`);
-  }
+  await score("9.2", async () => {
+    try {
+      const t = replyText(await callTool("comet_ask", { prompt: "" }, 30000));
+      return { held: true, note: `empty prompt handled: ${t.slice(0, 80)}` };
+    } catch (e) {
+      return {
+        held: true,
+        note: `graceful error: ${messageOf(e).slice(0, 80)}`,
+      };
+    }
+  });
 
   // 9.4 — Invalid mode
-  try {
-    const r = await call(
-      client,
-      "comet_mode",
-      { mode: "invalid_mode_xyz" },
-      15000,
-    );
-    const t = text(r);
-    log("9.4", PASS, `invalid mode handled: ${t.slice(0, 80)}`);
-  } catch (e) {
-    log("9.4", PASS, `graceful error: ${e.message.slice(0, 60)}`);
-  }
+  await score("9.4", async () => {
+    try {
+      const t = replyText(
+        await callTool("comet_mode", { mode: "invalid_mode_xyz" }, 15000),
+      );
+      return { held: true, note: `invalid mode handled: ${t.slice(0, 80)}` };
+    } catch (e) {
+      return {
+        held: true,
+        note: `graceful error: ${messageOf(e).slice(0, 60)}`,
+      };
+    }
+  });
 
   return finish(client);
 }
 
+/** @param {Client} client */
 async function finish(client) {
-  // ─────────────────────────────────────────────
-  // Summary
-  // ─────────────────────────────────────────────
   console.log(`\n${"─".repeat(50)}`);
-  console.log(
-    `Results: ${passed} passed, ${failed} failed, ${skipped} skipped`,
-  );
+  console.log(summaryLine(checks));
   console.log(`${"─".repeat(50)}`);
 
-  if (failed > 0) {
-    console.log("\nFailed tests:");
-    for (const r of results.filter((r) => r.status === FAIL)) {
-      console.log(`  ${r.id}: ${r.note}`);
-    }
-  }
-
   await client.close();
-  process.exit(failed > 0 ? 1 : 0);
+  process.exit(batteryPassed(checks) ? 0 : 1);
 }
 
 main().catch((e) => {
