@@ -84,6 +84,21 @@ describe("hasScreenshot [5.1]", () => {
   it("fails on an empty reply", () => {
     expect(hasScreenshot({ content: [] })).toBe(false);
   });
+
+  it("fails on an error result, even one whose text is long", () => {
+    const longError = `Error: Screenshot failed: ${"the page did not answer. ".repeat(8)}`;
+    expect(longError.length).toBeGreaterThan(100);
+    expect(hasScreenshot(error(longError))).toBe(false);
+  });
+
+  it("fails on an error result carrying an image", () => {
+    expect(
+      hasScreenshot({
+        content: [{ type: "image", data: "iVBOR", mimeType: "image/png" }],
+        isError: true,
+      }),
+    ).toBe(false);
+  });
 });
 
 describe("tabsListed [6.1]", () => {
@@ -377,6 +392,20 @@ describe("runNoProBattery", () => {
       verdict: "FAIL",
       note: "Failed: Mode option not found in dropdown",
     });
+    expect(batteryPassed(checks)).toBe(false);
+  });
+
+  it("fails [5.1] when the screenshot is an error result", async () => {
+    const checks = await runNoProBattery(
+      fakeServer({
+        ...HEALTHY,
+        [key("comet_screenshot", {})]: error(
+          `Error: Screenshot failed: ${"the page did not answer. ".repeat(8)}`,
+        ),
+      }).callTool,
+      LISTENING,
+    );
+    expect(byId(checks, "5.1")?.verdict).toBe("FAIL");
     expect(batteryPassed(checks)).toBe(false);
   });
 

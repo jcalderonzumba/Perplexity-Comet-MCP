@@ -65,14 +65,17 @@ export function connected(reply) {
 }
 
 /**
- * [5.1]: an image, or a text long enough to carry one.
+ * [5.1]: no error, and an image or a text long enough to carry one.
  * @param {ToolReply} reply
  */
 export function hasScreenshot(reply) {
-  return (reply.content ?? []).some(
-    (item) =>
-      item.type === "image" ||
-      (item.type === "text" && (item.text?.length ?? 0) > 100),
+  return (
+    succeeded(reply) &&
+    (reply.content ?? []).some(
+      (item) =>
+        item.type === "image" ||
+        (item.type === "text" && (item.text?.length ?? 0) > 100),
+    )
   );
 }
 

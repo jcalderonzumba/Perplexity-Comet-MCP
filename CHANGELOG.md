@@ -34,6 +34,7 @@ All notable changes to this project will be documented in this file.
 - **The HTTP bridge wraps `comet_ask`'s answer** - the answer comes back in the UNTRUSTED markers with a fresh nonce, as it always did over stdio, instead of as bare page text; `COMET_DISABLE_UNTRUSTED_MARKERS=1` opts out as before
 - **Mode clicks land only on Perplexity** - before each pointer click of a mode switch, the server asks the browser for the tab's origin and clicks only when it is exactly `https://www.perplexity.ai`; on any other site, including one whose address merely contains `perplexity.ai`, the switch fails and nothing is clicked. `comet_mode` likewise decides whether to open Perplexity first from the tab's origin read at that moment, rather than from the last address the server navigated to
 - **The live batteries wait for a call as long as they allow it** - each call's limit now reaches the MCP SDK, whose 60-second default had stopped the Pro battery's longer calls, the Deep research ask among them, with `MCP error -32001: Request timed out`; a call past its limit fails with `TIMEOUT after <limit>ms`, as before
+- **The no-pro battery's screenshot check fails on an error** - `[5.1]` used to pass any reply holding an image or a long text, so a long error message counted as a screenshot; an error result now fails it
 - **A forged close marker in page text is neutralised** - text read from the page that imitates the `[END UNTRUSTED PAGE CONTENT nonce=…]` marker the server writes is now defused like a forged opening marker, before it is wrapped
 
 ### Removed
