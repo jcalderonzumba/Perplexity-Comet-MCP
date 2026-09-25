@@ -459,6 +459,54 @@ describe("protect-main.sh reads quoting as the shell does", {
   });
 });
 
+describe("protect-main.sh reads continued lines and comments as the shell does", {
+  timeout: GIT_HEAVY_TEST_MS,
+}, () => {
+  it.each([
+    // A backslash-newline is removed, even inside a word.
+    "git com\\\nmit -m x",
+    "git -c a=b com\\\nmit -m x",
+    // A `#` starting a word comments out the rest of its line only, and a
+    // quote inside the comment opens nothing.
+    '# it\'s a note\ng"i"t commit -m x',
+  ])('denies "%s" on main', (command) => {
+    expect(decision(hook("protect-main.sh", toolInput(command)))).toMatchObject(
+      {
+        allowed: false,
+      },
+    );
+  });
+
+  it.each([
+    "git push origin ma\\\nin",
+    "git push origin HEAD:ma\\\nin",
+    'git push origin "ma\\\nin"',
+    '# it\'s\ngit push origin ma"in"',
+    // A `#` inside a word, even after an empty quote, is a character.
+    'echo a#b; git push origin ma"in"',
+    "echo ''#; git push origin ma\"in\"",
+    'echo $#; git push origin ma"in"',
+  ])('denies "%s" from a branch', (command) => {
+    sandbox.git("switch", "--quiet", "--create", "feat/x");
+    expect(decision(hook("protect-main.sh", toolInput(command)))).toMatchObject(
+      {
+        allowed: false,
+      },
+    );
+  });
+
+  it.each([
+    // Inside single quotes a backslash-newline is two characters of the word.
+    "git push origin 'ma\\\nin'",
+    "git commit -m x # then push to main",
+  ])('allows "%s" from a branch', (command) => {
+    sandbox.git("switch", "--quiet", "--create", "feat/x");
+    expect(decision(hook("protect-main.sh", toolInput(command)))).toEqual({
+      allowed: true,
+    });
+  });
+});
+
 describe("protect-main.sh without CLAUDE_PROJECT_DIR", {
   timeout: GIT_HEAVY_TEST_MS,
 }, () => {
