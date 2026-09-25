@@ -9,6 +9,7 @@ import { join } from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
+import { GIT_HEAVY_TEST_MS } from "./support/git-sandbox.ts";
 import { PreflightSandbox } from "./support/preflight-sandbox.ts";
 
 let sandbox: PreflightSandbox;
@@ -30,7 +31,7 @@ const CHECK_COMMANDS = [
   "npx --no-install vitest run",
 ];
 
-describe("the steps", () => {
+describe("the steps", { timeout: GIT_HEAVY_TEST_MS }, () => {
   it("check lints, typechecks both projects and runs every test, in that order", () => {
     const outcome = sandbox.check();
     expect(outcome.status).toBe(0);
@@ -72,7 +73,7 @@ describe("the steps", () => {
   });
 });
 
-describe("the clean-tree check", () => {
+describe("the clean-tree check", { timeout: GIT_HEAVY_TEST_MS }, () => {
   it("refuses a dirty working tree before running any step", () => {
     writeFileSync(join(sandbox.root, "stray.txt"), "uncommitted\n");
     const outcome = sandbox.preflight();
@@ -128,7 +129,7 @@ describe("the clean-tree check", () => {
   });
 });
 
-describe("recording the approval", () => {
+describe("recording the approval", { timeout: GIT_HEAVY_TEST_MS }, () => {
   it("with --allow-dirty, runs every step on dirty trees and records nothing", () => {
     sandbox.addNotebook();
     writeFileSync(join(sandbox.root, "stray.txt"), "uncommitted\n");
@@ -159,7 +160,7 @@ describe("recording the approval", () => {
   });
 });
 
-describe("the package contents step", () => {
+describe("the package contents step", { timeout: GIT_HEAVY_TEST_MS }, () => {
   it("fails, naming the command, when npm pack fails", () => {
     sandbox.standIn("npm", 'echo "npm error: stand-in" >&2; exit 1');
     const outcome = sandbox.preflight();

@@ -108,7 +108,7 @@ Start: public <`git rev-parse --short HEAD`> · work <`git -C .work rev-parse --
 | 1.2a | <task title> — <slice text> | … | 1.1 | pending | — |
 ```
 
-After this one question you ask nothing more until a builder blocks, a finding is disputed, a third review round still reports Must Fix, the preflight fails, or `/review-phase` asks before publishing (§7).
+After this one question you ask nothing more until a builder blocks, a finding is disputed, a third review round still reports Must Fix, the preflight fails, `/review-phase` asks to have a pending Pro battery run made, or `/review-phase` asks before publishing (§7).
 
 ## 3. The brief
 

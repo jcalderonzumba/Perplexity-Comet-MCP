@@ -14,7 +14,12 @@ import {
   it,
 } from "vitest";
 
-import { GitSandbox, type Outcome, pathWith } from "./support/git-sandbox.ts";
+import {
+  GIT_HEAVY_TEST_MS,
+  GitSandbox,
+  type Outcome,
+  pathWith,
+} from "./support/git-sandbox.ts";
 
 let sandbox: GitSandbox;
 let pathWithoutJq: string;
@@ -81,6 +86,7 @@ function decision(
 
 describe.each(["pr-gate.sh", "protect-main.sh"])(
   "%s fails closed",
+  { timeout: GIT_HEAVY_TEST_MS },
   (script) => {
     const command = script === "pr-gate.sh" ? "gh pr list" : "git status";
 
@@ -109,7 +115,7 @@ describe.each(["pr-gate.sh", "protect-main.sh"])(
   },
 );
 
-describe("pr-gate.sh", () => {
+describe("pr-gate.sh", { timeout: GIT_HEAVY_TEST_MS }, () => {
   beforeEach(() => {
     sandbox.git("switch", "--quiet", "--create", "feat/working-model-p9-x");
   });
@@ -178,7 +184,7 @@ describe("pr-gate.sh", () => {
   });
 });
 
-describe("protect-main.sh", () => {
+describe("protect-main.sh", { timeout: GIT_HEAVY_TEST_MS }, () => {
   it.each([
     "git commit -m x",
     "git merge feat/x",
@@ -217,7 +223,9 @@ describe("protect-main.sh", () => {
   });
 });
 
-describe("protect-main.sh and the private notebook", () => {
+describe("protect-main.sh and the private notebook", {
+  timeout: GIT_HEAVY_TEST_MS,
+}, () => {
   it.each([
     'git -C .work commit -m "docs(plan): tick 1.2"',
     "git -C .work push origin main",
@@ -247,7 +255,9 @@ describe("protect-main.sh and the private notebook", () => {
   });
 });
 
-describe("protect-main.sh and git's global options", () => {
+describe("protect-main.sh and git's global options", {
+  timeout: GIT_HEAVY_TEST_MS,
+}, () => {
   it.each([
     "git -c user.name=x commit -m x",
     "git -c core.hooksPath=/dev/null commit -m x",
@@ -295,7 +305,211 @@ describe("protect-main.sh and git's global options", () => {
   });
 });
 
-describe("protect-main.sh without CLAUDE_PROJECT_DIR", () => {
+describe("protect-main.sh and git's environment variables", {
+  timeout: GIT_HEAVY_TEST_MS,
+}, () => {
+  it.each([
+    "GIT_DIR=../.git GIT_WORK_TREE=.. git -C .work commit -m x",
+    "GIT_WORK_TREE=.. git -C .work commit -m x",
+    "GIT_CONFIG_COUNT=1 GIT_CONFIG_KEY_0=core.worktree GIT_CONFIG_VALUE_0=.. git -C .work commit -m x",
+    "GIT_CONFIG_PARAMETERS=\"'core.worktree'='..'\" git -C .work push origin main",
+    // Any git variable, set anywhere before the notebook's git, not only these.
+    "GIT_COMMON_DIR=../.git git -C .work commit -m x",
+    "env GIT_DIR=../.git git -C .work commit -m x",
+    "export GIT_DIR=../.git; git -C .work commit -m x",
+    "export GIT_WORK_TREE=..\ngit -C .work commit -m x",
+    // A variable read, not set, ends the exemption too: the hook cannot tell.
+    "echo $GIT_DIR; git -C .work commit -m x",
+  ])('denies "%s" on main', (command) => {
+    expect(decision(hook("protect-main.sh", toolInput(command)))).toMatchObject(
+      {
+        allowed: false,
+      },
+    );
+  });
+
+  it.each([
+    'git -C .work commit -m "docs: why GIT_DIR=.. is refused"',
+    "git -C .work add plans && git -C .work commit -m x",
+  ])('allows "%s" on main', (command) => {
+    expect(decision(hook("protect-main.sh", toolInput(command)))).toEqual({
+      allowed: true,
+    });
+  });
+});
+
+describe("protect-main.sh and quoted arguments", {
+  timeout: GIT_HEAVY_TEST_MS,
+}, () => {
+  it.each([
+    'git --git-dir "../a b/.git" commit -m x',
+    'git --git-dir="../a b/.git" commit -m x',
+    "git --git-dir '../a b/.git' merge feat/x",
+    "git --work-tree='a b' commit -m x",
+    "git --work-tree a\\ b commit -m x",
+    "git --work-tree=a\\ b commit -m x",
+    'git -C "a b" commit -m x',
+    // A backslash-newline continues the shell line.
+    "git \\\ncommit -m x",
+    "git -c k=v \\\n  merge feat/x",
+  ])('denies "%s" on main', (command) => {
+    expect(decision(hook("protect-main.sh", toolInput(command)))).toMatchObject(
+      {
+        allowed: false,
+      },
+    );
+  });
+
+  it.each([
+    'git push origin "main"',
+    "git push origin 'main'",
+    'git push origin "HEAD:main"',
+    'git push origin HEAD:"main"',
+    "git push origin '+main'",
+    'git push origin "refs/heads/main"',
+    'git --git-dir "../a b/.git" push origin feat/x:main',
+    "(git push origin main)",
+  ])('denies "%s" from a branch', (command) => {
+    sandbox.git("switch", "--quiet", "--create", "feat/x");
+    expect(decision(hook("protect-main.sh", toolInput(command)))).toMatchObject(
+      {
+        allowed: false,
+      },
+    );
+  });
+
+  it.each([
+    'git push origin "feat/x"',
+    "git push origin feat/main-fix",
+    'git --git-dir "../a b/.git" push origin feat/x',
+  ])('allows "%s" from a branch', (command) => {
+    sandbox.git("switch", "--quiet", "--create", "feat/x");
+    expect(decision(hook("protect-main.sh", toolInput(command)))).toEqual({
+      allowed: true,
+    });
+  });
+});
+
+describe("protect-main.sh reads quoting as the shell does", {
+  timeout: GIT_HEAVY_TEST_MS,
+}, () => {
+  it.each([
+    // An escaped quote inside double quotes does not end the argument.
+    'git -c "a=b\\" c" commit -m x',
+    'git --work-tree="a\\" b" commit -m x',
+    'git --git-dir "x\\" y" merge feat/x',
+    'git -C "x\\" y" commit -m x',
+    // ANSI-C quoting, where \' does not end the argument either.
+    "git -c $'a\\' b' commit -m x",
+    // A newline inside quotes is part of the argument.
+    'git -c "user.name=a\nb" commit -m x',
+    "git -c 'user.name=a\nb' commit -m x",
+    // Quotes removed, the words are git and commit.
+    '"git" commit -m x',
+    "g'it' com\\mit -m x",
+  ])('denies "%s" on main', (command) => {
+    expect(decision(hook("protect-main.sh", toolInput(command)))).toMatchObject(
+      {
+        allowed: false,
+      },
+    );
+  });
+
+  it.each([
+    'git -c "a\\" b" push origin main',
+    'git -c "a\\" b" push origin "main"',
+    'git -c "a\nb" push origin main',
+    // A quoted or escaped ; & | is part of a word, not the end of the push.
+    'git push origin "a;b" main',
+    "git push origin a\\;b main",
+    "git push origin 'a|b' main",
+    // ANSI-C escapes are decoded: \x6d, \155 and m are all "m".
+    "git push origin $'\\x6dain'",
+    "git push origin $'\\155ain'",
+    "git push origin $'\\u006dain'",
+  ])('denies "%s" from a branch', (command) => {
+    sandbox.git("switch", "--quiet", "--create", "feat/x");
+    expect(decision(hook("protect-main.sh", toolInput(command)))).toMatchObject(
+      {
+        allowed: false,
+      },
+    );
+  });
+
+  it.each([
+    'git commit -m "say \\"push to main\\" later"',
+    "git commit -m $'it\\'s for main, not now'",
+    "git push origin $'feat/x'",
+    'git push origin "feat/x;y"',
+  ])('allows "%s" on a branch', (command) => {
+    sandbox.git("switch", "--quiet", "--create", "feat/x");
+    expect(decision(hook("protect-main.sh", toolInput(command)))).toEqual({
+      allowed: true,
+    });
+  });
+
+  it.each([
+    'git -C .work commit -m "say \\"hi\\" to main"',
+    "git -C .work commit -m $'it\\'s done'",
+    'git -C .work commit -m "two\nlines"',
+  ])('allows the notebook\'s "%s" on main', (command) => {
+    expect(decision(hook("protect-main.sh", toolInput(command)))).toEqual({
+      allowed: true,
+    });
+  });
+});
+
+describe("protect-main.sh reads continued lines and comments as the shell does", {
+  timeout: GIT_HEAVY_TEST_MS,
+}, () => {
+  it.each([
+    // A backslash-newline is removed, even inside a word.
+    "git com\\\nmit -m x",
+    "git -c a=b com\\\nmit -m x",
+    // A `#` starting a word comments out the rest of its line only, and a
+    // quote inside the comment opens nothing.
+    '# it\'s a note\ng"i"t commit -m x',
+  ])('denies "%s" on main', (command) => {
+    expect(decision(hook("protect-main.sh", toolInput(command)))).toMatchObject(
+      {
+        allowed: false,
+      },
+    );
+  });
+
+  it.each([
+    "git push origin ma\\\nin",
+    "git push origin HEAD:ma\\\nin",
+    'git push origin "ma\\\nin"',
+    '# it\'s\ngit push origin ma"in"',
+    // A `#` inside a word, even after an empty quote, is a character.
+    'echo a#b; git push origin ma"in"',
+    "echo ''#; git push origin ma\"in\"",
+    'echo $#; git push origin ma"in"',
+  ])('denies "%s" from a branch', (command) => {
+    sandbox.git("switch", "--quiet", "--create", "feat/x");
+    expect(decision(hook("protect-main.sh", toolInput(command)))).toMatchObject(
+      {
+        allowed: false,
+      },
+    );
+  });
+
+  it.each([
+    // Inside single quotes a backslash-newline is two characters of the word.
+    "git push origin 'ma\\\nin'",
+    "git commit -m x # then push to main",
+  ])('allows "%s" from a branch', (command) => {
+    sandbox.git("switch", "--quiet", "--create", "feat/x");
+    expect(decision(hook("protect-main.sh", toolInput(command)))).toEqual({
+      allowed: true,
+    });
+  });
+});
+
+describe("protect-main.sh without CLAUDE_PROJECT_DIR", {
+  timeout: GIT_HEAVY_TEST_MS,
+}, () => {
   it("judges the branch of the working directory and denies a commit on main", () => {
     // PWD is removed too, so bash sets it from the child's real working directory
     // (the sandbox) instead of inheriting the test runner's.

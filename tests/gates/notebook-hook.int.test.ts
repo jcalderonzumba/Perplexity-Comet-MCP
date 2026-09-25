@@ -5,6 +5,8 @@
  * `core.hooksPath ../.githooks/notebook`, and a local bare repository as the
  * notebook's remote.
  */
+import { spawn } from "node:child_process";
+import { once } from "node:events";
 import {
   chmodSync,
   existsSync,
@@ -20,14 +22,23 @@ import { delimiter, join } from "node:path";
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 
-import { GitSandbox, type Outcome, runProcess } from "./support/git-sandbox.ts";
+import {
+  GIT_HEAVY_TEST_MS,
+  GitSandbox,
+  type Outcome,
+  runProcess,
+} from "./support/git-sandbox.ts";
 
 const NOTEBOOK_HOOKS_PATH = "../.githooks/notebook";
 /** Variables the hook reads, kept out of a commit unless a test sets them. */
-const HOOK_VARIABLES = ["GIT_SSH_COMMAND", "GIT_SSH", "GIT_TERMINAL_PROMPT"];
+const HOOK_VARIABLES = [
+  "GIT_SSH_COMMAND",
+  "GIT_SSH",
+  "GIT_TERMINAL_PROMPT",
+  "GIT_ASKPASS",
+  "SSH_ASKPASS",
+];
 const CONNECT_TIMEOUT_MS = 5_000;
-/** Each test runs several git commands, slow when the whole suite runs at once. */
-const GIT_HEAVY_TEST_MS = 30_000;
 
 function git(directory: string, ...args: string[]): string {
   const outcome = runProcess("git", ["-C", directory, ...args]);
@@ -143,6 +154,59 @@ async function silentListener(): Promise<{ server: Server; port: number }> {
     throw new Error("the listener has no port");
   return { server, port: address.port };
 }
+
+/**
+ * An HTTP server that answers every request by asking for credentials. It runs
+ * in a child process, because the hook runs under `spawnSync`, which blocks
+ * this process's event loop until the commit returns.
+ */
+const CREDENTIALS_SERVER = `
+const server = require("node:http").createServer((_request, response) => {
+  response.writeHead(401, { "WWW-Authenticate": 'Basic realm="notebook"' });
+  response.end();
+});
+server.listen(0, "127.0.0.1", () => console.log(server.address().port));
+`;
+
+async function credentialsServer(): Promise<{
+  readonly url: string;
+  readonly stop: () => void;
+}> {
+  const child = spawn(process.execPath, ["-e", CREDENTIALS_SERVER], {
+    stdio: ["ignore", "pipe", "inherit"],
+  });
+  const [port] = (await once(child.stdout, "data")) as [Buffer];
+  return {
+    url: `http://127.0.0.1:${port.toString().trim()}/notebook.git`,
+    stop: () => child.kill(),
+  };
+}
+
+/** Each place git looks for an askpass program, and how a test sets it. */
+const ASKPASS_SOURCES: readonly {
+  readonly name: string;
+  /** Sets `program` as the askpass program, returning the commit's variables. */
+  readonly configure: (
+    repository: string,
+    program: string,
+  ) => NodeJS.ProcessEnv;
+}[] = [
+  {
+    name: "GIT_ASKPASS",
+    configure: (_, program) => ({ GIT_ASKPASS: program }),
+  },
+  {
+    name: "core.askPass",
+    configure: (repository, program) => {
+      git(repository, "config", "core.askPass", program);
+      return {};
+    },
+  },
+  {
+    name: "SSH_ASKPASS",
+    configure: (_, program) => ({ SSH_ASKPASS: program }),
+  },
+];
 
 let clone: GitSandbox;
 let remote: BareRemote;
@@ -267,6 +331,25 @@ describe("the notebook's post-commit hook", {
     expect(outcome.stderr).toContain("post-commit: could not push main");
     expect(readFileSync(log, "utf8")).toContain("GIT_TERMINAL_PROMPT=0");
   });
+
+  it.each(ASKPASS_SOURCES)(
+    "never calls an askpass program set in $name",
+    async ({ configure }) => {
+      const log = join(clone.root, "askpass.log");
+      const askpass = join(clone.root, "askpass-stand-in");
+      recordingStandIn(askpass, log);
+      const server = await credentialsServer();
+      try {
+        notebook.setRemote(server.url);
+        const outcome = notebook.commit(configure(notebook.path, askpass));
+        expect(outcome.status).toBe(0);
+        expect(outcome.stderr).toContain("post-commit: could not push main");
+        expect(existsSync(log)).toBe(false);
+      } finally {
+        server.stop();
+      }
+    },
+  );
 });
 
 describe("the public repository", { timeout: GIT_HEAVY_TEST_MS }, () => {
