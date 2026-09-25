@@ -318,6 +318,8 @@ describe("protect-main.sh and git's environment variables", {
     "env GIT_DIR=../.git git -C .work commit -m x",
     "export GIT_DIR=../.git; git -C .work commit -m x",
     "export GIT_WORK_TREE=..\ngit -C .work commit -m x",
+    // A variable read, not set, ends the exemption too: the hook cannot tell.
+    "echo $GIT_DIR; git -C .work commit -m x",
   ])('denies "%s" on main', (command) => {
     expect(decision(hook("protect-main.sh", toolInput(command)))).toMatchObject(
       {
