@@ -10,7 +10,12 @@ import { join } from "node:path";
 
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 
-import { GitSandbox, repoRoot, runProcess } from "./support/git-sandbox.ts";
+import {
+  GIT_HEAVY_TEST_MS,
+  GitSandbox,
+  repoRoot,
+  runProcess,
+} from "./support/git-sandbox.ts";
 
 const IGNORE_FILE_NAME = ".git-blame-ignore-revs";
 
@@ -153,7 +158,9 @@ function gitBlameReads(repo: string, ignoreFile: string): boolean {
   return outcome.status === 0;
 }
 
-describe("the blame-ignore guard reads the file as git blame does", () => {
+describe("the blame-ignore guard reads the file as git blame does", {
+  timeout: GIT_HEAVY_TEST_MS,
+}, () => {
   let sandbox: GitSandbox;
   let commits: Commits;
   let ignoreFile: string;
