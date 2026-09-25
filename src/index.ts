@@ -14,18 +14,17 @@ import {
 import { readFileSync } from "fs";
 import { dirname, join } from "path";
 import { fileURLToPath } from "url";
+import { createCdpAskCore } from "./cdp-ask-port.js";
 import { cometClient, DEFAULT_PORT } from "./cdp-client.js";
 import { createCdpModeTool } from "./cdp-mode-page.js";
 import { cometAI } from "./comet-ai.js";
-import { reapplyModeBeforeAsk, withModeNotice } from "./core/ask-mode.js";
-import { answerModeTool, COMET_MODE_TOOL } from "./core/mode-tool.js";
-import { type ProseState, readProseState } from "./page-scripts.js";
 import {
-  completeTask,
-  isSessionStale,
-  sessionState,
-  startNewTask,
-} from "./session-state.js";
+  describeAskOutcome,
+  describePollOutcome,
+  describeStopOutcome,
+} from "./core/ask-reply.js";
+import { answerModeTool, COMET_MODE_TOOL } from "./core/mode-tool.js";
+import { toStdioResult } from "./tool-results.js";
 import { wrapUntrustedPageContent } from "./untrusted.js";
 import {
   validateDomain,
@@ -159,6 +158,15 @@ const TOOLS: Tool[] = [
 
 const modeTool = createCdpModeTool(cometClient, wrapUntrustedPageContent);
 
+// The ask core, and the task comet_poll and comet_stop follow, for as long
+// as the server runs. It puts back the mode comet_mode last set.
+const askCore = createCdpAskCore({
+  client: cometClient,
+  comet: cometAI,
+  mode: modeTool,
+  cometPort: DEFAULT_PORT,
+});
+
 const server = new Server(
   { name: "comet-bridge", version: SERVER_VERSION },
   { capabilities: { tools: {} } },
@@ -228,504 +236,18 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         };
       }
 
-      case "comet_ask": {
-        let prompt = args?.prompt as string;
-        const context = args?.context as string | undefined;
-        const maxTimeout = (args?.timeout as number) || 120000; // Max 2 minutes safety net
-        const newChat = (args?.newChat as boolean) || false;
-
-        // Validate prompt
-        if (!prompt || prompt.trim().length === 0) {
-          return {
-            content: [{ type: "text", text: "Error: prompt cannot be empty" }],
-          };
-        }
-
-        // If context is provided, prepend it to the prompt
-        if (context && context.trim().length > 0) {
-          // Format context as a clear prefix
-          const contextPrefix = `Context for this task:\n\`\`\`\n${context.trim()}\n\`\`\`\n\nBased on the above context, `;
-          prompt = contextPrefix + prompt;
-        }
-
-        // Start new task session - resets state and prevents stale poll responses
-        const taskId = startNewTask(prompt);
-
-        // CRITICAL: Pre-operation connection check for one-shot reliability
-        try {
-          await cometClient.preOperationCheck();
-        } catch (preCheckError) {
-          // If pre-check fails, try to recover
-          try {
-            await cometClient.startComet(DEFAULT_PORT);
-            const targets = await cometClient.listTargets();
-            // Prefer Perplexity main tab over the sidecar (see comet_connect
-            // for rationale). Fall back to any page tab if neither exists.
-            const page =
-              targets.find(
-                (t) =>
-                  t.type === "page" &&
-                  t.url.includes("perplexity.ai") &&
-                  !t.url.includes("sidecar"),
-              ) ||
-              targets.find(
-                (t) => t.type === "page" && t.url.includes("perplexity.ai"),
-              ) ||
-              targets.find((t) => t.type === "page");
-            if (page) await cometClient.connect(page.id);
-          } catch {
-            return {
-              content: [
-                {
-                  type: "text",
-                  text: "Error: Failed to establish connection to Comet browser",
-                },
-              ],
-            };
-          }
-        }
-
-        // Normalize prompt - convert markdown/bullets to natural text
-        prompt = prompt
-          .replace(/^[-*•]\s*/gm, "") // Remove bullet points
-          .replace(/\n+/g, " ") // Collapse newlines to spaces
-          .replace(/\s+/g, " ") // Collapse multiple spaces
-          .trim();
-
-        // Transform prompt to trigger agentic browsing when needed
-        // Detect if prompt requires browser actions (URLs, action verbs, website references)
-        const hasUrl = /https?:\/\/[^\s]+/.test(prompt);
-        const hasWebsiteRef =
-          /\b(go to|visit|navigate|open|browse|check|look at|read from|click|fill|submit|login|sign in|download from)\b/i.test(
-            prompt,
-          );
-        const hasSiteNames =
-          /\b(\.com|\.org|\.io|\.net|\.ai|website|webpage|page|site)\b/i.test(
-            prompt,
-          );
-        const needsAgenticBrowsing = hasUrl || hasWebsiteRef || hasSiteNames;
-
-        // If prompt needs browser action but doesn't have agentic language, add it
-        if (needsAgenticBrowsing) {
-          const alreadyAgentic =
-            /^(use your browser|using your browser|open a browser|navigate to|browse to)/i.test(
-              prompt,
-            );
-          if (!alreadyAgentic) {
-            // Transform to agentic prompt
-            if (hasUrl) {
-              // Extract URL and restructure prompt
-              const urlMatch = prompt.match(/https?:\/\/[^\s]+/);
-              if (urlMatch) {
-                const url = urlMatch[0];
-                const restOfPrompt = prompt.replace(url, "").trim();
-                prompt = `Use your browser to navigate to ${url} and ${restOfPrompt || "tell me what you find there"}`;
-              }
-            } else {
-              // Add agentic prefix for site references
-              prompt = `Use your browser to ${prompt.toLowerCase().startsWith("go") ? "" : "go and "}${prompt}`;
-            }
-          }
-        }
-
-        // For newChat: navigate to fresh Perplexity home (don't aggressively close tabs)
-        if (newChat) {
-          // Ensure we're connected
-          await cometClient.ensureConnection();
-
-          // Just navigate to Perplexity home for a fresh start
-          try {
-            await cometClient.navigate("https://www.perplexity.ai/", true);
-            await new Promise((resolve) => setTimeout(resolve, 2000));
-          } catch (navError) {
-            // If navigation fails, try to reconnect and retry
-            const targets = await cometClient.listTargets();
-            const mainTab = targets.find(
-              (t) => t.type === "page" && t.url.includes("perplexity"),
-            );
-            if (mainTab) {
-              await cometClient.connect(mainTab.id);
-            } else {
-              const anyPage = targets.find((t) => t.type === "page");
-              if (anyPage) {
-                await cometClient.connect(anyPage.id);
-                await cometClient.navigate("https://www.perplexity.ai/", true);
-              }
-            }
-            await new Promise((resolve) => setTimeout(resolve, 1500));
-          }
-        } else {
-          // Not newChat - just ensure we're on Perplexity
-          const tabs = await cometClient.listTabsCategorized();
-          if (tabs.main) {
-            await cometClient.connect(tabs.main.id);
-          }
-
-          const urlResult = await cometClient.evaluate("window.location.href");
-          const currentUrl = urlResult.result.value as string;
-          const isOnPerplexity = currentUrl?.includes("perplexity.ai");
-
-          if (!isOnPerplexity) {
-            await cometClient.navigate("https://www.perplexity.ai/", true);
-            await new Promise((resolve) => setTimeout(resolve, 2000));
-          }
-        }
-
-        // Perplexity resets its mode on every navigation: put back the mode
-        // comet_mode last set. A failure does not stop the ask; its line
-        // starts the result instead.
-        const modeNotice = await reapplyModeBeforeAsk(modeTool);
-
-        // Reset stability tracking for new prompt
-        cometAI.resetStabilityTracking();
-
-        // Capture old response state BEFORE sending prompt (for follow-up detection).
-        // We snapshot BOTH the cheap prose-count summary AND the full
-        // `extractAgentStatus().response` — the latter is what each
-        // completion branch returns, so comparing to it is the only way
-        // to be sure we're not handing back the previous turn's answer
-        // when Perplexity has not yet visibly updated the page.
-        const oldStateResult = await cometClient.evaluate(
-          `(${readProseState.toString()})()`,
+      case "comet_ask":
+        return toStdioResult(
+          describeAskOutcome(await askCore.ask(args), wrapUntrustedPageContent),
         );
-        const oldState = oldStateResult.result.value as ProseState;
-        let oldResponseSnapshot = "";
-        try {
-          const oldStatus = await cometAI.getAgentStatus();
-          oldResponseSnapshot = oldStatus.response || "";
-        } catch {
-          // Pre-send status check is best-effort; leaving oldResponseSnapshot
-          // empty means the freshness check below simply requires a non-empty
-          // response (still strictly stronger than no check at all).
-        }
 
-        // Send the prompt
-        await cometAI.sendPrompt(prompt);
+      case "comet_poll":
+        return toStdioResult(
+          describePollOutcome(await askCore.poll(), wrapUntrustedPageContent),
+        );
 
-        // Smart polling - detect completion based on activity, not fixed timeout
-        const startTime = Date.now();
-        const stepsCollected: string[] = [];
-        let sawNewResponse = false;
-        let lastActivityTime = Date.now();
-        let previousResponse = "";
-        const POLL_INTERVAL = 1500; // Poll every 1.5 seconds for balance
-        const IDLE_TIMEOUT = 6000; // If no activity for 6s and we have a response, consider done
-        let consecutiveErrors = 0;
-        const MAX_CONSECUTIVE_ERRORS = 5;
-
-        while (Date.now() - startTime < maxTimeout) {
-          await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL));
-
-          try {
-            // CRITICAL: Ensure we're on Perplexity tab during agentic browsing
-            // Comet may have opened new tabs which can break our connection
-            const isOnPerplexity = await cometClient.isOnPerplexityTab();
-            if (!isOnPerplexity) {
-              const switched = await cometClient.ensureOnPerplexityTab();
-              if (!switched) {
-                consecutiveErrors++;
-                continue; // Try again next poll
-              }
-            }
-
-            // Check if we have a NEW response (more prose elements or different text)
-            const currentStateResult = await cometClient.withAutoReconnect(
-              async () => {
-                return await cometClient.evaluate(
-                  `(${readProseState.toString()})()`,
-                );
-              },
-            );
-            const currentState = currentStateResult.result.value as ProseState;
-
-            // Detect new response
-            if (!sawNewResponse) {
-              if (
-                currentState.count > oldState.count ||
-                (currentState.lastText &&
-                  currentState.lastText !== oldState.lastText)
-              ) {
-                sawNewResponse = true;
-              }
-            }
-
-            const status = await cometAI.getAgentStatus();
-            consecutiveErrors = 0; // Reset error count on success
-
-            // Track activity - if response changed, update activity time
-            if (status.response !== previousResponse) {
-              lastActivityTime = Date.now();
-              previousResponse = status.response;
-            }
-
-            // Collect steps
-            for (const step of status.steps) {
-              if (!stepsCollected.includes(step)) {
-                stepsCollected.push(step);
-                lastActivityTime = Date.now(); // New step = activity
-              }
-            }
-
-            // Track steps in session state
-            sessionState.steps = stepsCollected;
-
-            // Stale-answer guard: a response equal to the snapshot taken
-            // BEFORE we sent the new prompt is, by definition, the previous
-            // turn's answer (Perplexity has not yet overwritten the DOM).
-            // Required by every completion branch — without it the polling
-            // loop can hand back the previous answer for the new question
-            // when `extractAgentStatus` matches stale markers still in the
-            // scroll buffer.
-            const responseIsFresh =
-              !!status.response && status.response !== oldResponseSnapshot;
-
-            // COMPLETION CONDITIONS (return immediately when any are met):
-
-            // 1. Explicit completion detected by status checker
-            if (
-              status.status === "completed" &&
-              sawNewResponse &&
-              responseIsFresh
-            ) {
-              completeTask(status.response);
-              return {
-                content: [
-                  {
-                    type: "text",
-                    text: withModeNotice(
-                      modeNotice,
-                      wrapUntrustedPageContent(status.response),
-                    ),
-                  },
-                ],
-              };
-            }
-
-            // 2. Response is stable (same content for 2+ polls) and no stop button
-            if (
-              status.isStable &&
-              sawNewResponse &&
-              responseIsFresh &&
-              !status.hasStopButton
-            ) {
-              completeTask(status.response);
-              return {
-                content: [
-                  {
-                    type: "text",
-                    text: withModeNotice(
-                      modeNotice,
-                      wrapUntrustedPageContent(status.response),
-                    ),
-                  },
-                ],
-              };
-            }
-
-            // 3. Idle timeout - no activity for 6s but we have a substantial response
-            const idleTime = Date.now() - lastActivityTime;
-            if (
-              idleTime > IDLE_TIMEOUT &&
-              sawNewResponse &&
-              responseIsFresh &&
-              status.response.length > 100 &&
-              !status.hasStopButton
-            ) {
-              completeTask(status.response);
-              return {
-                content: [
-                  {
-                    type: "text",
-                    text: withModeNotice(
-                      modeNotice,
-                      wrapUntrustedPageContent(status.response),
-                    ),
-                  },
-                ],
-              };
-            }
-          } catch (pollError) {
-            consecutiveErrors++;
-
-            // Try to recover by switching to Perplexity tab
-            try {
-              const recovered = await cometClient.ensureOnPerplexityTab();
-              if (recovered) {
-                consecutiveErrors = Math.max(0, consecutiveErrors - 1);
-                continue;
-              }
-            } catch {
-              // Continue to fallback
-            }
-
-            if (consecutiveErrors >= MAX_CONSECUTIVE_ERRORS) {
-              // Too many errors, try harder to recover
-              try {
-                await cometClient.ensureConnection();
-                await cometClient.ensureOnPerplexityTab();
-                consecutiveErrors = 0;
-              } catch {
-                // If still failing, exit loop and return partial result
-                break;
-              }
-            }
-          }
-        }
-
-        // Max timeout reached - return whatever we have.
-        // Same stale-answer guard: only return text that actually changed
-        // since we sent the prompt. If everything is stale we fall through
-        // to the "in progress" branch below, which tells the caller to
-        // keep polling rather than handing back the previous answer.
-        const finalStatus = await cometAI.getAgentStatus();
-        if (
-          finalStatus.response &&
-          finalStatus.response.length > 50 &&
-          finalStatus.response !== oldResponseSnapshot
-        ) {
-          completeTask(finalStatus.response);
-          return {
-            content: [
-              {
-                type: "text",
-                text: withModeNotice(
-                  modeNotice,
-                  wrapUntrustedPageContent(finalStatus.response),
-                ),
-              },
-            ],
-          };
-        }
-
-        // No response - return progress info (task still active).
-        // `currentStep` / `stepsCollected` are scraped from Perplexity DOM
-        // and therefore attacker-controllable; wrap them in untrusted
-        // markers so the consuming LLM treats them as data, not
-        // instructions. The surrounding scaffolding text is server-
-        // controlled and stays outside the markers.
-        let pageDerived = "";
-        if (finalStatus.currentStep) {
-          pageDerived += `Current: ${finalStatus.currentStep}\n`;
-        }
-        if (stepsCollected.length > 0) {
-          pageDerived += `\nSteps:\n${stepsCollected.map((s) => `  • ${s}`).join("\n")}\n`;
-        }
-        let inProgressMsg = `Task may still be in progress (max timeout reached).\n`;
-        inProgressMsg += `Status: ${finalStatus.status.toUpperCase()}\n`;
-        if (pageDerived) {
-          inProgressMsg += wrapUntrustedPageContent(pageDerived) + "\n";
-        }
-        inProgressMsg += `\nUse comet_poll to check progress or comet_stop to cancel.`;
-
-        // Keep task active since it may still be running
-        sessionState.steps = stepsCollected;
-        return {
-          content: [
-            { type: "text", text: withModeNotice(modeNotice, inProgressMsg) },
-          ],
-        };
-      }
-
-      case "comet_poll": {
-        // Check if there's an active task session
-        if (!sessionState.isActive && !sessionState.currentTaskId) {
-          return {
-            content: [
-              {
-                type: "text",
-                text: "Status: IDLE\nNo active task. Use comet_ask to start a new task.",
-              },
-            ],
-          };
-        }
-
-        // Check for stale session (no activity for 5+ minutes)
-        if (isSessionStale() && !sessionState.isActive) {
-          return {
-            content: [
-              {
-                type: "text",
-                text: "Status: IDLE\nPrevious task session expired. Use comet_ask to start a new task.",
-              },
-            ],
-          };
-        }
-
-        // If task was already completed, return the cached response
-        if (!sessionState.isActive && sessionState.lastResponse) {
-          const timeSinceComplete = sessionState.lastResponseTime
-            ? Math.round((Date.now() - sessionState.lastResponseTime) / 1000)
-            : 0;
-          return {
-            content: [
-              {
-                type: "text",
-                text: `Status: COMPLETED (${timeSinceComplete}s ago)\n\n${wrapUntrustedPageContent(sessionState.lastResponse)}`,
-              },
-            ],
-          };
-        }
-
-        // Active task - get fresh status from Perplexity
-        await cometClient.ensureOnPerplexityTab();
-        const status = await cometAI.getAgentStatus();
-
-        // If completed, update session state and return response
-        if (status.status === "completed" && status.response) {
-          completeTask(status.response);
-          return {
-            content: [
-              { type: "text", text: wrapUntrustedPageContent(status.response) },
-            ],
-          };
-        }
-
-        // Still working - return progress info. As in the comet_ask
-        // timeout path, `agentBrowsingUrl`, `currentStep`, and `steps`
-        // come from the Perplexity DOM and may carry indirect prompt
-        // injection. Wrap the page-derived block; leave server-
-        // controlled scaffolding outside the markers.
-        let output = `Status: ${status.status.toUpperCase()}\n`;
-        if (sessionState.currentTaskId) {
-          output += `Task: ${sessionState.currentTaskId}\n`;
-        }
-
-        const allSteps = [...new Set([...sessionState.steps, ...status.steps])];
-        let pageDerived = "";
-        if (status.agentBrowsingUrl) {
-          pageDerived += `Browsing: ${status.agentBrowsingUrl}\n`;
-        }
-        if (status.currentStep) {
-          pageDerived += `Current: ${status.currentStep}\n`;
-        }
-        if (allSteps.length > 0) {
-          pageDerived += `\nSteps:\n${allSteps.map((s) => `  • ${s}`).join("\n")}\n`;
-        }
-        if (pageDerived) {
-          output += wrapUntrustedPageContent(pageDerived) + "\n";
-        }
-
-        if (status.status === "working" || sessionState.isActive) {
-          output += `\n[Use comet_stop to interrupt, or comet_screenshot to see current page]`;
-        }
-
-        return { content: [{ type: "text", text: output }] };
-      }
-
-      case "comet_stop": {
-        const stopped = await cometAI.stopAgent();
-        if (stopped) {
-          sessionState.isActive = false;
-        }
-        return {
-          content: [
-            {
-              type: "text",
-              text: stopped ? "Agent stopped" : "No active agent to stop",
-            },
-          ],
-        };
-      }
+      case "comet_stop":
+        return toStdioResult(describeStopOutcome(await askCore.stop()));
 
       case "comet_screenshot": {
         const result = await cometClient.screenshot("png");
@@ -912,11 +434,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
 
       case "comet_mode": {
-        const reply = await answerModeTool(args?.mode, modeTool);
-        return {
-          content: [{ type: "text", text: reply.text }],
-          ...(reply.isError ? { isError: true } : {}),
-        };
+        return toStdioResult(await answerModeTool(args?.mode, modeTool));
       }
 
       case "comet_upload": {

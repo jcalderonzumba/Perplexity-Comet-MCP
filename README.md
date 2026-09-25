@@ -140,12 +140,18 @@ Send a prompt to Comet and wait for the complete response. Automatically trigger
 Parameters:
   - prompt (required): Question or task for Comet
   - newChat (optional): Start fresh conversation (default: false)
+  - context (optional): Text placed before the prompt, such as file contents
   - timeout (optional): Max wait time in ms (default: 120000)
 
-Returns: Complete response text
+Returns: The complete answer, or, when the timeout runs out first, what the
+page shows so far, said to be possibly incomplete
 ```
 
-The answer is page content, so it comes back wrapped in UNTRUSTED markers carrying a fresh nonce, over stdio and the HTTP bridge alike.
+The answer is page content, so it comes back wrapped in UNTRUSTED markers carrying a fresh nonce, over stdio and the HTTP bridge alike. The stdio server and the HTTP bridge run the same ask: the same arguments, the same wait and the same result text.
+
+The timeout counts from the moment the prompt is sent. When it runs out before Comet has finished, the result is not the answer and says so: its first line reads `The answer may be incomplete: this ask's <timeout> ms ran out before Comet finished answering.`, then come the page's status, the partial answer so far (or `No answer text yet.`) and the steps seen, all page text wrapped, and a last line saying the task is still active, so `comet_poll` can follow the answer until it is complete, or `comet_stop` cancel it. Over the HTTP bridge this is a successful call (`success: true`) whose `content` carries that text.
+
+The arguments are checked before anything reaches the browser. An empty prompt is refused, and so are a `timeout` that is not a positive number of milliseconds (text, a negative number), and a `newChat` that is not `true` or `false`; an absent or zero `timeout` means the default, and a numeric string its number. A refusal, or an ask that fails, is an error result starting `Error:` (`isError` over stdio, `success: false` over the HTTP bridge). When the connection to Comet is lost, the ask starts Comet, or finds it running, on the debug port `COMET_PORT` names, and reconnects.
 
 The mode `comet_mode` last set carries over to every ask. Perplexity puts the mode back to Search whenever the page navigates, so after its own navigation (a new chat, a reconnect) and before it types the prompt, `comet_ask` reads the page's mode and switches it back when it differs. Without a mode set by `comet_mode`, or with the page already in it, nothing is clicked and the result is just the answer. When the mode cannot be put back, the ask still runs, and its result starts with a line beginning `Mode not applied:` that says which mode and why, followed by a blank line and the answer.
 
@@ -166,25 +172,40 @@ The mode `comet_mode` last set carries over to every ask. Perplexity puts the mo
 
 ### comet_poll
 
-Check status and progress of ongoing tasks. Returns the response if completed.
+Check the status of the task the last `comet_ask` started. Returns the answer once it is complete.
 
 ```
 Parameters: None
-Returns: Status (IDLE/WORKING/COMPLETED), steps taken, or final response
+Returns: Status (IDLE/WORKING/COMPLETED), the answer once complete, or the
+partial answer and the steps so far, said to be possibly incomplete
 ```
+
+The first line is always the status. With no task, or a finished task that started more than five minutes ago, it is `Status: IDLE`. A task whose answer is complete is `Status: COMPLETED`, followed by the answer. A poll applies the same rules as `comet_ask` to decide that an answer is complete, so the answer to a task whose ask ran out of time comes back only once Comet has finished it, and never as the answer that was on the page before the prompt was sent. Until then the poll reports `Status: WORKING` and says the answer may be incomplete, with the partial answer so far (or `No answer text yet.`), the tab the agent is browsing, the current step and the steps seen. After `comet_stop`, the poll reports what the page shows and no answer.
+
+Every piece of page text in the result, the answer, the partial answer, the browsing address and the steps, comes back wrapped in UNTRUSTED markers, over stdio and the HTTP bridge alike; the two run the same poll and give the same text.
 
 **Example:**
 ```
 > comet_poll
 Status: WORKING
+Task: task_1760000000000_…
+The answer may be incomplete: Comet is still answering.
+
+Partial answer so far:
+[BEGIN UNTRUSTED PAGE CONTENT …]
+The top-ranked repository today is
+[END UNTRUSTED PAGE CONTENT …]
+
+Progress:
+[BEGIN UNTRUSTED PAGE CONTENT …]
 Browsing: https://github.com/trending
 Current: Scrolling page
-
 Steps:
-  - Preparing to assist you
-  - Navigating to github.com
-  - Clicking on Trending
-  - Scrolling page
+  • Navigating to github.com
+  • Clicking on Trending
+[END UNTRUSTED PAGE CONTENT …]
+
+[Use comet_poll again to follow the answer until it is complete, comet_stop to interrupt, or comet_screenshot to see current page]
 ```
 
 ---
@@ -195,8 +216,11 @@ Halt the current agentic task if it goes off track.
 
 ```
 Parameters: None
-Returns: Confirmation message
+Returns: "Agent stopped", or "No active agent to stop" when the page shows
+nothing to stop
 ```
+
+When it stops the agent, the task ends: `comet_poll` no longer follows its answer.
 
 ---
 
@@ -492,7 +516,7 @@ Results: 9 passed, 0 failed, 1 known
 
 The Pro battery ends with the same summary line. Its checks hold only on the answer or the refusal each expects:
 
-- An ask's check passes on a final answer that names what was asked (`VERIFIED`, `Paris`, `Artemis`, the page heading `Example Domain`), never on an error, a login page, or a result saying the task may still be in progress. `[1.5]` and `[2.5]`, whose prompts name the word themselves, also fail on a reply that holds the prompt read back from the page. Each ask gets a `timeout` shorter than the battery's own limit on the call, so a slow answer is judged on what the server returns.
+- An ask's check passes on a final answer that names what was asked (`VERIFIED`, `Paris`, `Artemis`, the page heading `Example Domain`), never on an error, a login page, or a result saying the answer may be incomplete or the task may still be in progress. `[1.5]` and `[2.5]`, whose prompts name the word themselves, also fail on a reply that holds the prompt read back from the page. Each ask gets a `timeout` shorter than the battery's own limit on the call, so a slow answer is judged on what the server returns.
 - `[2.2]` asks a follow-up in the same chat, and fails when the follow-up returns the previous turn's answer; `[2.3]` fails when a new chat still knows the number the previous one was given.
 - `[2.4]` gives the ask 3 seconds for a long essay, and passes when it returns within 8 seconds saying the answer may be incomplete and naming `comet_poll` to follow it.
 - `[2.6-whole-answer]` asks for three paragraphs starting `ALPHA`, `BRAVO` and `CHARLIE`, and passes only when all three come back, in order, each word opening a line; the prompt names them mid-sentence, so a reply that reads it back fails.
@@ -500,7 +524,7 @@ The Pro battery ends with the same summary line. Its checks hold only on the ans
 - `[3.4]` asks for the top trending GitHub repository, and passes when the answer names one as `owner/name`, on its own or in its `github.com` address, with a star count; a web address's path such as `news.site/trending` is not a repository, and a reply that names `example.com` or `example.org`, the sites of the browsing asks before it, carries one of their answers and fails.
 - The poll, stop, tab, upload and empty-prompt checks pass on the status line, the confirmation or the error each expects: `[4.1]` on `Status: IDLE` or `COMPLETED`, `[4.3]` on `Agent stopped`, `[4.3b]` on `Status: STOPPED` or `IDLE`, `[6.3]` on a switch to the `example.com` tab, `[6.4]` on its close or on the refusal to close the only browsing tab, `[8.3]` and `[8.4]` on the errors naming the missing selector and the missing file, and `[9.2]` on the refusal of an empty prompt. The screenshot, tab-listing and mode checks are the no-pro battery's own, and `[7.4-research-workflow]` runs the research workflow: `comet_mode research`, then `comet_ask` with `newChat: true`, then `comet_mode`; it passes when the ask's result has no `Mode not applied:` line and the page still reads `research`, and it puts Search back afterwards.
 
-The Pro battery's known-failures list names the `comet_ask` reliability plan for the ask's own defects: one-word answers the ask does not read as complete (`[1.5]`, `[2.1]`), the follow-up's answer (`[2.2]`), a new chat's short answer run to the timeout in the same way (`[2.3]`), a timeout that does not say the answer may be incomplete (`[2.4]`), typing that fails with `Prompt text not found in input` (`[2.5]`), a multi-paragraph answer not yet shown to come back whole (`[2.6-whole-answer]`), and a poll that returns a stopped task's text (`[4.3b]`). It names the Agentic browsing plan for Comet answering without opening the site a prompt names (`[3.1]`, `[3.2-agent-tab]`, `[3.3-tabs-kept]`, `[3.4]`, `[6.3]`), and lists the switch to `learn` as the no-pro battery does.
+The Pro battery's known-failures list names the `comet_ask` reliability plan for the ask's own defects: one-word answers the ask does not read as complete (`[1.5]`, `[2.1]`), the follow-up's answer (`[2.2]`), a new chat's short answer run to the timeout in the same way (`[2.3]`), typing that fails with `Prompt text not found in input` (`[2.5]`), a multi-paragraph answer not yet shown to come back whole (`[2.6-whole-answer]`), and a poll that returns a stopped task's text (`[4.3b]`). It names the Agentic browsing plan for Comet answering without opening the site a prompt names (`[3.1]`, `[3.2-agent-tab]`, `[3.3-tabs-kept]`, `[3.4]`, `[6.3]`), and lists the switch to `learn` as the no-pro battery does.
 
 The mode checks hold only on what the server really did. `[7.1]` and `[7.3-reconnect]` pass when `comet_mode` reads a mode from the page, and fail on an error or on `unknown`; `[9.4]`'s follow-up read is judged the same way. `[7.2-research]` and `[7.2-search]` pass on `Switched to <mode> mode`, and `[7.2-labs]` passes on the error saying Perplexity's input bar no longer offers Labs. Today the no-pro battery's known-failures list holds one check, the switch to the `learn` mode: Perplexity's input bar offers "Learn step by step", and `comet_mode` does not switch to it yet.
 
