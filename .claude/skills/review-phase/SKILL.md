@@ -185,7 +185,7 @@ On a phase branch, after `gh pr create` prints the PR's URL, take its number N f
 
 In that same commit, bring the plan's row of the **§12 status table** of the spec (`.work/specs/`) up to date, so the table never waits for someone to remember it:
 
-- **The row** is the one whose *File* column names the plan's file, or else the one whose *Plan* column names the plan. When no row names it, add one above the row of plans not started, and take the plan out of that row's list.
+- **The row** is the one whose *File* column names the plan's file, or else the one whose *Plan* column names the plan: the table has one row per plan, started or not. When no row names it, the plan was never listed: add its row after the last row of a plan already started.
 - **Its *Status*** names each phase done so far with its PR, and what remains: for example `phases 1 and 2 done in PR #5 and PR #9; phase 3 not built`. On the plan's last phase it reads `done:`, followed by every phase and its PR, as `done: phase 1 in PR #12, phase 2 in PR #15`. Keep the decision ids the row already cites, such as `(D16)`; a clause that only said what the plan waited for goes once the wait is over.
 - **Its *File*** is `plans/<file>`, and `plans/done/<file>` once the plan has moved.
 
