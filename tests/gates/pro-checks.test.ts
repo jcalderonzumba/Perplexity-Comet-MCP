@@ -1272,8 +1272,9 @@ const EARLIER_ANSWER_RUN_ON = answer(
  * turn's answer, the poll after a stop, a follow-up sent while [2.4]'s essay
  * is still streaming): each reply in the shape the server gives today, a
  * timeout in the ask core's words, and the agent answering without
- * browsing. The checks the known-failures list names fail, and every other
- * check holds.
+ * browsing, although the trending repository is named with its stars, as
+ * the run of 2026-09-26 found it. The checks the known-failures list names
+ * fail, and every other check holds.
  */
 const TODAY: Replies = {
   [CALLS.connect]: ok("Comet already running with debug port: Chrome/152"),
@@ -1289,7 +1290,9 @@ const TODAY: Replies = {
   [CALLS.heading]: answer("I can certainly help you with an overview."),
   [CALLS.tabs]: [NO_TABS, NO_TABS, NO_TABS],
   [CALLS.agentTab]: answer("The heading of example.org is Example Domain."),
-  [CALLS.trending]: answer("Trending repositories change every day."),
+  [CALLS.trending]: answer(
+    "The top-ranked repository on GitHub Trending’s “Today” page is octo/widgets, with 12,345 stars in total.",
+  ),
   [CALLS.poll]: [COMPLETED, ok("Status: STOPPED")],
   [CALLS.slowTask]: timedOut("working"),
   [CALLS.stop]: ok("Agent stopped"),
@@ -1384,7 +1387,7 @@ describe("runProBattery", () => {
       undefined,
       noWait,
     );
-    expect(summaryLine(checks)).toBe("Results: 24 passed, 0 failed, 6 known");
+    expect(summaryLine(checks)).toBe("Results: 25 passed, 0 failed, 5 known");
     expect(batteryPassed(checks)).toBe(true);
     expect(
       checks
@@ -1545,7 +1548,7 @@ describe("runProBattery", () => {
     });
   });
 
-  it("fails [2.3]'s short answer run to its timeout, no longer excused, and scores [3.4]'s earlier answer run on as known", async () => {
+  it("fails [2.3]'s short answer run to its timeout and [3.4]'s earlier answer run on, neither excused", async () => {
     const checks = await runProBattery(
       fakeServer({
         ...FIXED,
@@ -1557,10 +1560,8 @@ describe("runProBattery", () => {
       noWait,
     );
     expect(byId(checks, "2.3")).toMatchObject({ verdict: "FAIL" });
-    expect(byId(checks, "3.4")).toMatchObject({
-      verdict: "KNOWN",
-      known: { owningPlan: "plan 12 (Agentic browsing)" },
-    });
+    expect(byId(checks, "3.4")).toMatchObject({ verdict: "FAIL" });
+    expect(byId(checks, "3.4")).not.toHaveProperty("known");
   });
 
   it("scores [7.2-learn] with the no-pro battery's predicate, as known", async () => {

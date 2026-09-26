@@ -213,7 +213,6 @@ describe("PRO_KNOWN_FAILURES", () => {
       ["3.1", AGENTIC_BROWSING],
       ["3.2-agent-tab", AGENTIC_BROWSING],
       ["3.3-tabs-kept", AGENTIC_BROWSING],
-      ["3.4", AGENTIC_BROWSING],
       ["6.3", AGENTIC_BROWSING],
       ["7.2-learn", "plan 11 (Learn mode)"],
     ]);
@@ -238,11 +237,8 @@ describe("PRO_KNOWN_FAILURES", () => {
     expect(PRO_KNOWN_FAILURES.map((entry) => entry.id)).not.toContain(id);
   });
 
-  it("words [3.4] as the agent not browsing alone, since the ask no longer returns an earlier turn's answer", () => {
-    const entry = PRO_KNOWN_FAILURES.find((known) => known.id === "3.4");
-    expect(entry?.reason).toBe(
-      "Comet answers the multi-step browsing task without browsing",
-    );
+  it("no longer lists [3.4], whose condition, a repository and its star count in the final answer, holds without the agent opening a tab, and held on the 2026-09-26 run once the ask stopped returning an earlier turn's answer", () => {
+    expect(PRO_KNOWN_FAILURES.map((entry) => entry.id)).not.toContain("3.4");
   });
 
   it("gives [7.2-learn] the no-pro list's entry, as both batteries judge it alike", () => {

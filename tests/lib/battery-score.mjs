@@ -67,11 +67,6 @@ export const PRO_KNOWN_FAILURES = [
     owningPlan: AGENTIC_BROWSING,
   },
   {
-    id: "3.4",
-    reason: "Comet answers the multi-step browsing task without browsing",
-    owningPlan: AGENTIC_BROWSING,
-  },
-  {
     id: "6.3",
     reason:
       "no tab is found for the site, because the agent answered without opening one",
