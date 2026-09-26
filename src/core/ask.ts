@@ -17,6 +17,7 @@
 // it was before the prompt was sent, so it returns the answer only once it
 // is complete and new, and otherwise says the task is still working.
 
+import { errorMessage } from "../error-message.js";
 import type { ProseState } from "../page-scripts.js";
 import {
   type AskRequest,
@@ -485,8 +486,4 @@ function failure(error: unknown, notice: ModeNotice): AskOutcome {
     return { kind: "failed", message, pageDetail, notice };
   }
   return { kind: "failed", message: errorMessage(error), notice };
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }

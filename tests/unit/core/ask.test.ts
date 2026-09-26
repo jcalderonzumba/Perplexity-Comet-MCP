@@ -1004,7 +1004,7 @@ describe("src/core/ask.ts and its siblings", () => {
 
       for (const imported of imports) {
         expect(imported).toMatch(
-          /^(\.\/(ask|ask-input|ask-send|ask-task|ask-reply|ask-mode|ask-tab|perplexity-tab|mode|mode-tool|page-script-failed)\.js|\.\.\/(page-scripts|modes|perplexity-pages)\.js|node:crypto)$/,
+          /^(\.\/(ask|ask-input|ask-send|ask-task|ask-reply|ask-mode|ask-tab|perplexity-tab|mode|mode-tool|page-script-failed)\.js|\.\.\/(page-scripts|modes|perplexity-pages|error-message)\.js|node:crypto)$/,
         );
       }
     },

@@ -10,6 +10,7 @@
 // has not taken it within a bounded wait, a trusted click on the input
 // bar's Submit button.
 
+import { errorMessage } from "../error-message.js";
 import type { PagePoint, ProseState } from "../page-scripts.js";
 import { PageScriptFailed } from "./page-script-failed.js";
 
@@ -190,14 +191,10 @@ async function during<T>(
         error.pageDetail,
       );
     }
-    throw new PromptNotSent(step, `${what}: ${messageOf(error)}`);
+    throw new PromptNotSent(step, `${what}: ${errorMessage(error)}`);
   }
 }
 
 function collapseWhitespace(text: string): string {
   return text.replace(/\s+/g, " ").trim();
-}
-
-function messageOf(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }

@@ -5,6 +5,7 @@ import { type ChildProcess, execSync, spawn } from "child_process";
 import CDP from "chrome-remote-interface";
 import { existsSync } from "fs";
 import { platform } from "os";
+import { errorMessage } from "./error-message.js";
 import type { PagePoint } from "./page-scripts.js";
 import { isPerplexityMainPage, PERPLEXITY_ORIGIN } from "./perplexity-pages.js";
 import type {
@@ -302,7 +303,7 @@ async function inputOnPerplexity(
     origin = await readTopFrameOrigin(domains.Page);
   } catch (error) {
     throw new Error(
-      `refused to ${action}: the tab's origin could not be read (${messageOf(error)})`,
+      `refused to ${action}: the tab's origin could not be read (${errorMessage(error)})`,
     );
   }
   if (origin !== PERPLEXITY_ORIGIN) {
@@ -327,10 +328,6 @@ async function pressKeyOn(
     : ({ type: "rawKeyDown" } as const);
   await input.dispatchKeyEvent({ ...down, key, ...codes });
   await input.dispatchKeyEvent({ type: "keyUp", key, ...codes });
-}
-
-function messageOf(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }
 
 // Detect if running in WSL (must be before windowsFetch)
@@ -704,8 +701,7 @@ export class CometCDPClient {
       return result;
     } catch (error: unknown) {
       this.consecutiveSuccesses = 0;
-      const errorMessage =
-        error instanceof Error ? error.message : String(error);
+      const message = errorMessage(error);
 
       const connectionErrors = [
         "WebSocket",
@@ -729,7 +725,7 @@ export class CometCDPClient {
       ];
 
       const isConnectionError = connectionErrors.some((e) =>
-        errorMessage.toLowerCase().includes(e.toLowerCase()),
+        message.toLowerCase().includes(e.toLowerCase()),
       );
 
       if (
