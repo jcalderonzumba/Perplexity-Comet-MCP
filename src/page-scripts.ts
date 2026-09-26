@@ -127,19 +127,129 @@ export function extractAgentStatus(): AgentStatusResult {
     body.includes("Задайте уточняющий вопрос") || // ru: input placeholder
     body.includes("Последующие вопросы"); // ru: section heading
 
-  // Check for prose content (actual response) - lowered threshold for short answers
-  const proseEls = [
-    ...document.querySelectorAll('[class*="prose"]'),
-  ] as HTMLElement[];
-  const hasProseContent = proseEls.some((el) => {
-    const text = el.innerText.trim();
-    // Must have some content, not just UI text (lowered from 50 to 15 for short answers)
-    return (
-      text.length > 15 &&
-      !text.startsWith("Library") &&
-      !text.startsWith("Discover")
+  // The latest turn's answer. A thread is a flat list of blocks: each
+  // question in a `data-workflow-entry` block, its answer in the
+  // `data-workflow-final-text` block after it, as an element of class
+  // `prose` (list items inside it carry classes that only contain the
+  // word). The latest turn's answer is the answer block after the last
+  // question; while that turn has none yet, there is no answer, and an
+  // earlier turn's never stands in for it. A page without these blocks
+  // falls back to its last `prose` element outside page chrome whose text
+  // is not exactly a UI label.
+  const outermostProse = (scope: ParentNode): Element[] =>
+    [...scope.querySelectorAll(".prose")].filter(
+      (element) => !element.parentElement?.closest(".prose"),
     );
-  });
+
+  // Text is read block by block with `textContent`, so it does not depend
+  // on layout: paragraphs, headings and list items and table rows apart,
+  // a line break kept, a code block's code without its caption, and the
+  // inline citation chips left out.
+  const readAnswerText = (root: Element): string => {
+    const blockTags =
+      /^(ADDRESS|ARTICLE|ASIDE|BLOCKQUOTE|DD|DIV|DL|DT|FIGURE|H[1-6]|HR|LI|OL|P|SECTION|TABLE|TBODY|TFOOT|THEAD|TR|UL)$/;
+    const blocks: string[] = [];
+    let line = "";
+    let prefix = "";
+    const flush = (): void => {
+      const text = line
+        .split("\n")
+        .map((part) => part.replace(/\s+/g, " ").trim())
+        .filter((part) => part !== "")
+        .join("\n");
+      if (text !== "") {
+        blocks.push(prefix + text);
+        prefix = "";
+      }
+      line = "";
+    };
+    const listPrefix = (item: Element): string => {
+      const list = item.parentElement;
+      if (list?.tagName !== "OL") return "- ";
+      return `${[...list.children].indexOf(item) + 1}. `;
+    };
+    const walk = (node: Node): void => {
+      for (const child of node.childNodes) {
+        if (child.nodeType === Node.TEXT_NODE) {
+          line += (child.textContent ?? "").replace(/\s+/g, " ");
+          continue;
+        }
+        if (!(child instanceof Element)) continue;
+        if (child.matches("[data-pplx-citation], button, svg")) continue;
+        const tag = child.tagName;
+        if (tag === "BR") {
+          line += "\n";
+        } else if (tag === "PRE") {
+          flush();
+          const code = (child.querySelector("code") ?? child).textContent ?? "";
+          if (code.trim() !== "") blocks.push(code.replace(/\s+$/, ""));
+        } else if (tag === "TD" || tag === "TH") {
+          if (line.trim() !== "") line += " | ";
+          walk(child);
+        } else if (blockTags.test(tag)) {
+          flush();
+          if (tag === "LI") prefix = listPrefix(child);
+          walk(child);
+          flush();
+          if (tag === "LI") prefix = "";
+        } else {
+          walk(child);
+        }
+      }
+    };
+    walk(root);
+    flush();
+    return blocks.join("\n\n");
+  };
+
+  const uiLabels = [
+    "Library",
+    "Discover",
+    "Spaces",
+    "Finance",
+    "Account",
+    "Upgrade",
+    "Home",
+    "Search",
+  ];
+  const lastAnswerOutsideChrome = (): Element[] => {
+    const candidates = outermostProse(document).filter((element) => {
+      if (
+        element.closest("nav, aside, header, footer, form, [contenteditable]")
+      )
+        return false;
+      const text = readAnswerText(element);
+      return text !== "" && !uiLabels.includes(text);
+    });
+    const last = candidates[candidates.length - 1];
+    return last ? [last] : [];
+  };
+
+  const latestAnswerRoots = (): Element[] => {
+    const questions = [...document.querySelectorAll("[data-workflow-entry]")];
+    const answers = [
+      ...document.querySelectorAll("[data-workflow-final-text]"),
+    ];
+    if (questions.length === 0 && answers.length === 0) {
+      return lastAnswerOutsideChrome();
+    }
+    const lastQuestion = questions[questions.length - 1];
+    const answersAfter = answers.filter(
+      (answer) =>
+        !lastQuestion ||
+        (lastQuestion.compareDocumentPosition(answer) &
+          Node.DOCUMENT_POSITION_FOLLOWING) !==
+          0,
+    );
+    const latest = answersAfter[answersAfter.length - 1];
+    return latest ? outermostProse(latest) : [];
+  };
+
+  const answer = latestAnswerRoots()
+    .map(readAnswerText)
+    .filter((text) => text !== "")
+    .join("\n\n");
+  const hasAnswer = answer !== "";
 
   const workingPatterns = [
     "Working",
@@ -174,9 +284,9 @@ export function extractAgentStatus(): AgentStatusResult {
   // (because completed pages still show historical step text)
   else if (hasStepsCompleted || hasFinishedMarker) {
     status = "completed";
-  } else if (hasAskFollowUp && hasProseContent) {
+  } else if (hasAskFollowUp && hasAnswer) {
     status = "completed";
-  } else if (hasSourcesIndicator && hasProseContent && !hasActiveStopButton) {
+  } else if (hasSourcesIndicator && hasAnswer && !hasActiveStopButton) {
     status = "completed";
   } else if (hasReviewedSources && !hasActiveStopButton) {
     status = "completed";
@@ -202,143 +312,14 @@ export function extractAgentStatus(): AgentStatusResult {
     if (matches) steps.push(...matches.map((s) => s.trim().substring(0, 100)));
   }
 
-  // Extract response - get the FULL FINAL response after agent completes
-  let response = "";
-  if (status === "completed") {
-    const mainContent = (document.querySelector("main") ||
-      document.body) as HTMLElement;
-    const bodyText = mainContent.innerText;
-
-    // Strategy 1: Find content after "X steps completed" marker (agent's final response).
-    // In multi-turn chats Perplexity keeps previous-turn markers in the
-    // scroll buffer, and the marker text differs across turns ("3 steps
-    // completed" vs "5 steps completed"). `match()` returns only the
-    // FIRST match, so anchoring on it — with either `indexOf` or
-    // `lastIndexOf` of that exact string — lands on the OLDEST turn.
-    // Walk every match with the /g flag and take the last one.
-    const stepsMatches = [...bodyText.matchAll(/(\d+)\s*steps?\s*completed/gi)];
-    const stepsMatch =
-      stepsMatches.length > 0 ? stepsMatches[stepsMatches.length - 1] : null;
-    if (stepsMatch) {
-      const markerIndex = stepsMatch.index ?? -1;
-      if (markerIndex !== -1) {
-        // Get everything after the marker
-        let afterMarker = bodyText
-          .substring(markerIndex + stepsMatch[0].length)
-          .trim();
-
-        // Remove the ">" or arrow that often follows
-        afterMarker = afterMarker.replace(/^[>›→\s]+/, "").trim();
-
-        // Find where the response ends (before input area or UI elements)
-        const endMarkers = [
-          "Ask anything",
-          "Ask a follow-up",
-          "Add details",
-          "Type a message",
-          "Задайте уточняющий вопрос",
-          "Последующие вопросы", // ru
-        ];
-        let endIndex = afterMarker.length;
-        for (const marker of endMarkers) {
-          const idx = afterMarker.indexOf(marker);
-          if (idx !== -1 && idx < endIndex) {
-            endIndex = idx;
-          }
-        }
-
-        response = afterMarker.substring(0, endIndex).trim();
-      }
-    }
-
-    // Strategy 2: If no steps marker, look for content after source citations
-    if (!response || response.length < 50) {
-      // Same rationale as Strategy 1: walk every match and take the last.
-      const sourcesMatches = [
-        ...bodyText.matchAll(/Reviewed\s+\d+\s+sources?/gi),
-      ];
-      const sourcesMatch =
-        sourcesMatches.length > 0
-          ? sourcesMatches[sourcesMatches.length - 1]
-          : null;
-      if (sourcesMatch) {
-        const markerIndex = sourcesMatch.index ?? -1;
-        if (markerIndex !== -1) {
-          const afterMarker = bodyText
-            .substring(markerIndex + sourcesMatch[0].length)
-            .trim();
-          const endMarkers = [
-            "Ask anything",
-            "Ask a follow-up",
-            "Add details",
-            "Задайте уточняющий вопрос",
-            "Последующие вопросы", // ru
-          ];
-          let endIndex = afterMarker.length;
-          for (const marker of endMarkers) {
-            const idx = afterMarker.indexOf(marker);
-            if (idx !== -1 && idx < endIndex) endIndex = idx;
-          }
-          response = afterMarker.substring(0, endIndex).trim();
-        }
-      }
-    }
-
-    // Strategy 3: Fallback - get all prose content combined
-    if (!response || response.length < 50) {
-      const allProseEls = [
-        ...mainContent.querySelectorAll('[class*="prose"]'),
-      ] as HTMLElement[];
-      const validTexts = allProseEls
-        .filter((el) => {
-          if (el.closest("nav, aside, header, footer, form, [contenteditable]"))
-            return false;
-          const text = el.innerText.trim();
-          const isUIText = [
-            "Library",
-            "Discover",
-            "Spaces",
-            "Finance",
-            "Account",
-            "Upgrade",
-            "Home",
-            "Search",
-          ].some((ui) => text.startsWith(ui));
-          return !isUIText && text.length > 30;
-        })
-        .map((el) => el.innerText.trim());
-
-      // Combine all valid prose texts, taking the last/most recent ones
-      if (validTexts.length > 0) {
-        // Take last 3 prose blocks max (most recent response)
-        response = validTexts.slice(-3).join("\n\n");
-      }
-    }
-
-    // Clean up response - preserve formatting but remove UI artifacts
-    if (response) {
-      response = response
-        .replace(/View All/gi, "")
-        .replace(/Show more/gi, "")
-        .replace(/Ask a follow-up/gi, "")
-        .replace(/Ask anything\.*/gi, "")
-        .replace(/Add details to this task\.*/gi, "")
-        .replace(/Задайте уточняющий вопрос/giu, "") // ru
-        .replace(/Последующие вопросы/giu, "") // ru
-        .replace(/\d+\s*sources?\s*$/gi, "")
-        .replace(/\d+\s*источник(?:а|ов)?\s*$/giu, "") // ru
-        .replace(/[\u{1F300}-\u{1F9FF}]/gu, "") // Remove most emojis from UI
-        .replace(/^[>›→\s]+/gm, "") // Remove leading arrows
-        .replace(/\n{3,}/g, "\n\n") // Collapse multiple newlines
-        .trim();
-    }
-  }
+  // The answer whole, with no length limit: an answer is never cut.
+  const response = status === "completed" ? answer : "";
 
   return {
     status,
     steps: [...new Set(steps)].slice(-5),
     currentStep: steps.length > 0 ? steps[steps.length - 1] : "",
-    response: response.substring(0, 8000),
+    response,
     hasStopButton: hasActiveStopButton,
   };
 }

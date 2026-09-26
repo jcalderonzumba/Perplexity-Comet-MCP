@@ -126,24 +126,6 @@ describe("extractAgentStatus", () => {
     expect(runInPage(extractAgentStatus).status).toBe("working");
   });
 
-  it("picks the response after the LAST 'steps completed' marker", () => {
-    // Multi-turn chat: the older turn's marker must NOT win over the newer one.
-    const main = document.createElement("main");
-    const turn1 = document.createElement("div");
-    turn1.textContent =
-      "3 steps completed Previous turn answer text here, long enough to exceed thresholds easily. Ask anything";
-    const turn2 = document.createElement("div");
-    turn2.textContent =
-      "5 steps completed New turn answer that we actually want returned to the caller. Ask a follow-up";
-    main.append(turn1, turn2);
-    document.body.append(main);
-
-    const result = extractAgentStatus();
-    expect(result.status).toBe("completed");
-    expect(result.response).toContain("New turn answer");
-    expect(result.response).not.toContain("Previous turn answer");
-  });
-
   it("extracts and dedupes step descriptions matching the working patterns", () => {
     // Pattern matching runs against document.body.innerText.
     // Use one step per <div> so jsdom's innerText emits one per line.
@@ -625,5 +607,181 @@ describe("extractAgentStatus and the stop control", () => {
     }
 
     expect(runInPage(extractAgentStatus).hasStopButton).toBe(false);
+  });
+});
+
+// The answer, on fixtures of live threads: Perplexity lays a thread out as a
+// flat list of blocks, each question in a `data-workflow-entry` block and
+// its answer in the `data-workflow-final-text` block after it.
+
+function readFixture(name: string): string {
+  return readFileSync(
+    join(dirname(fileURLToPath(import.meta.url)), "fixtures", name),
+    "utf8",
+  );
+}
+
+const ONE_WORD_THREAD = readFixture("thread-one-word.html");
+const SEVERAL_TURNS_THREAD = readFixture("thread-several-turns.html");
+
+/** "Answer <turn> part <from>. … Answer <turn> part <to>.", as invented. */
+function parts(turn: number, from: number, to = from): string {
+  const numbers = Array.from({ length: to - from + 1 }, (_, i) => from + i);
+  return numbers.map((part) => `Answer ${turn} part ${part}.`).join(" ");
+}
+
+/** Turn 4's answer, the latest in the several-turn fixture. */
+const TURN_4_ANSWER = [
+  parts(4, 1),
+  "Heading 4.2",
+  parts(4, 3),
+  parts(4, 4),
+  parts(4, 5, 11),
+  parts(4, 12, 19),
+  parts(4, 20, 24),
+  parts(4, 25, 27),
+  parts(4, 28),
+  parts(4, 29, 33),
+  parts(4, 34),
+  parts(4, 35, 36),
+  parts(4, 37),
+].join("\n\n");
+
+/** Turn 3's answer: headings, two lists, and a line break in a paragraph. */
+const TURN_3_ANSWER = [
+  parts(3, 1),
+  "Heading 3.2",
+  parts(3, 3),
+  `- ${parts(3, 4)}`,
+  `- ${parts(3, 5)}`,
+  parts(3, 6),
+  "Heading 3.7",
+  `${parts(3, 8, 10)}\n${parts(3, 11)}`,
+  `- ${parts(3, 12)}`,
+  `- ${parts(3, 13)}`,
+  parts(3, 14),
+].join("\n\n");
+
+function answerBlocks(): HTMLElement[] {
+  return [
+    ...document.querySelectorAll<HTMLElement>("[data-workflow-final-text]"),
+  ];
+}
+
+function latestAnswerRoot(): HTMLElement {
+  return answerBlocks().at(-1)?.querySelector(".prose") as HTMLElement;
+}
+
+/** Removes turn 4, question and answer, leaving turn 3 the latest. */
+function removeTurn4(): void {
+  document.querySelector('[data-workflow-entry="4"]')?.remove();
+  answerBlocks().at(-1)?.remove();
+}
+
+describe("extractAgentStatus reads the latest turn's answer", () => {
+  it("reads a one-word answer as a completed answer", () => {
+    document.body.innerHTML = ONE_WORD_THREAD;
+
+    expect(runInPage(extractAgentStatus)).toMatchObject({
+      status: "completed",
+      response: "Paris",
+      hasStopButton: false,
+    });
+  });
+
+  it("keeps an answer that starts with a UI label's word", () => {
+    document.body.innerHTML = ONE_WORD_THREAD;
+    latestAnswerRoot().innerHTML = "<p>Search results show three vendors.</p>";
+
+    expect(runInPage(extractAgentStatus).response).toBe(
+      "Search results show three vendors.",
+    );
+  });
+
+  it("returns every paragraph of a long answer, headings included, citation chips left out", () => {
+    document.body.innerHTML = SEVERAL_TURNS_THREAD;
+
+    expect(runInPage(extractAgentStatus)).toMatchObject({
+      status: "completed",
+      response: TURN_4_ANSWER,
+    });
+  });
+
+  it("returns only the latest turn's answer in a thread of several turns", () => {
+    document.body.innerHTML = SEVERAL_TURNS_THREAD;
+
+    const { response } = runInPage(extractAgentStatus);
+
+    expect(response).toContain(parts(4, 1));
+    expect(response).not.toContain("Answer 3");
+    expect(response).not.toContain("Answer 2");
+  });
+
+  it("returns each list item of an answer, with the paragraphs around the list", () => {
+    document.body.innerHTML = SEVERAL_TURNS_THREAD;
+    removeTurn4();
+
+    expect(runInPage(extractAgentStatus).response).toBe(TURN_3_ANSWER);
+  });
+
+  it("never returns an earlier turn's answer while the latest turn has none yet", () => {
+    document.body.innerHTML = SEVERAL_TURNS_THREAD;
+    answerBlocks().at(-1)?.remove();
+
+    const result = runInPage(extractAgentStatus);
+
+    expect(result.status).not.toBe("completed");
+    expect(result.response).toBe("");
+  });
+
+  it("never cuts a long answer", () => {
+    document.body.innerHTML = ONE_WORD_THREAD;
+    const long = "word ".repeat(5000).trim();
+    latestAnswerRoot().innerHTML = `<p>${long}</p>`;
+
+    expect(runInPage(extractAgentStatus).response).toBe(long);
+  });
+
+  it("reads a code block's code, and not its caption or copy button", () => {
+    document.body.innerHTML = ONE_WORD_THREAD;
+    // A code block as the live page renders one, trimmed to structure.
+    latestAnswerRoot().innerHTML = `<p>Run this:</p><div><pre><figure><figcaption><span>text</span><div><button aria-label="Copy code" type="button"></button></div></figcaption><span><code>const a = 1;\n  const b = 2;\n</code></span></figure></pre></div>`;
+
+    expect(runInPage(extractAgentStatus).response).toBe(
+      "Run this:\n\nconst a = 1;\n  const b = 2;",
+    );
+  });
+
+  it("numbers the items of an ordered list", () => {
+    document.body.innerHTML = ONE_WORD_THREAD;
+    latestAnswerRoot().innerHTML = `<p>Steps:</p><ol><li><p>Open it.</p></li><li><p>Read it.</p></li></ol>`;
+
+    expect(runInPage(extractAgentStatus).response).toBe(
+      "Steps:\n\n1. Open it.\n\n2. Read it.",
+    );
+  });
+
+  it("reads a table row by row, cells apart", () => {
+    document.body.innerHTML = ONE_WORD_THREAD;
+    latestAnswerRoot().innerHTML = `<table><thead><tr><th>City</th><th>Country</th></tr></thead><tbody><tr><td>Paris</td><td>France</td></tr></tbody></table>`;
+
+    expect(runInPage(extractAgentStatus).response).toBe(
+      "City | Country\n\nParis | France",
+    );
+  });
+
+  it("reads the last answer block of a page without turn blocks, never navigation or a UI label", () => {
+    document.body.innerHTML = `
+      <nav><div class="prose">A navigation entry long enough to pass for text</div></nav>
+      <main>
+        <div class="prose">Rome.</div>
+        <div class="prose">Library</div>
+      </main>
+      <div>Ask a follow-up</div>`;
+
+    expect(runInPage(extractAgentStatus)).toMatchObject({
+      status: "completed",
+      response: "Rome.",
+    });
   });
 });
