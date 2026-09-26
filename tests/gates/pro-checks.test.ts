@@ -701,12 +701,66 @@ describe("the poll and stop predicates against the core's own replies", () => {
     expect(pollIdle(reply)).toBe(false);
   });
 
+  /** The ask core the stdio server builds, over `port`. */
+  function askCoreOver(port: FakeAskPort): AskCore {
+    return new AskCore({
+      port,
+      mode: {
+        core: new ModeCore(new FakeModePage()),
+        quotePage: wrapUntrustedPageContent,
+      },
+      perplexity: new PerplexityTab(port),
+      cometPort: 9222,
+    });
+  }
+
+  it("agentStopped [4.3] and pollAfterStop [4.3b] hold on the core's stop and the poll after it, whatever the stopped page reads", async () => {
+    const port = new FakeAskPort();
+    port.after = [reading("Rome was", { hasStopButton: true })];
+    const core = askCoreOver(port);
+    expect((await core.ask({ prompt: "q", timeout: 3000 })).kind).toBe(
+      "timed-out",
+    );
+    port.inputBar.answering = true;
+
+    const stop = toStdioResult(describeStopOutcome(await core.stop()));
+    port.after = [reading("Rome was founded", { status: "completed" })];
+    const poll = pollReply(await core.poll());
+
+    expect(agentStopped(stop)).toBe(true);
+    expect(pollAfterStop(poll)).toBe(true);
+  });
+
+  it("answered fails on the reply of an ask whose task was stopped while it waited", async () => {
+    const port = new FakeAskPort();
+    port.after = [
+      reading("Rome was", { hasStopButton: true }),
+      reading("Rome was founded", { status: "completed" }),
+    ];
+    const core = askCoreOver(port);
+    port.onPoll = async (poll) => {
+      if (poll !== 1) return;
+      port.inputBar.answering = true;
+      await core.stop();
+    };
+
+    const outcome = await core.ask({ prompt: "q", timeout: 60000 });
+    const reply = toStdioResult(
+      describeAskOutcome(outcome, wrapUntrustedPageContent),
+    );
+
+    expect(outcome.kind).toBe("stopped");
+    expect(answered(reply)).toBe(false);
+  });
+
   it("agentStopped [4.3] holds on the stop that stopped, and fails on the one that did not", () => {
     expect(
-      agentStopped(toStdioResult(describeStopOutcome({ stopped: true }))),
+      agentStopped(toStdioResult(describeStopOutcome({ kind: "stopped" }))),
     ).toBe(true);
     expect(
-      agentStopped(toStdioResult(describeStopOutcome({ stopped: false }))),
+      agentStopped(
+        toStdioResult(describeStopOutcome({ kind: "nothing-to-stop" })),
+      ),
     ).toBe(false);
   });
 });
@@ -1161,7 +1215,7 @@ function timedOut(status: "working" | "idle", partialAnswer = ""): ToolReply {
   );
 }
 
-/** A one-word answer the ask does not read as complete, run to its timeout. */
+/** A one-word answer run to its timeout, as the runs before phase 4 showed. */
 const SHORT_ANSWER_TIMED_OUT = timedOut("working", "VERI");
 
 /** A short answer the ask does not read as complete, as [2.3]'s run showed. */
@@ -1176,29 +1230,32 @@ const EARLIER_ANSWER_RUN_ON = answer(
 );
 
 /**
- * Comet as the Pro runs of 2026-09-24 to 2026-09-26 found it, each reply in
- * the shape the server gives today, a timeout in the ask core's words, and
- * [2.5]'s submit not taken while [2.4]'s essay may still be streaming: the
- * checks the known-failures list names fail, and every other check holds.
+ * Comet as the Pro runs of 2026-09-24 to 2026-09-26 found it, with the ask's
+ * own defects those runs showed fixed since (short answers, the latest
+ * turn's answer, the poll after a stop): each reply in the shape the server
+ * gives today, a timeout in the ask core's words, [2.5]'s submit not taken
+ * while [2.4]'s essay may still be streaming, and the agent answering
+ * without browsing. The checks the known-failures list names fail, and
+ * every other check holds.
  */
 const TODAY: Replies = {
   [CALLS.connect]: ok("Comet already running with debug port: Chrome/152"),
-  [CALLS.session]: SHORT_ANSWER_TIMED_OUT,
-  [CALLS.capital]: SHORT_ANSWER_TIMED_OUT,
-  [CALLS.remember]: SHORT_ANSWER_TIMED_OUT,
-  [CALLS.recall]: answer("NOTED"),
+  [CALLS.session]: answer("VERIFIED"),
+  [CALLS.capital]: answer("Paris"),
+  [CALLS.remember]: answer("NOTED"),
+  [CALLS.recall]: answer("9473"),
   [CALLS.rememberAgain]: answer("Got it: 9473."),
-  [CALLS.recallInNewChat]: IDLE_TIMED_OUT,
+  [CALLS.recallInNewChat]: answer("You have not asked me to remember one."),
   [CALLS.essay]: timedOut("working", "Rome was founded, according to legend"),
   [CALLS.context]: error(
     "Error: The prompt was not sent: the submit was not taken, the input bar still holds the prompt after Enter and the page shows no Submit button",
   ),
-  [CALLS.paragraphs]: answer("CHARLIE closes the three paragraphs."),
+  [CALLS.paragraphs]: answer("ALPHA one.\n\nBRAVO two.\n\nCHARLIE three."),
   [CALLS.heading]: answer("I can certainly help you with an overview."),
   [CALLS.tabs]: [NO_TABS, NO_TABS, NO_TABS],
   [CALLS.agentTab]: answer("The heading of example.org is Example Domain."),
-  [CALLS.trending]: EARLIER_ANSWER_RUN_ON,
-  [CALLS.poll]: [COMPLETED, answer("The featured article is about")],
+  [CALLS.trending]: answer("Trending repositories change every day."),
+  [CALLS.poll]: [COMPLETED, ok("Status: STOPPED")],
   [CALLS.slowTask]: timedOut("working"),
   [CALLS.stop]: ok("Agent stopped"),
   [CALLS.screenshot]: IMAGE,
@@ -1237,18 +1294,11 @@ const AGENT_TABS = tabListing(AGENT_TAB);
 /** Comet once every fix lands: every check's condition holds. */
 const FIXED: Replies = {
   ...TODAY,
-  [CALLS.session]: answer("VERIFIED"),
-  [CALLS.capital]: answer("Paris"),
-  [CALLS.remember]: answer("NOTED"),
-  [CALLS.recall]: answer("9473"),
-  [CALLS.recallInNewChat]: answer("You have not asked me to remember one."),
   [CALLS.essay]: MAY_BE_INCOMPLETE,
   [CALLS.context]: answer("The project is Artemis."),
-  [CALLS.paragraphs]: answer("ALPHA one.\n\nBRAVO two.\n\nCHARLIE three."),
   [CALLS.heading]: answer("Example Domain"),
   [CALLS.tabs]: [NO_TABS, AGENT_TABS, AGENT_TABS],
   [CALLS.trending]: answer("octo/widgets, with 12,345 stars"),
-  [CALLS.poll]: [COMPLETED, ok("Status: STOPPED")],
   [CALLS.switchTab]: ok("Switched to example.com (https://example.com/)"),
   [CALLS.learn]: ok("Switched to learn mode"),
 };
@@ -1300,7 +1350,7 @@ describe("runProBattery", () => {
       undefined,
       noWait,
     );
-    expect(summaryLine(checks)).toBe("Results: 17 passed, 0 failed, 13 known");
+    expect(summaryLine(checks)).toBe("Results: 23 passed, 0 failed, 7 known");
     expect(batteryPassed(checks)).toBe(true);
     expect(
       checks
@@ -1409,6 +1459,7 @@ describe("runProBattery", () => {
       fakeServer({
         ...FIXED,
         [CALLS.session]: LOGIN_PAGE,
+        [CALLS.capital]: SHORT_ANSWER_TIMED_OUT,
         [CALLS.recall]: answer("NOTED\n\n9473"),
         [CALLS.recallInNewChat]: error("Error: Not connected to Comet"),
         [CALLS.poll]: [ok("Status: WORKING"), answer("The article")],
@@ -1423,12 +1474,13 @@ describe("runProBattery", () => {
       noWait,
     );
     expect(verdicts(checks)).toMatchObject({
-      "1.5": "KNOWN",
-      "2.2": "KNOWN",
-      "2.3": "KNOWN",
+      "1.5": "FAIL",
+      "2.1": "FAIL",
+      "2.2": "FAIL",
+      "2.3": "FAIL",
       "4.1": "FAIL",
       "4.3": "FAIL",
-      "4.3b": "KNOWN",
+      "4.3b": "FAIL",
       "6.4": "FAIL",
       "8.3": "FAIL",
       "8.4": "FAIL",
@@ -1453,13 +1505,13 @@ describe("runProBattery", () => {
       noWait,
     );
     expect(verdicts(checks)).toMatchObject({
-      "1.5": "KNOWN",
+      "1.5": "FAIL",
       "2.5": "KNOWN",
-      "2.6-whole-answer": "KNOWN",
+      "2.6-whole-answer": "FAIL",
     });
   });
 
-  it("scores [2.3]'s short answer run to its timeout, and [3.4]'s earlier answer run on, as known", async () => {
+  it("fails [2.3]'s short answer run to its timeout, no longer excused, and scores [3.4]'s earlier answer run on as known", async () => {
     const checks = await runProBattery(
       fakeServer({
         ...FIXED,
@@ -1470,10 +1522,7 @@ describe("runProBattery", () => {
       undefined,
       noWait,
     );
-    expect(byId(checks, "2.3")).toMatchObject({
-      verdict: "KNOWN",
-      known: { owningPlan: "plan 3 (comet_ask reliability)" },
-    });
+    expect(byId(checks, "2.3")).toMatchObject({ verdict: "FAIL" });
     expect(byId(checks, "3.4")).toMatchObject({
       verdict: "KNOWN",
       known: { owningPlan: "plan 12 (Agentic browsing)" },
@@ -1522,7 +1571,7 @@ describe("runProBattery", () => {
       note: "TIMEOUT after 10000ms",
     });
     expect(byId(checks, "4.3b")).toMatchObject({
-      verdict: "KNOWN",
+      verdict: "FAIL",
       note: "TIMEOUT after 10000ms",
     });
     expect(slowTaskEnded).toBe(true);

@@ -207,21 +207,15 @@ describe("PRO_KNOWN_FAILURES", () => {
   const ASK_RELIABILITY = "plan 3 (comet_ask reliability)";
   const AGENTIC_BROWSING = "plan 12 (Agentic browsing)";
 
-  it("lists the checks the Pro runs of 2026-09-24 to 2026-09-26 failed, and the new ones, each with its owner", () => {
+  it("lists the checks the Pro runs of 2026-09-24 to 2026-09-26 failed that no fix has reached yet, each with its owner", () => {
     expect(
       PRO_KNOWN_FAILURES.map((entry) => [entry.id, entry.owningPlan]),
     ).toEqual([
-      ["1.5", ASK_RELIABILITY],
-      ["2.1", ASK_RELIABILITY],
-      ["2.2", ASK_RELIABILITY],
-      ["2.3", ASK_RELIABILITY],
       ["2.5", ASK_RELIABILITY],
-      ["2.6-whole-answer", ASK_RELIABILITY],
       ["3.1", AGENTIC_BROWSING],
       ["3.2-agent-tab", AGENTIC_BROWSING],
       ["3.3-tabs-kept", AGENTIC_BROWSING],
       ["3.4", AGENTIC_BROWSING],
-      ["4.3b", ASK_RELIABILITY],
       ["6.3", AGENTIC_BROWSING],
       ["7.2-learn", "plan 11 (Learn mode)"],
     ]);
@@ -231,19 +225,30 @@ describe("PRO_KNOWN_FAILURES", () => {
     expect(PRO_KNOWN_FAILURES.map((entry) => entry.id)).not.toContain("2.4");
   });
 
+  it.each([
+    ["1.5", "a one-word answer is read as complete"],
+    ["2.1", "a one-word answer is read as complete"],
+    ["2.2", "a follow-up returns its own turn's answer"],
+    ["2.3", "a new chat's short answer is read as complete"],
+    ["2.6-whole-answer", "the latest turn's answer is read whole"],
+    ["4.3b", "a poll after comet_stop reports the task stopped"],
+  ])("no longer lists [%s], since %s", (id) => {
+    expect(PRO_KNOWN_FAILURES.map((entry) => entry.id)).not.toContain(id);
+  });
+
+  it("words [3.4] as the agent not browsing alone, since the ask no longer returns an earlier turn's answer", () => {
+    const entry = PRO_KNOWN_FAILURES.find((known) => known.id === "3.4");
+    expect(entry?.reason).toBe(
+      "Comet answers the multi-step browsing task without browsing",
+    );
+  });
+
   it("lists [2.5] for its submit not taken while Comet may still be answering [2.4], a cause still to confirm", () => {
     const entry = PRO_KNOWN_FAILURES.find((known) => known.id === "2.5");
     expect(entry?.reason).toMatch(/the submit is not taken/);
     expect(entry?.reason).toMatch(/still answering the previous question/);
     expect(entry?.reason).toMatch(/not yet confirmed/);
     expect(entry?.reason).not.toMatch(/Prompt text not found in input/);
-  });
-
-  it("words a short answer run to its timeout as the ask's timeout result now reads", () => {
-    for (const id of ["1.5", "2.1", "2.3"]) {
-      const entry = PRO_KNOWN_FAILURES.find((known) => known.id === id);
-      expect(entry?.reason, id).toMatch(/says the answer may be incomplete$/);
-    }
   });
 
   it("gives [7.2-learn] the no-pro list's entry, as both batteries judge it alike", () => {

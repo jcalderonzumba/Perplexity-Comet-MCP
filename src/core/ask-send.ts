@@ -15,8 +15,9 @@
 // and the window is never raised.
 
 import { errorMessage } from "../error-message.js";
-import type { PagePoint, ProseState } from "../page-scripts.js";
+import type { PagePoint, ThreadState } from "../page-scripts.js";
 import { PageScriptFailed } from "./page-script-failed.js";
+import { showsNewTurn } from "./thread-turn.js";
 
 /** What the send step needs from the browser. */
 export interface PromptPort {
@@ -43,7 +44,8 @@ export interface PromptPort {
   startFocusEmulation(): Promise<void>;
   /** Ends `startFocusEmulation`. */
   stopFocusEmulation(): Promise<void>;
-  readProseState(): Promise<ProseState>;
+  /** Which turn of the thread the page shows. */
+  readThreadState(): Promise<ThreadState>;
   /** Milliseconds, on the clock `wait` advances. */
   now(): number;
   wait(ms: number): Promise<void>;
@@ -80,17 +82,17 @@ export class PromptNotSent extends Error {
 
 /**
  * Types `prompt` into the input bar and submits it, or throws
- * `PromptNotSent` naming the step that failed. `proseBefore` is the page's
- * prose before sending: an answer that starts shows the prompt submitted.
+ * `PromptNotSent` naming the step that failed. `threadBefore` is the
+ * page's thread before sending: a new turn shows the prompt submitted.
  */
 export async function sendPrompt(
   port: PromptPort,
   prompt: string,
-  proseBefore: ProseState,
+  threadBefore: ThreadState,
 ): Promise<void> {
   await selectInputBar(port);
   await typePrompt(port, prompt);
-  await withFocusEmulated(port, () => submitPrompt(port, proseBefore));
+  await withFocusEmulated(port, () => submitPrompt(port, threadBefore));
 }
 
 async function selectInputBar(port: PromptPort): Promise<void> {
@@ -155,39 +157,39 @@ async function withFocusEmulated(
 
 async function submitPrompt(
   port: PromptPort,
-  proseBefore: ProseState,
+  threadBefore: ThreadState,
 ): Promise<void> {
   const notTaken = "the submit was not taken";
   await during("submit", notTaken, () => port.pressEnter());
-  if (await submittedWithin(port, proseBefore)) return;
+  if (await submittedWithin(port, threadBefore)) return;
   const button = await during("submit", notTaken, () =>
     port.locateSubmitButton(),
   );
   if (!button) {
     // The button shows only while the field holds text: an Enter taken just
     // after the wait took the button with the prompt.
-    if (await showsSubmitted(port, proseBefore)) return;
+    if (await showsSubmitted(port, threadBefore)) return;
     throw new PromptNotSent(
       "submit",
       `${notTaken}, the input bar still holds the prompt after Enter and the page shows no Submit button`,
     );
   }
   await during("submit", notTaken, () => port.clickAt(button));
-  if (await submittedWithin(port, proseBefore)) return;
+  if (await submittedWithin(port, threadBefore)) return;
   throw new PromptNotSent(
     "submit",
     `${notTaken}, the input bar still holds the prompt after Enter and a click on the Submit button`,
   );
 }
 
-/** True once the field empties or an answer starts, within the submit wait. */
+/** True once the field empties or a new turn shows, within the submit wait. */
 async function submittedWithin(
   port: PromptPort,
-  proseBefore: ProseState,
+  threadBefore: ThreadState,
 ): Promise<boolean> {
   const startedAt = port.now();
   for (;;) {
-    if (await showsSubmitted(port, proseBefore)) return true;
+    if (await showsSubmitted(port, threadBefore)) return true;
     if (port.now() - startedAt >= SEND_TIMING.submitWaitMs) return false;
     await port.wait(SEND_TIMING.submitPollMs);
   }
@@ -196,12 +198,16 @@ async function submittedWithin(
 /** A read that fails, as while the page moves to the new thread, is a no. */
 async function showsSubmitted(
   port: PromptPort,
-  proseBefore: ProseState,
+  threadBefore: ThreadState,
 ): Promise<boolean> {
   try {
     const field = await port.readAskInput();
     if (field !== null && collapseWhitespace(field) === "") return true;
-    return (await port.readProseState()).count > proseBefore.count;
+    const now = await port.readThreadState();
+    return (
+      showsNewTurn(threadBefore, now) ??
+      now.proseCount > threadBefore.proseCount
+    );
   } catch {
     return false;
   }

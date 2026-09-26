@@ -810,7 +810,7 @@ export class CometCDPClient {
     // Find best target. Prefer the MAIN Perplexity tab — explicitly
     // exclude `sidecar` URLs, which Comet uses for its right-panel
     // chat helper. Connecting to the sidecar by mistake silently
-    // routes `sendPrompt` / `stopAgent` to the wrong tab.
+    // routes the prompt and the stop to the wrong tab.
     const targets = await this.listTargets();
     const target =
       targets.find(

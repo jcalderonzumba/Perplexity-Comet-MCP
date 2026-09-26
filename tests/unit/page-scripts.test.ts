@@ -14,7 +14,7 @@ import {
   pageScriptExpression,
   readAskInput,
   readModeMenuItems,
-  readProseState,
+  readThreadState,
   selectAskInput,
 } from "../../src/page-scripts.js";
 
@@ -37,37 +37,33 @@ function markVisible(el: HTMLElement): void {
   });
 }
 
-describe("readProseState", () => {
-  it("returns count=0 and empty lastText for an empty DOM", () => {
-    const state = readProseState();
-    expect(state).toEqual({ count: 0, lastText: "" });
+// Without turn markup, the thread state falls back to the page's prose
+// elements: how many there are, and the start of the last one.
+describe("readThreadState on a page that shows no turn", () => {
+  it("reads no turn, no prose and no text on an empty page", () => {
+    expect(readThreadState()).toEqual({
+      latestTurn: null,
+      proseCount: 0,
+      lastProseText: "",
+    });
   });
 
-  it("returns the count and full lastText (under 100 chars) for one prose block", () => {
-    document.body.innerHTML = `<div class="prose">Short answer here.</div>`;
-    const state = readProseState();
-    expect(state.count).toBe(1);
-    expect(state.lastText).toBe("Short answer here.");
-  });
-
-  it("returns the last prose block's text when several are present", () => {
+  it("counts the prose elements and reads the last one's text", () => {
     document.body.innerHTML = `
       <div class="prose">first</div>
       <div class="prose-md">middle</div>
       <div class="prose">last block</div>
     `;
-    const state = readProseState();
-    expect(state.count).toBe(3);
-    expect(state.lastText).toBe("last block");
+    expect(readThreadState()).toEqual({
+      latestTurn: null,
+      proseCount: 3,
+      lastProseText: "last block",
+    });
   });
 
-  it("truncates lastText at 100 characters", () => {
-    const longText = "x".repeat(250);
-    document.body.innerHTML = `<div class="prose">${longText}</div>`;
-    const state = readProseState();
-    expect(state.count).toBe(1);
-    expect(state.lastText.length).toBe(100);
-    expect(state.lastText).toBe("x".repeat(100));
+  it("reads the first 100 characters of the last prose element", () => {
+    document.body.innerHTML = `<div class="prose">${"x".repeat(250)}</div>`;
+    expect(readThreadState().lastProseText).toBe("x".repeat(100));
   });
 });
 
@@ -783,5 +779,54 @@ describe("extractAgentStatus reads the latest turn's answer", () => {
       status: "completed",
       response: "Rome.",
     });
+  });
+});
+
+// The latest turn, by the index each question block carries: a hidden tab
+// renders only the turns near the view, so the index, not a count of the
+// blocks, says which turn is the latest.
+describe("readThreadState on a thread", () => {
+  it("reads the latest turn's index from its question block", () => {
+    document.body.innerHTML = SEVERAL_TURNS_THREAD;
+
+    expect(runInPage(readThreadState).latestTurn).toBe(4);
+  });
+
+  it("reads turn 0 on a thread of one turn", () => {
+    document.body.innerHTML = ONE_WORD_THREAD;
+
+    expect(runInPage(readThreadState).latestTurn).toBe(0);
+  });
+
+  it("reads a new turn as soon as its question shows, before its answer", () => {
+    document.body.innerHTML = SEVERAL_TURNS_THREAD;
+    const question = document.createElement("div");
+    question.setAttribute("data-workflow-entry", "5");
+    question.textContent = "The next question";
+    answerBlocks().at(-1)?.after(question);
+
+    expect(runInPage(readThreadState).latestTurn).toBe(5);
+  });
+
+  it("reads the highest index, whatever order the blocks are in", () => {
+    document.body.innerHTML = `
+      <div data-workflow-entry="7">q</div>
+      <div data-workflow-entry="12">q</div>
+      <div data-workflow-entry="9">q</div>
+    `;
+
+    expect(runInPage(readThreadState).latestTurn).toBe(12);
+  });
+
+  it("reads no turn on Perplexity's home page", () => {
+    loadAskInputFixture();
+
+    expect(runInPage(readThreadState).latestTurn).toBeNull();
+  });
+
+  it("ignores a question block whose index is not a number", () => {
+    document.body.innerHTML = `<div data-workflow-entry="">q</div><div data-workflow-entry="x">q</div>`;
+
+    expect(runInPage(readThreadState).latestTurn).toBeNull();
   });
 });

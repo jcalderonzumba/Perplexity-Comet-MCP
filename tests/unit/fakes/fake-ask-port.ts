@@ -4,7 +4,7 @@
 //
 // The prompt is sent once `inputBar`, the fake input bar, takes it as
 // submitted. Before that the page shows `before`. Once it is sent, each
-// read of the prose state is one poll: it moves to the next of `after`, and
+// read of the thread state is one poll: it moves to the next of `after`, and
 // the last one stays. An `Error` in `after` makes that poll's reads throw,
 // as a CDP call does when the page goes away; an `Error` as `before` makes
 // the reads before sending throw. Time only passes through
@@ -14,34 +14,40 @@
 // check which tab the prompt reached.
 
 import type { AskPort, AskStatus } from "../../../src/core/ask.js";
-import type { PagePoint, ProseState } from "../../../src/page-scripts.js";
+import type { PagePoint, ThreadState } from "../../../src/page-scripts.js";
 import { FakeInputBar } from "./fake-input-bar.js";
 import { FakeTabPort } from "./fake-tab-port.js";
 
-/** What one read of the page shows: its prose blocks and its status. */
+/** What one read of the page shows: its thread's turns and its status. */
 export interface PageReading {
-  readonly prose: ProseState;
+  readonly thread: ThreadState;
   readonly status: AskStatus;
 }
 
 /**
- * The page showing `response`: by default one prose block more than a quiet
- * page, still working, not stable, with no stop button.
+ * The page showing `response`: by default the first turn of a thread, still
+ * working, with no stop button.
  */
 export function reading(
   response: string,
-  options: Partial<AskStatus> & { proseCount?: number } = {},
+  options: Partial<AskStatus> & {
+    latestTurn?: number | null;
+    proseCount?: number;
+  } = {},
 ): PageReading {
-  const { proseCount = 1, ...status } = options;
+  const { latestTurn = 0, proseCount = 1, ...status } = options;
   return {
-    prose: { count: proseCount, lastText: response.slice(0, 100) },
+    thread: {
+      latestTurn,
+      proseCount,
+      lastProseText: response.slice(0, 100),
+    },
     status: {
       status: "working",
       steps: [],
       currentStep: "",
       response,
       hasStopButton: false,
-      isStable: false,
       agentBrowsingUrl: "",
       ...status,
     },
@@ -51,6 +57,7 @@ export function reading(
 /** A Perplexity page with no answer on it. */
 export const QUIET_PAGE: PageReading = reading("", {
   status: "idle",
+  latestTurn: null,
   proseCount: 0,
 });
 
@@ -70,10 +77,13 @@ export class FakeAskPort extends FakeTabPort implements AskPort {
   public preCheckFails = false;
   public recoveryFails = false;
   public navigationFails = false;
-  /** Whether the page shows a control that stops the answer. */
-  public hasStopControl = true;
   /** Runs on every navigation, as a real one resets the page's mode. */
   public onNavigate: (() => void) | undefined;
+  /**
+   * Runs at each poll after the prompt was sent, with its number from 0,
+   * before the poll's reads return: what happens while the ask waits.
+   */
+  public onPoll: ((poll: number) => void | Promise<void>) | undefined;
 
   private sent = false;
   private poll = -1;
@@ -110,19 +120,18 @@ export class FakeAskPort extends FakeTabPort implements AskPort {
     this.onNavigate?.();
   }
 
-  async readProseState(): Promise<ProseState> {
-    this.calls.push("readProseState");
-    if (this.sent) this.poll++;
-    return this.current().prose;
+  async readThreadState(): Promise<ThreadState> {
+    this.calls.push("readThreadState");
+    if (this.sent) {
+      this.poll++;
+      await this.onPoll?.(this.poll);
+    }
+    return this.current().thread;
   }
 
   async readStatus(): Promise<AskStatus> {
     this.calls.push("readStatus");
     return this.current().status;
-  }
-
-  resetStabilityTracking(): void {
-    this.calls.push("resetStabilityTracking");
   }
 
   selectAskInput(): Promise<boolean> {
@@ -166,9 +175,9 @@ export class FakeAskPort extends FakeTabPort implements AskPort {
     return this.inputBar.stopFocusEmulation();
   }
 
-  async stopAgent(): Promise<boolean> {
-    this.calls.push("stopAgent");
-    return this.hasStopControl;
+  locateStopControl(): Promise<PagePoint | null> {
+    this.calls.push("locateStopControl");
+    return this.inputBar.locateStopControl();
   }
 
   now(): number {

@@ -4,19 +4,22 @@
 // Text read from the page reaches the reply only through `quotePage`, the
 // adapter's UNTRUSTED wrapper. A timeout, and a poll of a task still
 // working, say the answer may be incomplete and name `comet_poll` to follow
-// it, so partial text is never mistaken for the answer.
+// it, so partial text is never mistaken for the answer; an ask whose task
+// was stopped says so too, and a poll of a stopped task says it stopped.
 
 import type {
   AskOutcome,
   AskProgress,
   PollOutcome,
   PollProgress,
-  StopOutcome,
 } from "./ask.js";
 import { withModeNotice } from "./ask-mode.js";
+import type { StopOutcome } from "./ask-stop.js";
 
 const TASK_STILL_ACTIVE =
   "The task is still active: use comet_poll to follow the answer until it is complete, or comet_stop to cancel it.";
+
+const START_A_NEW_TASK = "Use comet_ask to start a new task.";
 
 export interface AskReply {
   readonly text: string;
@@ -51,6 +54,14 @@ export function describeAskOutcome(
         ),
         isError: false,
       };
+    case "stopped":
+      return {
+        text: withModeNotice(
+          outcome.notice,
+          describeStoppedAsk(outcome.progress, quotePage),
+        ),
+        isError: false,
+      };
   }
 }
 
@@ -82,6 +93,23 @@ function describeTimeout(
   return lines.join("\n");
 }
 
+function describeStoppedAsk(
+  progress: AskProgress,
+  quotePage: (pageText: string) => string,
+): string {
+  const lines = [
+    "The answer may be incomplete: this ask's task was stopped, by comet_stop or by a newer comet_ask, before Comet finished answering.",
+    "Status: STOPPED",
+    "",
+    ...partialAnswerLines(progress.partialAnswer, quotePage),
+    "",
+  ];
+  const progressText = describeProgress(progress);
+  if (progressText) lines.push("Progress:", quotePage(progressText), "");
+  lines.push(START_A_NEW_TASK);
+  return lines.join("\n");
+}
+
 function partialAnswerLines(
   partialAnswer: string,
   quotePage: (pageText: string) => string,
@@ -100,11 +128,18 @@ export function describePollOutcome(
   };
 }
 
-export function describeStopOutcome({ stopped }: StopOutcome): AskReply {
-  return {
-    text: stopped ? "Agent stopped" : "No active agent to stop",
-    isError: false,
-  };
+export function describeStopOutcome(outcome: StopOutcome): AskReply {
+  switch (outcome.kind) {
+    case "stopped":
+      return { text: "Agent stopped", isError: false };
+    case "nothing-to-stop":
+      return { text: "No active agent to stop", isError: false };
+    case "not-taken":
+      return {
+        text: "Error: The answer was not stopped: the stop control still shows after a click on it. Use comet_screenshot to see the page.",
+        isError: true,
+      };
+  }
 }
 
 function pollText(
@@ -124,8 +159,8 @@ function pollText(
       return `Status: COMPLETED\n\n${quotePage(outcome.answer)}`;
     case "working":
       return describeWorking(outcome.taskId, outcome.progress, quotePage);
-    case "not-followed":
-      return describeNotFollowed(outcome.taskId, outcome.progress, quotePage);
+    case "stopped":
+      return describeStoppedTask(outcome.taskId, outcome.steps, quotePage);
     case "page-error":
       return [
         ...statusLines("unknown", outcome.taskId),
@@ -156,28 +191,23 @@ function describeWorking(
   return lines.join("\n");
 }
 
-function describeNotFollowed(
+function describeStoppedTask(
   taskId: string | null,
-  progress: PollProgress,
+  steps: readonly string[],
   quotePage: (pageText: string) => string,
 ): string {
   const lines = [
-    ...statusLines(progress.status, taskId),
-    "No answer to follow: the task was stopped.",
+    ...statusLines("stopped", taskId),
+    "The task was stopped before its answer was complete, so there is no answer to follow.",
   ];
-  const progressText = describeProgress(progress);
+  const progressText = describeProgress({ currentStep: "", steps });
   if (progressText) lines.push("", "Progress:", quotePage(progressText));
-  if (progress.status === "working") {
-    lines.push(
-      "",
-      "[Use comet_stop to interrupt, or comet_screenshot to see current page]",
-    );
-  }
+  lines.push("", START_A_NEW_TASK);
   return lines.join("\n");
 }
 
 function statusLines(
-  status: PollProgress["status"],
+  status: PollProgress["status"] | "stopped",
   taskId: string | null,
 ): string[] {
   const lines = [`Status: ${status.toUpperCase()}`];
@@ -193,7 +223,9 @@ function describeProgress({
   currentStep,
   steps,
   browsingUrl,
-}: AskProgress & { readonly browsingUrl?: string }): string {
+}: Pick<AskProgress, "currentStep" | "steps"> & {
+  readonly browsingUrl?: string;
+}): string {
   const lines: string[] = [];
   if (browsingUrl) lines.push(`Browsing: ${browsingUrl}`);
   if (currentStep) lines.push(`Current: ${currentStep}`);

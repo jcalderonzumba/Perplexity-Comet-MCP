@@ -57,8 +57,8 @@ const ASK_OF_ITS_OWN = [
   "sendPrompt",
   "getAgentStatus",
   "evaluate(",
-  "readProseState",
-  "isStable",
+  "readThreadState",
+  "showsNewTurn",
   "hasStopButton",
   "setTimeout",
   ".replace(",
@@ -165,7 +165,7 @@ const TASK_HANDLERS: Record<
 /** What only a poll or stop of its own would hold: page reads and task state. */
 const TASK_OF_ITS_OWN = [
   "getAgentStatus",
-  "stopAgent",
+  "locateStopControl",
   "ensureOnPerplexityTab",
   "evaluate(",
   "askCore.task",

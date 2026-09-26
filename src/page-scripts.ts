@@ -36,17 +36,35 @@ export function pageScriptExpression<A extends PageArgument[]>(
   return `(${script.toString()})(${serialisedArgs})`;
 }
 
-export interface ProseState {
-  count: number;
-  lastText: string;
+/**
+ * Which turn of the thread the page shows last. A thread is a flat list of
+ * blocks, each question in a `data-workflow-entry` block that carries its
+ * turn's index, the answer after it; a new question block shows as soon as
+ * a prompt is submitted. A hidden tab renders only the turns near the view,
+ * so the latest turn is the highest index, never a count of the blocks.
+ */
+export interface ThreadState {
+  /** The latest turn's index, or null on a page that shows no turn. */
+  latestTurn: number | null;
+  /**
+   * For a page that shows no turn: how many elements have a class naming
+   * `prose`, and the first 100 characters of the last one.
+   */
+  proseCount: number;
+  lastProseText: string;
 }
 
-export function readProseState(): ProseState {
+export function readThreadState(): ThreadState {
+  const indices = [...document.querySelectorAll("[data-workflow-entry]")]
+    .map((entry) => entry.getAttribute("data-workflow-entry") ?? "")
+    .filter((index) => /^\d+$/.test(index))
+    .map(Number);
   const proseEls = document.querySelectorAll('[class*="prose"]');
   const lastProse = proseEls[proseEls.length - 1] as HTMLElement | undefined;
   return {
-    count: proseEls.length,
-    lastText: lastProse ? lastProse.innerText.substring(0, 100) : "",
+    latestTurn: indices.length > 0 ? Math.max(...indices) : null,
+    proseCount: proseEls.length,
+    lastProseText: lastProse ? lastProse.innerText.substring(0, 100) : "",
   };
 }
 
@@ -100,8 +118,8 @@ export function extractAgentStatus(): AgentStatusResult {
 
   // Completion markers — multilingual.
   // Perplexity localizes its UI (ru, de, es, fr, etc). English-only patterns
-  // miss completion on non-English accounts and force fallback to slow
-  // response-stability polling (~90s). See PR #9 notes for marker source.
+  // miss completion on non-English accounts, whose answers then never read
+  // as complete. See PR #9 notes for marker source.
   const hasStepsCompleted =
     /\d+ steps? completed/i.test(body) ||
     // Russian agrees the verb with grammatical number:

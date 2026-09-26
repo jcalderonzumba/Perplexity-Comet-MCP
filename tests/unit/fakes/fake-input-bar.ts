@@ -1,6 +1,7 @@
-// A fake of Perplexity's input bar, as the send step drives it through the
-// ask port: selected by a page script, typed into by trusted text, and
-// submitted by a trusted Enter or a click on its Submit button.
+// A fake of Perplexity's input bar, as the send step and the stop drive it
+// through the ask port: selected by a page script, typed into by trusted
+// text, submitted by a trusted Enter or a click on its Submit button, and,
+// while an answer is streaming, stopped by a click on its stop control.
 //
 // By default it behaves like the live page with the window in front: the
 // text inserted after a selection replaces the field, and Enter submits a
@@ -13,6 +14,8 @@
 import type { PagePoint } from "../../../src/page-scripts.js";
 
 export const SUBMIT_BUTTON: PagePoint = { x: 640, y: 480 };
+/** Where the stop control shows, in the Submit button's place. */
+export const STOP_CONTROL: PagePoint = { x: 641, y: 481 };
 
 export class FakeInputBar {
   /** Every input-bar call by name, oldest first. */
@@ -35,6 +38,10 @@ export class FakeInputBar {
   public takesClick = true;
   /** Whether the page shows a Submit button while the field holds text. */
   public hasSubmitButton = true;
+  /** Whether an answer is streaming, so the bar shows its stop control. */
+  public answering = false;
+  /** Whether a click on the stop control stops the answer. */
+  public takesStopClick = true;
   /** When set, the trusted input the origin gate refuses, with this error. */
   public inputRefusal: Error | null = null;
   /** Whether keys and clicks reach the page only while focus is emulated. */
@@ -78,11 +85,21 @@ export class FakeInputBar {
     return shown ? SUBMIT_BUTTON : null;
   }
 
+  async locateStopControl(): Promise<PagePoint | null> {
+    this.log.push("locateStopControl");
+    return this.present && this.answering ? STOP_CONTROL : null;
+  }
+
   async clickAt(point: PagePoint): Promise<void> {
     this.log.push("clickAt");
     this.refuseIfSet();
     this.clicks.push(point);
-    if (this.takesClick && this.reachesPage()) this.submit();
+    if (!this.reachesPage()) return;
+    if (isAt(point, STOP_CONTROL)) {
+      if (this.answering && this.takesStopClick) this.answering = false;
+    } else if (this.takesClick) {
+      this.submit();
+    }
   }
 
   async startFocusEmulation(): Promise<void> {
@@ -113,4 +130,8 @@ export class FakeInputBar {
   private refuseIfSet(): void {
     if (this.inputRefusal) throw this.inputRefusal;
   }
+}
+
+function isAt(point: PagePoint, target: PagePoint): boolean {
+  return point.x === target.x && point.y === target.y;
 }

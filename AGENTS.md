@@ -80,7 +80,7 @@ TypeScript (strict, ES2022, NodeNext) compiled by `tsc` to `dist/`, one npm pack
 | `src/index.ts` | The stdio MCP server: tool definitions and handlers, the UNTRUSTED wrapper |
 | `src/http-bridge.ts` | The HTTP bridge exposing the same tools to remote clients |
 | `src/cdp-client.ts` | Comet launch, CDP connection and reconnect, tabs, screenshots, uploads, Windows and WSL |
-| `src/comet-ai.ts` | Completion detection, answer extraction, stopping an answer; prompts are sent by the ask core (`src/core/ask-send.ts`) |
+| `src/comet-ai.ts` | Reading the answer and its status from the page; the ask core decides when an answer is complete (`src/core/answer-watch.ts`), sends prompts (`src/core/ask-send.ts`) and stops answers (`src/core/ask-stop.ts`) |
 | `src/page-scripts.ts` | JavaScript run in the page, as tested functions |
 | `src/upload-validator.ts` | Allowlists for paths, tab ids, domains and selectors |
 | `tests/unit/`, `tests/gates/` | Unit tests; the gate scripts' tests |
