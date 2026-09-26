@@ -3,7 +3,8 @@
 //
 // Each method is one call to the client or the Comet module. The page is
 // read only through the tested functions of `page-scripts.ts`, through the
-// client's evaluate that reconnects when the connection drops. The prompt
+// client's evaluate that reconnects when the connection drops; the tab's
+// address is read from the browser, never from the page. The prompt
 // reaches the page only as the client's trusted text, which, like its keys
 // and clicks, the client sends only to a tab on Perplexity's origin.
 
@@ -12,17 +13,16 @@ import {
   AskCore,
   type AskPort,
   type AskStatus,
-  type AskTarget,
   PageScriptFailed,
 } from "./core/ask.js";
 import type { ModeTool } from "./core/mode-tool.js";
+import type { BrowserTarget } from "./core/perplexity-tab.js";
 import {
   locateSubmitButton,
   type PagePoint,
   type ProseState,
   pageScriptExpression,
   readAskInput,
-  readPageAddress,
   readProseState,
   selectAskInput,
 } from "./page-scripts.js";
@@ -32,15 +32,16 @@ import type { EvaluateResult } from "./types.js";
 export interface AskPortClient {
   preOperationCheck(): Promise<unknown>;
   startComet(port: number): Promise<unknown>;
-  listTargets(): Promise<readonly AskTarget[]>;
+  listTargets(): Promise<readonly BrowserTarget[]>;
   connect(targetId: string): Promise<unknown>;
   ensureConnection(): Promise<unknown>;
   navigate(url: string, waitForLoad?: boolean): Promise<unknown>;
-  listTabsCategorized(): Promise<{ main: AskTarget | null }>;
+  /** The connected tab's top-frame address, read through CDP. */
+  pageAddress(): Promise<string>;
+  /** Opens a new tab on `url`, without connecting to it. */
+  newTab(url: string): Promise<BrowserTarget>;
   /** Evaluates in the page, reconnecting when the connection has dropped. */
   safeEvaluate(expression: string): Promise<EvaluateResult>;
-  isOnPerplexityTab(): Promise<boolean>;
-  ensureOnPerplexityTab(): Promise<boolean>;
   /** Trusted text at the focused element; refused off Perplexity. */
   insertText(text: string): Promise<void>;
   /** A trusted key press; refused off Perplexity. */
@@ -70,7 +71,7 @@ class CdpAskPort implements AskPort {
     return this.client.startComet(port);
   }
 
-  listTargets(): Promise<readonly AskTarget[]> {
+  listTargets(): Promise<readonly BrowserTarget[]> {
     return this.client.listTargets();
   }
 
@@ -86,20 +87,12 @@ class CdpAskPort implements AskPort {
     return this.client.navigate(url, waitForLoad);
   }
 
-  async mainTab(): Promise<AskTarget | null> {
-    return (await this.client.listTabsCategorized()).main;
+  pageAddress(): Promise<string> {
+    return this.client.pageAddress();
   }
 
-  currentUrl(): Promise<string> {
-    return this.runPageScript(readPageAddress);
-  }
-
-  isOnPerplexityTab(): Promise<boolean> {
-    return this.client.isOnPerplexityTab();
-  }
-
-  ensureOnPerplexityTab(): Promise<boolean> {
-    return this.client.ensureOnPerplexityTab();
+  newTab(url: string): Promise<BrowserTarget> {
+    return this.client.newTab(url);
   }
 
   readProseState(): Promise<ProseState> {

@@ -5,14 +5,14 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cdpAskPort, createCdpAskCore } from "../../src/cdp-ask-port.js";
-import { type AskTarget, PageScriptFailed } from "../../src/core/ask.js";
+import { PageScriptFailed } from "../../src/core/ask.js";
 import { sendPrompt } from "../../src/core/ask-send.js";
 import { ModeCore } from "../../src/core/mode.js";
+import type { BrowserTarget } from "../../src/core/perplexity-tab.js";
 import {
   locateSubmitButton,
   pageScriptExpression,
   readAskInput,
-  readPageAddress,
   readProseState,
   selectAskInput,
 } from "../../src/page-scripts.js";
@@ -23,7 +23,7 @@ import {
 } from "./fakes/fake-ask-client.js";
 import { FakeModePage } from "./fakes/fake-mode-page.js";
 
-const MAIN: AskTarget = {
+const MAIN: BrowserTarget = {
   id: "main",
   type: "page",
   url: "https://www.perplexity.ai/search/a-thread",
@@ -66,24 +66,26 @@ describe("cdpAskPort: the connection and the tabs", () => {
     expect(await port.listTargets()).toEqual([MAIN]);
   });
 
-  it("finds the main tab among the client's categorised tabs", async () => {
+  it("reads the connected tab's address from the client, which reads the browser, not the page", async () => {
     const { client, port } = rig();
+    client.address = "https://www.perplexity.ai/sidecar?copilot=true";
 
-    expect(await port.mainTab()).toBeNull();
-    client.mainTab = MAIN;
-    expect(await port.mainTab()).toEqual(MAIN);
+    expect(await port.pageAddress()).toBe(
+      "https://www.perplexity.ai/sidecar?copilot=true",
+    );
+    expect(client.calls).toEqual(["pageAddress"]);
+    expect(client.expressions).toEqual([]);
   });
 
-  it("asks the client whether the tab is on Perplexity, and to move it there", async () => {
+  it("opens a new tab through the client", async () => {
     const { client, port } = rig();
-    client.onPerplexity = false;
 
-    expect(await port.isOnPerplexityTab()).toBe(false);
-    expect(await port.ensureOnPerplexityTab()).toBe(false);
-    expect(client.calls).toEqual([
-      "isOnPerplexityTab",
-      "ensureOnPerplexityTab",
-    ]);
+    expect(await port.newTab("https://www.perplexity.ai/")).toEqual({
+      id: "new-tab",
+      type: "page",
+      url: "https://www.perplexity.ai/",
+    });
+    expect(client.calls).toEqual(["newTab https://www.perplexity.ai/"]);
   });
 });
 
@@ -99,31 +101,15 @@ describe("cdpAskPort: reading the page", () => {
     expect(client.expressions).toEqual([pageScriptExpression(readProseState)]);
   });
 
-  it("reads the tab's address with its page script", async () => {
-    const { client, port } = rig();
-    window.history.pushState({}, "", "/search/a-thread");
-
-    expect(await port.currentUrl()).toBe(
-      `${window.location.origin}/search/a-thread`,
-    );
-    expect(client.expressions).toEqual([pageScriptExpression(readPageAddress)]);
-  });
-
   it("rejects with the page's error, kept apart from its own words, when a page script fails", async () => {
     const { client, port } = rig();
     client.pageFailure = "TypeError: document is gone";
 
     const proseFailure = await port.readProseState().catch((error) => error);
-    const addressFailure = await port.currentUrl().catch((error) => error);
 
     expect(proseFailure).toBeInstanceOf(PageScriptFailed);
     expect(proseFailure).toMatchObject({
       message: "readProseState failed in the page",
-      pageDetail: "TypeError: document is gone",
-    });
-    expect(addressFailure).toBeInstanceOf(PageScriptFailed);
-    expect(addressFailure).toMatchObject({
-      message: "readPageAddress failed in the page",
       pageDetail: "TypeError: document is gone",
     });
   });

@@ -10,7 +10,8 @@
 
 import type { AskPortClient, AskPortComet } from "../../../src/cdp-ask-port.js";
 import type { TrustedKey } from "../../../src/cdp-client.js";
-import type { AskStatus, AskTarget } from "../../../src/core/ask.js";
+import type { AskStatus } from "../../../src/core/ask.js";
+import type { BrowserTarget } from "../../../src/core/perplexity-tab.js";
 import type { PagePoint } from "../../../src/page-scripts.js";
 import type { EvaluateResult } from "../../../src/types.js";
 
@@ -21,10 +22,10 @@ export class FakeAskClient implements AskPortClient {
   public readonly inserted: string[] = [];
   /** Every text an Enter submitted from the focused element. */
   public readonly submitted: string[] = [];
-  public targets: AskTarget[] = [];
-  public mainTab: AskTarget | null = null;
+  public targets: BrowserTarget[] = [];
+  /** The connected tab's address, as the browser reports it. */
+  public address = "https://www.perplexity.ai/";
   public preCheckFails = false;
-  public onPerplexity = true;
   /** When set, every page script fails in the page with this error. */
   public pageFailure: string | undefined;
 
@@ -38,7 +39,7 @@ export class FakeAskClient implements AskPortClient {
     return "Comet started";
   }
 
-  async listTargets(): Promise<AskTarget[]> {
+  async listTargets(): Promise<BrowserTarget[]> {
     this.calls.push("listTargets");
     return [...this.targets];
   }
@@ -56,9 +57,14 @@ export class FakeAskClient implements AskPortClient {
     this.calls.push(`navigate ${url} wait=${waitForLoad}`);
   }
 
-  async listTabsCategorized(): Promise<{ main: AskTarget | null }> {
-    this.calls.push("listTabsCategorized");
-    return { main: this.mainTab };
+  async pageAddress(): Promise<string> {
+    this.calls.push("pageAddress");
+    return this.address;
+  }
+
+  async newTab(url: string): Promise<BrowserTarget> {
+    this.calls.push(`newTab ${url}`);
+    return { id: "new-tab", type: "page", url };
   }
 
   async safeEvaluate(expression: string): Promise<EvaluateResult> {
@@ -93,16 +99,6 @@ export class FakeAskClient implements AskPortClient {
 
   async clickAt(point: PagePoint): Promise<void> {
     this.calls.push(`clickAt ${point.x},${point.y}`);
-  }
-
-  async isOnPerplexityTab(): Promise<boolean> {
-    this.calls.push("isOnPerplexityTab");
-    return this.onPerplexity;
-  }
-
-  async ensureOnPerplexityTab(): Promise<boolean> {
-    this.calls.push("ensureOnPerplexityTab");
-    return this.onPerplexity;
   }
 }
 

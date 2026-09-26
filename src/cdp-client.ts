@@ -6,6 +6,7 @@ import CDP from "chrome-remote-interface";
 import { existsSync } from "fs";
 import { platform } from "os";
 import type { PagePoint } from "./page-scripts.js";
+import { isPerplexityMainPage, PERPLEXITY_ORIGIN } from "./perplexity-pages.js";
 import type {
   CDPTarget,
   CDPVersion,
@@ -223,9 +224,11 @@ export async function clickAtPoint(
   await input.dispatchMouseEvent({ type: "mouseReleased", ...press });
 }
 
-/** The slice of the CDP Page domain that `readTopFrameOrigin` uses. */
+/** The slice of the CDP Page domain that reads the tab's top frame. */
 export interface FrameTreeAPI {
-  getFrameTree(): Promise<{ frameTree: { frame: { securityOrigin: string } } }>;
+  getFrameTree(): Promise<{
+    frameTree: { frame: { url: string; securityOrigin: string } };
+  }>;
 }
 
 /**
@@ -238,8 +241,14 @@ export async function readTopFrameOrigin(page: FrameTreeAPI): Promise<string> {
   return frameTree.frame.securityOrigin;
 }
 
-/** The one origin trusted input is ever sent to. */
-export const PERPLEXITY_ORIGIN = "https://www.perplexity.ai";
+/**
+ * The address of the tab's top frame, as the browser reports it, read
+ * afresh through CDP for the same reasons as its origin.
+ */
+export async function readTopFrameAddress(page: FrameTreeAPI): Promise<string> {
+  const { frameTree } = await page.getFrameTree();
+  return frameTree.frame.url;
+}
 
 /** A key the server presses. */
 export type TrustedKey = "Enter" | "Escape";
@@ -844,12 +853,8 @@ export class CometCDPClient {
 
     return {
       main:
-        targets.find(
-          (t) =>
-            t.type === "page" &&
-            t.url.includes("perplexity.ai") &&
-            !t.url.includes("sidecar"),
-        ) || null,
+        targets.find((t) => t.type === "page" && isPerplexityMainPage(t.url)) ||
+        null,
       sidecar:
         targets.find((t) => t.type === "page" && t.url.includes("sidecar")) ||
         null,
@@ -874,82 +879,6 @@ export class CometCDPClient {
           !t.url.includes("chrome-extension"),
       ),
     };
-  }
-
-  /**
-   * Ensure we're connected to the main Perplexity tab
-   * Used during agentic browsing when Comet may open new tabs
-   */
-  async ensureOnPerplexityTab(): Promise<boolean> {
-    try {
-      // First check if current connection is valid and on Perplexity.
-      // Reject the sidecar URL — same reason as in reconnect(): the
-      // sidecar matches `perplexity.ai` but is a different tab.
-      if (this.client) {
-        try {
-          const urlResult = await this.client.Runtime.evaluate({
-            expression: "window.location.href",
-            timeout: 2000,
-          });
-          const currentUrl = urlResult.result.value as string;
-          if (
-            currentUrl?.includes("perplexity.ai") &&
-            !currentUrl.includes("sidecar")
-          ) {
-            return true; // Already on Perplexity main tab
-          }
-        } catch {
-          // Current connection is stale, continue to reconnect
-        }
-      }
-
-      // Find and connect to Perplexity main tab
-      const tabs = await this.listTabsCategorized();
-      if (tabs.main) {
-        await this.connect(tabs.main.id);
-        this.invalidateHealthCache();
-        return true;
-      }
-
-      // Fallback: find any Perplexity tab that isn't the sidecar.
-      const targets = await this.listTargets();
-      const perplexityTab = targets.find(
-        (t) =>
-          t.type === "page" &&
-          t.url.includes("perplexity.ai") &&
-          !t.url.includes("sidecar"),
-      );
-
-      if (perplexityTab) {
-        await this.connect(perplexityTab.id);
-        this.invalidateHealthCache();
-        return true;
-      }
-
-      return false;
-    } catch {
-      return false;
-    }
-  }
-
-  /**
-   * Check if we're currently connected to the Perplexity tab
-   */
-  async isOnPerplexityTab(): Promise<boolean> {
-    if (!this.client) return false;
-    try {
-      const result = await this.client.Runtime.evaluate({
-        expression: "window.location.href",
-        timeout: 2000,
-      });
-      const url = result.result.value as string;
-      // Sidecar URLs match `perplexity.ai` but are a different surface; treat
-      // them as "not the main tab" so callers don't dispatch sendPrompt /
-      // stopAgent there.
-      return !!url && url.includes("perplexity.ai") && !url.includes("sidecar");
-    } catch {
-      return false;
-    }
   }
 
   // ============ TAB REGISTRY METHODS ============
@@ -1907,10 +1836,10 @@ export class CometCDPClient {
     return inputOnPerplexity(this.client!, action);
   }
 
-  /** The security origin of the connected tab's top frame, read now. */
-  async pageOrigin(): Promise<string> {
+  /** The address of the connected tab's top frame, read now through CDP. */
+  async pageAddress(): Promise<string> {
     this.ensureConnected();
-    return readTopFrameOrigin(this.client!.Page);
+    return readTopFrameAddress(this.client!.Page);
   }
 
   /**

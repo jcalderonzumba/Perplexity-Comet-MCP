@@ -7,22 +7,26 @@ import {
   AskCore,
   type AskOutcome,
   PageScriptFailed,
-  PERPLEXITY_HOME,
 } from "../../../src/core/ask.js";
 import { ASK_DEFAULT_TIMEOUT_MS } from "../../../src/core/ask-input.js";
 import { SEND_TIMING } from "../../../src/core/ask-send.js";
 import { TASK_STALE_AFTER_MS } from "../../../src/core/ask-task.js";
 import { ModeCore } from "../../../src/core/mode.js";
 import type { PageArgument } from "../../../src/page-scripts.js";
+import { PERPLEXITY_HOME } from "../../../src/perplexity-pages.js";
 import {
   FakeAskPort,
-  MAIN_TAB,
   type PageReading,
   reading,
-  SIDECAR_TAB,
-  USER_TAB,
 } from "../fakes/fake-ask-port.js";
 import { FakeModePage } from "../fakes/fake-mode-page.js";
+import {
+  LOOKALIKE_TAB,
+  MAIN_TAB,
+  SIDECAR_NAMED_THREAD,
+  SIDECAR_TAB,
+  USER_TAB,
+} from "../fakes/fake-tab-port.js";
 
 const COMET_PORT = 9333;
 const quote = (pageText: string) => `<<${pageText}>>`;
@@ -295,6 +299,14 @@ describe("AskCore.ask: typing and submitting", () => {
 });
 
 describe("AskCore.ask: the tab it asks in", () => {
+  /** A rig connected to the first of `targets`, all of them open. */
+  function openOn(...targets: (typeof MAIN_TAB)[]): Rig {
+    const built = answering(STREAMED_THEN_COMPLETED);
+    built.port.targets = [...targets];
+    built.port.url = targets[0].url;
+    return built;
+  }
+
   it("opens Perplexity's home page for a new chat", async () => {
     const { port, core } = answering(STREAMED_THEN_COMPLETED);
 
@@ -304,43 +316,115 @@ describe("AskCore.ask: the tab it asks in", () => {
     expect(answerOf(outcome)).toBe(LONG_ANSWER);
   });
 
-  it("asks a follow-up in the main Perplexity tab, without navigating", async () => {
-    const { port, core } = answering(STREAMED_THEN_COMPLETED);
-    port.targets = [SIDECAR_TAB, MAIN_TAB];
+  it("asks a follow-up in the main Perplexity tab it is connected to, without navigating", async () => {
+    const { port, core } = openOn(MAIN_TAB, SIDECAR_TAB);
+
+    const outcome = await core.ask({ prompt: "q" });
+
+    expect(port.connectedTo).toEqual([]);
+    expect(port.navigations).toEqual([]);
+    expect(port.typedIn).toEqual([MAIN_TAB.url]);
+    expect(answerOf(outcome)).toBe(LONG_ANSWER);
+  });
+
+  it("moves a follow-up from the sidecar to the main tab, and types there", async () => {
+    const { port, core } = openOn(SIDECAR_TAB, MAIN_TAB);
 
     const outcome = await core.ask({ prompt: "q" });
 
     expect(port.connectedTo).toEqual([MAIN_TAB.id]);
     expect(port.navigations).toEqual([]);
+    expect(port.typedIn).toEqual([MAIN_TAB.url]);
     expect(answerOf(outcome)).toBe(LONG_ANSWER);
   });
 
-  it("moves a follow-up to Perplexity when the tab is elsewhere", async () => {
-    const { port, core } = answering(STREAMED_THEN_COMPLETED);
-    port.targets = [USER_TAB];
-    port.url = USER_TAB.url;
+  it("moves a new chat from the sidecar to the main tab before opening the home page there", async () => {
+    const { port, core } = openOn(SIDECAR_TAB, MAIN_TAB);
 
-    const outcome = await core.ask({ prompt: "q" });
+    await core.ask({ prompt: "q", newChat: true });
 
+    expect(port.connectedTo).toEqual([MAIN_TAB.id]);
+    expect(port.calls.indexOf("connect")).toBeLessThan(
+      port.calls.indexOf("navigate"),
+    );
     expect(port.navigations).toEqual([PERPLEXITY_HOME]);
-    expect(answerOf(outcome)).toBe(LONG_ANSWER);
+    expect(port.typedIn).toEqual([PERPLEXITY_HOME]);
   });
 
-  it("connects to a Perplexity tab when a new chat's navigation fails", async () => {
-    const { port, core } = answering(STREAMED_THEN_COMPLETED);
+  it.each([{ newChat: false }, { newChat: true }])(
+    "opens a new Perplexity tab, navigating neither the sidecar nor the user's page, when only they are open (newChat $newChat)",
+    async ({ newChat }) => {
+      const { port, core } = openOn(SIDECAR_TAB, USER_TAB);
+
+      const outcome = await core.ask({ prompt: "q", newChat });
+
+      expect(port.openedAt).toEqual([PERPLEXITY_HOME]);
+      expect(port.connectedTo).toEqual(["opened-1"]);
+      expect(port.navigations).toEqual([]);
+      expect(port.typedIn).toEqual([PERPLEXITY_HOME]);
+      expect(core.tab.perplexity.opened("opened-1")).toBe(true);
+      expect(answerOf(outcome)).toBe(LONG_ANSWER);
+    },
+  );
+
+  it("does not take a user's page that names Perplexity in its address for Perplexity", async () => {
+    const { port, core } = openOn(LOOKALIKE_TAB);
+
+    await core.ask({ prompt: "q" });
+
+    expect(port.openedAt).toEqual([PERPLEXITY_HOME]);
+    expect(port.navigations).toEqual([]);
+    expect(port.typedIn).toEqual([PERPLEXITY_HOME]);
+  });
+
+  it("asks in a thread whose address names a sidecar, rather than in the sidecar", async () => {
+    const { port, core } = openOn(SIDECAR_TAB, SIDECAR_NAMED_THREAD);
+
+    await core.ask({ prompt: "q" });
+
+    expect(port.connectedTo).toEqual([SIDECAR_NAMED_THREAD.id]);
+    expect(port.typedIn).toEqual([SIDECAR_NAMED_THREAD.url]);
+  });
+
+  it("reuses the tab it opened for the next ask", async () => {
+    const { port, core } = openOn(USER_TAB);
+
+    await core.ask({ prompt: "q" });
+    port.after = STREAMED_THEN_COMPLETED;
+    await core.ask({ prompt: "again" });
+
+    expect(port.openedAt).toHaveLength(1);
+  });
+
+  it("reconnects to the main tab when a new chat's navigation fails, navigating no other tab", async () => {
+    const { port, core } = openOn(MAIN_TAB, USER_TAB);
     port.navigationFails = true;
-    port.targets = [USER_TAB, MAIN_TAB];
 
     const outcome = await core.ask({ prompt: "q", newChat: true });
+
+    expect(port.connectedTo).toEqual([MAIN_TAB.id]);
+    expect(port.navigations).toEqual([]);
+    expect(port.typedIn).toEqual([MAIN_TAB.url]);
+    expect(answerOf(outcome)).toBe(LONG_ANSWER);
+  });
+
+  it("keeps reading the answer in the main tab when the connection is found elsewhere", async () => {
+    const { port, core } = openOn(MAIN_TAB, SIDECAR_TAB);
+    const submit = port.inputBar.onSubmit;
+    port.inputBar.onSubmit = (prompt) => {
+      submit?.(prompt);
+      port.url = SIDECAR_TAB.url;
+    };
+
+    const outcome = await core.ask({ prompt: "q" });
 
     expect(port.connectedTo).toEqual([MAIN_TAB.id]);
     expect(answerOf(outcome)).toBe(LONG_ANSWER);
   });
 
   it("recovers a lost connection by starting Comet on the configured port and connecting to the main tab", async () => {
-    const { port, core } = answering(STREAMED_THEN_COMPLETED);
+    const { port, core } = openOn(USER_TAB, SIDECAR_TAB, MAIN_TAB);
     port.preCheckFails = true;
-    port.targets = [USER_TAB, SIDECAR_TAB, MAIN_TAB];
 
     const outcome = await core.ask({ prompt: "q" });
 
@@ -753,6 +837,18 @@ describe("AskCore.poll", () => {
     expect(core.task.isActive).toBe(true);
   });
 
+  it("reads the task's page in the main tab, moving there from the sidecar", async () => {
+    const { port, core } = await timedOut();
+    port.targets = [SIDECAR_TAB, MAIN_TAB];
+    port.url = SIDECAR_TAB.url;
+
+    expect((await core.poll()).kind).toBe("working");
+    expect(port.connectedTo).toEqual([MAIN_TAB.id]);
+    expect(port.calls.lastIndexOf("connect")).toBeLessThan(
+      port.calls.lastIndexOf("readProseState"),
+    );
+  });
+
   it("reports a page script's failure, its page text apart, and keeps the task active", async () => {
     const { port, core } = await timedOut();
     port.after.push(
@@ -895,6 +991,8 @@ describe("src/core/ask.ts and its siblings", () => {
     "ask-send.ts",
     "ask-task.ts",
     "ask-reply.ts",
+    "ask-tab.ts",
+    "perplexity-tab.ts",
     "page-script-failed.ts",
   ];
 
@@ -906,7 +1004,7 @@ describe("src/core/ask.ts and its siblings", () => {
 
       for (const imported of imports) {
         expect(imported).toMatch(
-          /^(\.\/(ask|ask-input|ask-send|ask-task|ask-reply|ask-mode|mode|mode-tool|page-script-failed)\.js|\.\.\/page-scripts\.js|\.\.\/modes\.js|node:crypto)$/,
+          /^(\.\/(ask|ask-input|ask-send|ask-task|ask-reply|ask-mode|ask-tab|perplexity-tab|mode|mode-tool|page-script-failed)\.js|\.\.\/(page-scripts|modes|perplexity-pages)\.js|node:crypto)$/,
         );
       }
     },

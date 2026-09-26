@@ -1,29 +1,31 @@
 // The mode core's page, over the CDP client: the one `ModePage` both
-// adapters build when they start, the navigation to Perplexity the
+// adapters build when they start, the move to Perplexity's main page the
 // `comet_mode` tool makes before a switch, and the tool built from them.
+//
+// The move is the ask's own tab choice, `PerplexityTab`: the connection goes
+// to Perplexity's main page as its one rule decides, never to the sidecar or
+// a user's page, and a new tab is opened on Perplexity's home page when no
+// main page is open. No tab is navigated.
 //
 // Clicks and Escape are trusted input, clicks at points a page script
 // returns. The client sends them only while the browser reports the tab's
 // top frame on Perplexity's own origin, so a page elsewhere, imitating the
 // mode button or an open menu, never steers them.
 
-import { PERPLEXITY_ORIGIN, type TrustedKey } from "./cdp-client.js";
+import type { TrustedKey } from "./cdp-client.js";
 import { ModeCore, type ModePage } from "./core/mode.js";
 import type { ModeTool } from "./core/mode-tool.js";
+import {
+  type BrowserTarget,
+  PerplexityTab,
+  type TabPort,
+} from "./core/perplexity-tab.js";
 import {
   type PageArgument,
   type PagePoint,
   pageScriptExpression,
 } from "./page-scripts.js";
 import type { EvaluateResult } from "./types.js";
-
-const PERPLEXITY_HOME = `${PERPLEXITY_ORIGIN}/`;
-
-/** The part of the CDP client that reads the tab's origin from the browser. */
-export interface OriginReader {
-  /** The top frame's security origin, as the browser reports it now. */
-  pageOrigin(): Promise<string>;
-}
 
 /**
  * The part of the CDP client the mode page drives. Its clicks and key
@@ -35,9 +37,14 @@ export interface ModePageClient {
   pressKey(key: TrustedKey): Promise<void>;
 }
 
-/** The part of the CDP client that knows and changes the tab's address. */
-export interface PerplexityNavigator extends OriginReader {
-  navigate(url: string, waitForLoad?: boolean): Promise<unknown>;
+/** The part of the CDP client the move to Perplexity's main page drives. */
+export interface ModeTabClient {
+  listTargets(): Promise<readonly BrowserTarget[]>;
+  connect(targetId: string): Promise<unknown>;
+  /** The connected tab's top-frame address, read through CDP. */
+  pageAddress(): Promise<string>;
+  /** Opens a new tab on `url`, without connecting to it. */
+  newTab(url: string): Promise<BrowserTarget>;
 }
 
 class CdpModePage implements ModePage {
@@ -76,12 +83,15 @@ export function cdpModePage(client: ModePageClient): ModePage {
   return new CdpModePage(client);
 }
 
-/** Opens Perplexity's home page, waiting for it to load, unless the tab is there. */
-export async function openPerplexityIfElsewhere(
-  client: PerplexityNavigator,
-): Promise<void> {
-  if ((await client.pageOrigin()) === PERPLEXITY_ORIGIN) return;
-  await client.navigate(PERPLEXITY_HOME, true);
+/** The tab choice's port over `client`. */
+function cdpTabPort(client: ModeTabClient): TabPort {
+  return {
+    listTargets: () => client.listTargets(),
+    connect: (targetId) => client.connect(targetId),
+    pageAddress: () => client.pageAddress(),
+    newTab: (url) => client.newTab(url),
+    wait: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+  };
 }
 
 function errorDetail(
@@ -95,12 +105,15 @@ function errorDetail(
  * adapter builds one when it starts, passing its UNTRUSTED wrapper.
  */
 export function createCdpModeTool(
-  client: ModePageClient & PerplexityNavigator,
+  client: ModePageClient & ModeTabClient,
   quotePage: (pageText: string) => string,
 ): ModeTool {
+  const tab = new PerplexityTab(cdpTabPort(client));
   return {
     core: new ModeCore(cdpModePage(client)),
-    openPerplexity: () => openPerplexityIfElsewhere(client),
+    openPerplexity: async () => {
+      await tab.bringToMainPage();
+    },
     quotePage,
   };
 }

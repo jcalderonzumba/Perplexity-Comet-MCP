@@ -2,7 +2,8 @@
 // each adapter satisfies with its CDP client and Comet module.
 //
 // An ask validates its arguments before anything reaches the browser,
-// shapes the prompt, brings the connection to a Perplexity tab, puts back
+// shapes the prompt, brings the connection to Perplexity's main page (by
+// `ask-tab.ts`, never the sidecar or a user's page), puts back
 // the mode `comet_mode` last set, sends the prompt (typed and submitted
 // with trusted input by `ask-send.ts`), and waits for an answer
 // that is new: one that differs from the response on the page before the
@@ -25,20 +26,12 @@ import {
 } from "./ask-input.js";
 import { type ModeNotice, reapplyModeBeforeAsk } from "./ask-mode.js";
 import { PromptNotSent, type PromptPort, sendPrompt } from "./ask-send.js";
+import { AskTab, type AskTabPort } from "./ask-tab.js";
 import { AskTaskState } from "./ask-task.js";
 import type { ModeTool } from "./mode-tool.js";
 import { PageScriptFailed } from "./page-script-failed.js";
 
 export { PageScriptFailed };
-
-export const PERPLEXITY_HOME = "https://www.perplexity.ai/";
-
-/** A browser target, as the CDP client lists it. */
-export interface AskTarget {
-  readonly id: string;
-  readonly type: string;
-  readonly url: string;
-}
 
 /** What the page shows about the answer, as the Comet module reads it. */
 export interface AskStatus {
@@ -54,26 +47,11 @@ export interface AskStatus {
 }
 
 /**
- * What the ask core needs from the browser, the send step's needs among
- * them; each adapter supplies one. A read through a page script rejects
- * with `PageScriptFailed` when the script throws in the page.
+ * What the ask core needs from the browser, the send step's and the tab's
+ * needs among them; each adapter supplies one. A read through a page script
+ * rejects with `PageScriptFailed` when the script throws in the page.
  */
-export interface AskPort extends PromptPort {
-  /** Checks the connection is alive; throws when it is not. */
-  preOperationCheck(): Promise<unknown>;
-  /** Starts Comet with its debug port on `port`, or finds it running. */
-  startComet(port: number): Promise<unknown>;
-  listTargets(): Promise<readonly AskTarget[]>;
-  connect(targetId: string): Promise<unknown>;
-  ensureConnection(): Promise<unknown>;
-  navigate(url: string, waitForLoad: boolean): Promise<unknown>;
-  /** The main Perplexity tab, not the sidecar, when one is open. */
-  mainTab(): Promise<AskTarget | null>;
-  /** The address of the connected tab. */
-  currentUrl(): Promise<string>;
-  isOnPerplexityTab(): Promise<boolean>;
-  /** Moves the connection back to a Perplexity tab; false when it cannot. */
-  ensureOnPerplexityTab(): Promise<boolean>;
+export interface AskPort extends PromptPort, AskTabPort {
   readStatus(): Promise<AskStatus>;
   /** Forgets the responses seen, before a new prompt is sent. */
   resetStabilityTracking(): void;
@@ -87,12 +65,6 @@ export const ASK_TIMING = {
   pollMs: 1500,
   /** A long answer unchanged for this long is complete. */
   idleMs: 6000,
-  /** After opening Perplexity's home page for a new chat. */
-  newChatSettleMs: 2000,
-  /** After falling back to another tab when that navigation failed. */
-  fallbackSettleMs: 1500,
-  /** After moving a follow-up's tab to Perplexity. */
-  homeSettleMs: 2000,
 } as const;
 
 /** Failed reads in a row after which the connection itself is re-checked. */
@@ -206,6 +178,8 @@ interface PageBefore {
  */
 export class AskCore {
   readonly task: AskTaskState;
+  /** The connection and the tab the ask runs in. */
+  readonly tab: AskTab;
   private readonly port: AskPort;
   /** The completion rules of the task's answer, once its prompt is sent. */
   private watch: AnswerWatch | null = null;
@@ -213,6 +187,7 @@ export class AskCore {
   constructor(private readonly options: AskCoreOptions) {
     this.port = options.port;
     this.task = new AskTaskState(() => options.port.now());
+    this.tab = new AskTab(options.port, options.cometPort);
   }
 
   async ask(args: Record<string, unknown> | undefined): Promise<AskOutcome> {
@@ -234,10 +209,10 @@ export class AskCore {
   ): Promise<AskOutcome> {
     let notice = NO_NOTICE;
     try {
-      if (!(await this.connectOrRecover())) {
+      if (!(await this.tab.connectOrRecover())) {
         return { kind: "failed", message: CONNECTION_FAILED, notice };
       }
-      await (request.newChat ? this.openNewChat() : this.stayOnPerplexity());
+      await this.tab.bringToAskPage(request.newChat);
       notice = await reapplyModeBeforeAsk(this.options.mode);
       return await this.sendAndWait(
         shapePrompt(prompt),
@@ -266,7 +241,7 @@ export class AskCore {
         secondsAgo: this.secondsSince(task.lastResponseTime),
       };
     }
-    await this.port.ensureOnPerplexityTab();
+    await this.tab.returnToMainPage();
     if (task.isActive && this.watch) return this.followOrReport(this.watch);
     return this.pageStatusOnly();
   }
@@ -324,57 +299,6 @@ export class AskCore {
     return then === null ? 0 : Math.round((this.port.now() - then) / 1000);
   }
 
-  /** True when connected, after starting Comet again if the check failed. */
-  private async connectOrRecover(): Promise<boolean> {
-    try {
-      await this.port.preOperationCheck();
-      return true;
-    } catch {
-      // The connection is gone: start Comet, or find it, and reconnect.
-    }
-    try {
-      await this.port.startComet(this.options.cometPort);
-      const page = recoveryPage(await this.port.listTargets());
-      if (page) await this.port.connect(page.id);
-      return true;
-    } catch {
-      return false;
-    }
-  }
-
-  private async openNewChat(): Promise<void> {
-    await this.port.ensureConnection();
-    try {
-      await this.port.navigate(PERPLEXITY_HOME, true);
-      await this.port.wait(ASK_TIMING.newChatSettleMs);
-    } catch {
-      await this.fallBackToAnotherTab();
-    }
-  }
-
-  /** After a failed navigation: a Perplexity tab, or any page sent there. */
-  private async fallBackToAnotherTab(): Promise<void> {
-    const pages = (await this.port.listTargets()).filter(isPage);
-    const perplexityTab = pages.find((page) => page.url.includes("perplexity"));
-    if (perplexityTab) {
-      await this.port.connect(perplexityTab.id);
-    } else if (pages[0]) {
-      await this.port.connect(pages[0].id);
-      await this.port.navigate(PERPLEXITY_HOME, true);
-    }
-    await this.port.wait(ASK_TIMING.fallbackSettleMs);
-  }
-
-  /** A follow-up asks in the main Perplexity tab, or sends the tab there. */
-  private async stayOnPerplexity(): Promise<void> {
-    const main = await this.port.mainTab();
-    if (main) await this.port.connect(main.id);
-    const url = await this.port.currentUrl();
-    if (url?.includes("perplexity.ai")) return;
-    await this.port.navigate(PERPLEXITY_HOME, true);
-    await this.port.wait(ASK_TIMING.homeSettleMs);
-  }
-
   private async sendAndWait(
     prompt: string,
     timeoutMs: number,
@@ -407,7 +331,7 @@ export class AskCore {
     while (this.port.now() - startedAt < timeoutMs) {
       await this.port.wait(ASK_TIMING.pollMs);
       try {
-        if (!(await this.onPerplexity())) {
+        if (!(await this.tab.returnToMainPage())) {
           errors++;
           continue;
         }
@@ -434,13 +358,6 @@ export class AskCore {
     };
   }
 
-  private async onPerplexity(): Promise<boolean> {
-    return (
-      (await this.port.isOnPerplexityTab()) ||
-      (await this.port.ensureOnPerplexityTab())
-    );
-  }
-
   /**
    * After a failed read: the errors in a row that remain once the tab is
    * back on Perplexity, or undefined when the connection cannot be kept.
@@ -449,14 +366,14 @@ export class AskCore {
     errors: number,
   ): Promise<number | undefined> {
     try {
-      if (await this.port.ensureOnPerplexityTab()) return errors - 1;
+      if (await this.tab.returnToMainPage()) return errors - 1;
     } catch {
       // Fall through to the connection check.
     }
     if (errors < MAX_CONSECUTIVE_ERRORS) return errors;
     try {
       await this.port.ensureConnection();
-      await this.port.ensureOnPerplexityTab();
+      await this.tab.returnToMainPage();
       return 0;
     } catch {
       return undefined;
@@ -555,23 +472,6 @@ function pollProgress(
     steps: [...new Set([...taskSteps, ...status.steps])],
     browsingUrl: status.agentBrowsingUrl,
   };
-}
-
-/** The tab to reconnect to: Perplexity's main tab, its sidecar, or any page. */
-function recoveryPage(targets: readonly AskTarget[]): AskTarget | undefined {
-  const pages = targets.filter(isPage);
-  return (
-    pages.find(
-      (page) =>
-        page.url.includes("perplexity.ai") && !page.url.includes("sidecar"),
-    ) ??
-    pages.find((page) => page.url.includes("perplexity.ai")) ??
-    pages[0]
-  );
-}
-
-function isPage(target: AskTarget): boolean {
-  return target.type === "page";
 }
 
 /** A failed ask, with the page's part apart when a page script threw. */

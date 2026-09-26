@@ -4,13 +4,18 @@ import { readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import {
-  cdpModePage,
-  createCdpModeTool,
-  openPerplexityIfElsewhere,
-} from "../../src/cdp-mode-page.js";
+import { cdpModePage, createCdpModeTool } from "../../src/cdp-mode-page.js";
+import type { BrowserTarget } from "../../src/core/perplexity-tab.js";
 import { pageScriptExpression } from "../../src/page-scripts.js";
+import { PERPLEXITY_HOME } from "../../src/perplexity-pages.js";
 import { FakePageClient } from "./fakes/fake-page-client.js";
+import {
+  LOOKALIKE_TAB,
+  MAIN_TAB,
+  SIDECAR_NAMED_THREAD,
+  SIDECAR_TAB,
+  USER_TAB,
+} from "./fakes/fake-tab-port.js";
 
 afterEach(() => {
   vi.useRealTimers();
@@ -70,13 +75,13 @@ describe("cdpModePage", () => {
     expect(client.clicks).toEqual([]);
   });
 
-  it("leaves the origin check to the client, reading no origin itself", async () => {
+  it("leaves the origin check to the client, reading no address itself", async () => {
     const client = new FakePageClient();
 
     await cdpModePage(client).clickAt({ x: 1, y: 2 });
     await cdpModePage(client).pressEscape();
 
-    expect(client.originReads).toBe(0);
+    expect(client.calls).toEqual([]);
   });
 
   it("presses Escape with the client's key press", async () => {
@@ -115,60 +120,95 @@ describe("cdpModePage", () => {
   });
 });
 
-describe("openPerplexityIfElsewhere", () => {
-  it("navigates to Perplexity, waiting for the load, when the tab is elsewhere", async () => {
+describe("createCdpModeTool: bringing the tab to Perplexity before a switch", () => {
+  const quote = (pageText: string) => `<<${pageText}>>`;
+
+  /** The tool's move, with the opened tab's wait run on fake timers. */
+  async function openPerplexity(client: FakePageClient): Promise<void> {
+    await openPerplexityWith(createCdpModeTool(client, quote));
+  }
+
+  async function openPerplexityWith(
+    tool: ReturnType<typeof createCdpModeTool>,
+  ): Promise<void> {
+    vi.useFakeTimers();
+    const moving = tool.openPerplexity();
+    await vi.runAllTimersAsync();
+    await moving;
+  }
+
+  /** A client connected to the first of `targets`, all of them open. */
+  function openOn(...targets: BrowserTarget[]): FakePageClient {
     const client = new FakePageClient();
-    client.origin = "https://example.com";
+    client.targets = [...targets];
+    client.url = targets[0].url;
+    return client;
+  }
 
-    await openPerplexityIfElsewhere(client);
+  it("stays on Perplexity's main page, connecting and opening nothing", async () => {
+    const client = openOn(MAIN_TAB, SIDECAR_TAB);
 
-    expect(client.navigations).toEqual([
-      "https://www.perplexity.ai/ wait=true",
-    ]);
+    await openPerplexity(client);
+
+    expect(client.connectedTo).toEqual([]);
+    expect(client.openedAt).toEqual([]);
   });
 
-  it("navigates when the tab has no origin yet", async () => {
-    const client = new FakePageClient();
-    client.origin = "null";
+  it("does not take the sidecar for Perplexity: it moves to the main tab", async () => {
+    const client = openOn(SIDECAR_TAB, MAIN_TAB);
 
-    await openPerplexityIfElsewhere(client);
+    await openPerplexity(client);
 
-    expect(client.navigations).toHaveLength(1);
+    expect(client.connectedTo).toEqual([MAIN_TAB.id]);
+    expect(client.openedAt).toEqual([]);
+  });
+
+  it("opens Perplexity's home page in a new tab when only the sidecar and a user's page are open", async () => {
+    const client = openOn(SIDECAR_TAB, USER_TAB);
+
+    await openPerplexity(client);
+
+    expect(client.openedAt).toEqual([PERPLEXITY_HOME]);
+    expect(client.connectedTo).toEqual(["opened-1"]);
   });
 
   it.each([
-    "https://www.perplexity.ai.example",
-    "https://perplexity.ai.evil.test",
-    "http://www.perplexity.ai",
+    "https://www.perplexity.ai.example/",
+    "https://perplexity.ai.evil.test/search/x",
+    "http://www.perplexity.ai/",
+    LOOKALIKE_TAB.url,
   ])(
-    "navigates from %s, whose origin only resembles Perplexity's",
-    async (origin) => {
-      const client = new FakePageClient();
-      client.origin = origin;
+    "does not take %s, which only resembles Perplexity, for it",
+    async (url) => {
+      const client = openOn({ id: "elsewhere", type: "page", url });
 
-      await openPerplexityIfElsewhere(client);
+      await openPerplexity(client);
 
-      expect(client.navigations).toHaveLength(1);
+      expect(client.openedAt).toEqual([PERPLEXITY_HOME]);
     },
   );
 
-  it("reads the tab's origin afresh rather than trusting the last known address", async () => {
-    const client = new FakePageClient();
-    client.currentState = { currentUrl: "https://www.perplexity.ai/" };
-    client.origin = "https://example.com";
+  it("stays on a thread whose address names a sidecar", async () => {
+    const client = openOn(SIDECAR_NAMED_THREAD, SIDECAR_TAB);
 
-    await openPerplexityIfElsewhere(client);
+    await openPerplexity(client);
 
-    expect(client.navigations).toHaveLength(1);
+    expect(client.connectedTo).toEqual([]);
+    expect(client.openedAt).toEqual([]);
   });
 
-  it("stays when the tab is on Perplexity already", async () => {
-    const client = new FakePageClient();
-    client.origin = "https://www.perplexity.ai";
+  it("reads the tab's address afresh through the client on every switch", async () => {
+    const client = openOn(MAIN_TAB, USER_TAB);
+    const tool = createCdpModeTool(client, quote);
 
-    await openPerplexityIfElsewhere(client);
+    await openPerplexityWith(tool);
+    client.url = USER_TAB.url;
+    await openPerplexityWith(tool);
 
-    expect(client.navigations).toEqual([]);
+    expect(client.calls.filter((call) => call === "pageAddress")).toHaveLength(
+      2,
+    );
+    expect(client.connectedTo).toEqual([MAIN_TAB.id]);
   });
 });
 
@@ -190,17 +230,6 @@ describe("createCdpModeTool", () => {
 
     expect(reading).toEqual({ kind: "known", mode: "search" });
     expect(client.expressions).not.toEqual([]);
-  });
-
-  it("opens Perplexity through the client", async () => {
-    const client = new FakePageClient();
-    client.origin = "https://example.com";
-
-    await createCdpModeTool(client, quote).openPerplexity();
-
-    expect(client.navigations).toEqual([
-      "https://www.perplexity.ai/ wait=true",
-    ]);
   });
 
   it("fails a switch without a click when the client refuses the click", async () => {

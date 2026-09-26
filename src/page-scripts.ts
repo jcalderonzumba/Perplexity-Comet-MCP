@@ -441,11 +441,6 @@ export function locateModeMenuItem(label: string): PagePoint | null {
   return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
 }
 
-/** The address of the page, as the page itself reports it. */
-export function readPageAddress(): string {
-  return window.location.href;
-}
-
 // The input bar: as read from the live page on 2026-09-26, Perplexity's
 // input bar is a Lexical editor, a contenteditable `div#ask-input` with
 // role "textbox", on the home page and in a thread alike; a textarea on

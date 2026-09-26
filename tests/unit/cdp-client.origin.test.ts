@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { CometCDPClient, readTopFrameOrigin } from "../../src/cdp-client.js";
+import { readTopFrameOrigin } from "../../src/cdp-client.js";
 
 /** A fake of the CDP Page slice `readTopFrameOrigin` uses. */
 function pageWithTopFrame(frame: { url: string; securityOrigin: string }) {
@@ -30,15 +30,5 @@ describe("readTopFrameOrigin", () => {
     });
 
     expect(await readTopFrameOrigin(page)).toBe("https://example.com");
-  });
-});
-
-describe("CometCDPClient.pageOrigin", () => {
-  it("fails with the not-connected error before any connection exists", async () => {
-    const client = new CometCDPClient();
-
-    await expect(client.pageOrigin()).rejects.toThrow(
-      "Not connected to Comet. Call connect() first.",
-    );
   });
 });
