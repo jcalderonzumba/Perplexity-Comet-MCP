@@ -15,6 +15,7 @@ All notable changes to this project will be documented in this file.
 - **`/review-phase` and `phase-reviewer`** - a Claude Code skill that reviews a finished phase with a fresh-context, read-only reviewer, which alone approves the commit for the push and PR gates. It has each round's findings fixed by a fresh builder on a branch `/run-phase` built, runs the preflight, and opens the pull request after asking the owner once
 - **`npm run check` and `npm run preflight`** - the local per-commit and per-PR gates; preflight runs the live no-pro battery against the local Comet and stamps the commit
 - **Biome** - lint and format for the whole codebase
+- **`npm run bridge:update`** - points a user-scope Claude Code `comet-bridge` server at this repository's build at a commit, by default the tip of `main` on GitHub, or the full sha given after `--`. It builds the commit with npx and asks it for its tools before touching the configuration, replaces the entry with `claude mcp` only when every tool answers, and puts the old entry back if the add fails. It keeps the entry's environment, with `COMET_PORT` from the environment when set there, and does nothing when the entry already runs that commit on that port
 
 ### Changed
 

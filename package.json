@@ -22,6 +22,7 @@
     "test:watch": "vitest",
     "test:live": "node tests/run-no-pro.mjs",
     "test:live:pro": "node tests/run-all.mjs",
+    "bridge:update": "node scripts/update-bridge.mjs",
     "lint": "biome lint .",
     "format": "biome format --write ."
   },
