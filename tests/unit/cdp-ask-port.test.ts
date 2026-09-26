@@ -67,26 +67,11 @@ describe("cdpAskPort: the connection and the tabs", () => {
     expect(await port.listTargets()).toEqual([MAIN]);
   });
 
-  it("reads the connected tab's address from the client, which reads the browser, not the page", async () => {
-    const { client, port } = rig();
-    client.address = "https://www.perplexity.ai/sidecar?copilot=true";
+  it("neither reads nor opens tabs itself: the shared tab choice does that", () => {
+    const { port } = rig();
 
-    expect(await port.pageAddress()).toBe(
-      "https://www.perplexity.ai/sidecar?copilot=true",
-    );
-    expect(client.calls).toEqual(["pageAddress"]);
-    expect(client.expressions).toEqual([]);
-  });
-
-  it("opens a new tab through the client", async () => {
-    const { client, port } = rig();
-
-    expect(await port.newTab("https://www.perplexity.ai/")).toEqual({
-      id: "new-tab",
-      type: "page",
-      url: "https://www.perplexity.ai/",
-    });
-    expect(client.calls).toEqual(["newTab https://www.perplexity.ai/"]);
+    expect("pageAddress" in port).toBe(false);
+    expect("newTab" in port).toBe(false);
   });
 });
 

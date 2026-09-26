@@ -3,10 +3,11 @@
 //
 // Each method is one call to the client or the Comet module. The page is
 // read only through the tested functions of `page-scripts.ts`, through the
-// client's evaluate that reconnects when the connection drops; the tab's
-// address is read from the browser, never from the page. The prompt
+// client's evaluate that reconnects when the connection drops. The prompt
 // reaches the page only as the client's trusted text, which, like its keys
-// and clicks, the client sends only to a tab on Perplexity's origin.
+// and clicks, the client sends only to a tab on Perplexity's origin. Tabs
+// are read and opened by the shared tab choice, `createCdpPerplexityTab`,
+// never through this port.
 
 import type { TrustedKey } from "./cdp-client.js";
 import {
@@ -36,10 +37,6 @@ export interface AskPortClient {
   connect(targetId: string): Promise<unknown>;
   ensureConnection(): Promise<unknown>;
   navigate(url: string, waitForLoad?: boolean): Promise<unknown>;
-  /** The connected tab's top-frame address, read through CDP. */
-  pageAddress(): Promise<string>;
-  /** Opens a new tab on `url`, without connecting to it. */
-  newTab(url: string): Promise<BrowserTarget>;
   /** Evaluates in the page, reconnecting when the connection has dropped. */
   safeEvaluate(expression: string): Promise<EvaluateResult>;
   /** Trusted text at the focused element; refused off Perplexity. */
@@ -85,14 +82,6 @@ class CdpAskPort implements AskPort {
 
   navigate(url: string, waitForLoad: boolean): Promise<unknown> {
     return this.client.navigate(url, waitForLoad);
-  }
-
-  pageAddress(): Promise<string> {
-    return this.client.pageAddress();
-  }
-
-  newTab(url: string): Promise<BrowserTarget> {
-    return this.client.newTab(url);
   }
 
   readProseState(): Promise<ProseState> {

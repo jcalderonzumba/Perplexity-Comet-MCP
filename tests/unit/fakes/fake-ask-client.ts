@@ -5,17 +5,19 @@
 // error as CDP does, in `exceptionDetails`, without rejecting. Its trusted
 // text lands in the focused element, as `Input.insertText` does, and its
 // Enter submits what that element holds and empties it, as Perplexity's
-// input bar does. Every call is logged by name in `calls`, with its
-// argument when it has one.
+// input bar does. It also serves as the tab choice's client, reading the
+// connected tab's `address` and opening tabs. Every call is logged by name
+// in `calls`, with its argument when it has one.
 
 import type { AskPortClient, AskPortComet } from "../../../src/cdp-ask-port.js";
 import type { TrustedKey } from "../../../src/cdp-client.js";
+import type { TabClient } from "../../../src/cdp-perplexity-tab.js";
 import type { AskStatus } from "../../../src/core/ask.js";
 import type { BrowserTarget } from "../../../src/core/perplexity-tab.js";
 import type { PagePoint } from "../../../src/page-scripts.js";
 import type { EvaluateResult } from "../../../src/types.js";
 
-export class FakeAskClient implements AskPortClient {
+export class FakeAskClient implements AskPortClient, TabClient {
   public readonly calls: string[] = [];
   public readonly expressions: string[] = [];
   /** Every text given to the trusted insertion. */

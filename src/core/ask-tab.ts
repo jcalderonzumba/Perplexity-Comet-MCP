@@ -15,8 +15,13 @@ import {
   type TabPort,
 } from "./perplexity-tab.js";
 
-/** What the ask's connection and tab need from the browser. */
-export interface AskTabPort extends TabPort {
+/**
+ * What the ask's connection and tab need from the browser. The tab choice it
+ * is given reads and opens tabs through its own port, so this one only lists
+ * and connects them, for the recovery, and waits.
+ */
+export interface AskTabPort
+  extends Pick<TabPort, "listTargets" | "connect" | "wait"> {
   /** Checks the connection is alive; throws when it is not. */
   preOperationCheck(): Promise<unknown>;
   /** Starts Comet with its debug port on `port`, or finds it running. */
