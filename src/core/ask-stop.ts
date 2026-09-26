@@ -1,9 +1,10 @@
 // Stopping the answer in progress: a trusted click on the input bar's stop
 // control, which `locateStopControl` finds by its label, never by its icon,
 // so no other button (a pane's, the dictation's, the read-aloud player's)
-// is ever pressed. The browser drops a click to a tab whose window is
-// behind others, so focus is emulated around the click, as around the
-// send step's submit, and the stop is taken once the control is gone.
+// is ever pressed. The browser drops a trusted click to a hidden tab, one
+// not selected in its window, and may for a window behind others, so focus
+// is emulated around the click, as around the send step's submit, and the
+// stop is taken once the control is gone.
 
 import type { PagePoint } from "../page-scripts.js";
 
