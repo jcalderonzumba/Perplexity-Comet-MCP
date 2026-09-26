@@ -8,6 +8,7 @@ import {
   extractAgentStatus,
   locateModeButton,
   locateModeMenuItem,
+  locateStopControl,
   locateSubmitButton,
   type PageArgument,
   pageScriptExpression,
@@ -22,10 +23,10 @@ beforeEach(() => {
 });
 
 /**
- * jsdom does not compute layout, so `offsetParent` is always `null`.
- * `extractAgentStatus` uses `offsetParent !== null` as a visibility check
- * for stop buttons. To exercise the "working" path we have to mark
- * specific elements as visible.
+ * jsdom does not compute layout, so `offsetParent` is always `null`. The
+ * stop-button check `extractAgentStatus` had before the stop control counted
+ * only buttons whose `offsetParent` was set; the tests that show a button is
+ * not the stop control mark it visible, so that check would have taken it.
  */
 function markVisible(el: HTMLElement): void {
   Object.defineProperty(el, "offsetParent", {
@@ -71,16 +72,6 @@ describe("readProseState", () => {
 });
 
 describe("extractAgentStatus", () => {
-  it("returns 'working' when a visible stop button is present", () => {
-    document.body.innerHTML = `<button aria-label="Stop">stop</button>`;
-    const btn = document.querySelector("button") as HTMLButtonElement;
-    markVisible(btn);
-
-    const result = extractAgentStatus();
-    expect(result.status).toBe("working");
-    expect(result.hasStopButton).toBe(true);
-  });
-
   it("returns 'completed' when 'Reviewed N sources' is present, prose has content, no stop button", () => {
     document.body.innerHTML = `
       <main>
@@ -125,19 +116,14 @@ describe("extractAgentStatus", () => {
   });
 
   it("does NOT treat 'Finished reading sources' as a completion marker", () => {
-    const main = document.createElement("main");
-    const m = document.createElement("div");
-    m.textContent = "Finished reading sources";
-    const btn = document.createElement("button");
-    btn.setAttribute("aria-label", "Stop");
-    btn.textContent = "stop";
-    main.append(m, btn);
-    document.body.append(main);
-    markVisible(btn);
+    loadAskInputFixture();
+    showStopControl();
+    const step = document.createElement("div");
+    step.textContent = "Finished reading sources";
+    document.body.prepend(step);
 
-    const result = extractAgentStatus();
-    // Stop button visible -> still working, regardless of "Finished reading".
-    expect(result.status).toBe("working");
+    // The stop control shows -> still working, regardless of "Finished reading".
+    expect(runInPage(extractAgentStatus).status).toBe("working");
   });
 
   it("picks the response after the LAST 'steps completed' marker", () => {
@@ -542,5 +528,102 @@ describe("locateSubmitButton", () => {
     document.body.appendChild(far);
 
     expect(runInPage(locateSubmitButton)).toBeNull();
+  });
+});
+
+// The stop control: while Perplexity answers, its input bar shows a button
+// labelled "Stop response (Esc)" with a filled stop icon where the Submit
+// button sits, as Perplexity's input bar script renders it (read from the
+// script the page loads, 2026-09-26). Two other buttons share its icon and
+// are never the stop control: "Stop dictation", in the input bar while
+// dictating, and the "Stop" of the answer's read-aloud player.
+
+const STOP_ICON = `<svg role="img" aria-hidden="true"><use xlink:href="#pplx-icon-player-stop-filled"></use></svg>`;
+
+function iconButton(label: string, icon = STOP_ICON): string {
+  return `<button aria-label="${label}" type="button"><div><div>${icon}</div><div></div></div></button>`;
+}
+
+/** The input bar as Perplexity shows it while an answer is streaming. */
+function showStopControl(): void {
+  submitButton().outerHTML = iconButton("Stop response (Esc)");
+}
+
+/** Replaces the Submit button with `markup`, beside the input bar. */
+function replaceSubmitButtonWith(markup: string): void {
+  submitButton().outerHTML = markup;
+}
+
+/** An "Expand pane"-style button: a labelled icon drawn with an SVG rect. */
+const RECT_ICON_BUTTON = `<button aria-label="Expand pane" type="button"><svg><rect width="10" height="10"></rect></svg></button>`;
+
+describe("locateStopControl", () => {
+  beforeEach(loadAskInputFixture);
+
+  it("returns the centre point of the input bar's stop control", () => {
+    showStopControl();
+
+    expect(runInPage(locateStopControl)).toEqual(anyPoint);
+  });
+
+  it("returns null when the input bar shows Submit, as when no answer is streaming", () => {
+    expect(runInPage(locateStopControl)).toBeNull();
+  });
+
+  it("never takes a button with an SVG rect for the stop control", () => {
+    replaceSubmitButtonWith(RECT_ICON_BUTTON);
+
+    expect(runInPage(locateStopControl)).toBeNull();
+  });
+
+  it("never takes the input bar's Stop dictation button for the stop control", () => {
+    replaceSubmitButtonWith(iconButton("Stop dictation"));
+
+    expect(runInPage(locateStopControl)).toBeNull();
+  });
+
+  it.each([
+    ["the read-aloud player's Stop", "Stop"],
+    ["a Cancel button", "Cancel"],
+    [
+      "a label that only contains the stop control's",
+      "Stop response (Esc) now",
+    ],
+  ])("never takes %s for the stop control", (_case, label) => {
+    replaceSubmitButtonWith(iconButton(label));
+
+    expect(runInPage(locateStopControl)).toBeNull();
+  });
+
+  it("never takes a stop-labelled button far from the input bar", () => {
+    document.body.innerHTML = `<main><div>${iconButton("Stop response (Esc)")}</div></main>`;
+
+    expect(runInPage(locateStopControl)).toBeNull();
+  });
+});
+
+describe("extractAgentStatus and the stop control", () => {
+  beforeEach(loadAskInputFixture);
+
+  it("reads the stop control as an answer in progress", () => {
+    showStopControl();
+
+    expect(runInPage(extractAgentStatus)).toMatchObject({
+      status: "working",
+      hasStopButton: true,
+    });
+  });
+
+  it.each([
+    ["an Expand pane-style button with an SVG rect", RECT_ICON_BUTTON],
+    ["the Stop dictation button", iconButton("Stop dictation")],
+    ["the read-aloud player's Stop button", iconButton("Stop")],
+  ])("never reads %s as the stop control", (_case, markup) => {
+    replaceSubmitButtonWith(markup);
+    for (const button of document.querySelectorAll("button")) {
+      markVisible(button);
+    }
+
+    expect(runInPage(extractAgentStatus).hasStopButton).toBe(false);
   });
 });

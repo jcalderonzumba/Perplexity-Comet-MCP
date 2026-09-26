@@ -61,29 +61,32 @@ export interface AgentStatusResult {
 export function extractAgentStatus(): AgentStatusResult {
   const body = document.body.innerText;
 
-  // Check for active stop button (more comprehensive check)
-  let hasActiveStopButton = false;
-  for (const btn of document.querySelectorAll("button")) {
-    const rect = btn.querySelector("rect");
-    const ariaLabel = (btn.getAttribute("aria-label") || "").toLowerCase();
-    const btnText = btn.innerText.toLowerCase();
-
-    // Stop button indicators: square icon (rect), "stop" label, or specific SVG patterns
-    const isStopButton =
-      rect ||
-      ariaLabel.includes("stop") ||
-      ariaLabel.includes("cancel") ||
-      btnText === "stop";
-
-    if (
-      isStopButton &&
-      (btn as HTMLButtonElement).offsetParent !== null &&
-      !(btn as HTMLButtonElement).disabled
-    ) {
-      hasActiveStopButton = true;
-      break;
+  // The stop control, found as `locateStopControl` finds it.
+  const findStopControl = (): HTMLButtonElement | null => {
+    const stopLabel = "Stop response (Esc)";
+    const levelsUp = 6;
+    const askInput =
+      document.querySelector<HTMLElement>("#ask-input") ??
+      document.querySelector<HTMLElement>(
+        '[contenteditable="true"][role="textbox"]',
+      ) ??
+      document.querySelector<HTMLElement>("textarea");
+    let container = askInput?.parentElement ?? null;
+    for (let level = 0; container && level < levelsUp; level++) {
+      const stop = [
+        ...container.querySelectorAll<HTMLButtonElement>("button[aria-label]"),
+      ].find(
+        (button) =>
+          (button.getAttribute("aria-label") ?? "")
+            .replace(/\s+/g, " ")
+            .trim() === stopLabel,
+      );
+      if (stop) return stop;
+      container = container.parentElement;
     }
-  }
+    return null;
+  };
+  const hasActiveStopButton = findStopControl() !== null;
 
   // More comprehensive loading detection
   const hasLoadingSpinner =
@@ -509,4 +512,48 @@ export function locateSubmitButton(): PagePoint | null {
     container = container.parentElement;
   }
   return null;
+}
+
+// The stop control: while Perplexity answers, the input bar shows a button
+// labelled "Stop response (Esc)" where the Submit button sits (Perplexity's
+// input bar script, as the page loaded it on 2026-09-26). Its filled stop
+// icon is shared by the input bar's "Stop dictation" button and by the
+// answer's read-aloud "Stop", so the label decides, compared exactly and in
+// English, as the mode menu's labels are. `extractAgentStatus` finds it with
+// the same search, written inside it.
+
+/**
+ * The centre of the input bar's stop control, looked for a few levels up
+ * from the input bar, or null when the input bar shows none.
+ */
+export function locateStopControl(): PagePoint | null {
+  const findStopControl = (): HTMLButtonElement | null => {
+    const stopLabel = "Stop response (Esc)";
+    const levelsUp = 6;
+    const askInput =
+      document.querySelector<HTMLElement>("#ask-input") ??
+      document.querySelector<HTMLElement>(
+        '[contenteditable="true"][role="textbox"]',
+      ) ??
+      document.querySelector<HTMLElement>("textarea");
+    let container = askInput?.parentElement ?? null;
+    for (let level = 0; container && level < levelsUp; level++) {
+      const stop = [
+        ...container.querySelectorAll<HTMLButtonElement>("button[aria-label]"),
+      ].find(
+        (button) =>
+          (button.getAttribute("aria-label") ?? "")
+            .replace(/\s+/g, " ")
+            .trim() === stopLabel,
+      );
+      if (stop) return stop;
+      container = container.parentElement;
+    }
+    return null;
+  };
+
+  const stop = findStopControl();
+  if (!stop) return null;
+  const rect = stop.getBoundingClientRect();
+  return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
 }
