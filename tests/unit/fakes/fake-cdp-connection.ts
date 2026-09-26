@@ -2,8 +2,8 @@
 // just the domains `CometCDPClient.connect` and its trusted input use. The
 // tab's top frame is on Perplexity until a test moves it; the page's own
 // script answers whatever `pageClaims` says, so a test can make the page lie
-// about where it is. Every Input call and every page evaluation is recorded
-// in one log, in the order it was made.
+// about where it is. Every Input call, every focus emulation switch and every
+// page evaluation is recorded, the first two in one log, in the order made.
 
 export interface TopFrame {
   url: string;
@@ -13,7 +13,8 @@ export interface TopFrame {
 export type InputCall =
   | { method: "Input.dispatchMouseEvent"; params: unknown }
   | { method: "Input.dispatchKeyEvent"; params: unknown }
-  | { method: "Input.insertText"; params: unknown };
+  | { method: "Input.insertText"; params: unknown }
+  | { method: "Emulation.setFocusEmulationEnabled"; params: unknown };
 
 export class FakeCdpConnection {
   public topFrame: TopFrame = {
@@ -59,6 +60,15 @@ export class FakeCdpConnection {
     },
     insertText: async (params: unknown) => {
       this.inputs.push({ method: "Input.insertText", params });
+    },
+  };
+
+  readonly Emulation = {
+    setFocusEmulationEnabled: async (params: unknown) => {
+      this.inputs.push({
+        method: "Emulation.setFocusEmulationEnabled",
+        params,
+      });
     },
   };
 

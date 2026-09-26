@@ -102,6 +102,14 @@ export class FakeAskClient implements AskPortClient, TabClient {
   async clickAt(point: PagePoint): Promise<void> {
     this.calls.push(`clickAt ${point.x},${point.y}`);
   }
+
+  async startFocusEmulation(): Promise<void> {
+    this.calls.push("startFocusEmulation");
+  }
+
+  async stopFocusEmulation(): Promise<void> {
+    this.calls.push("stopFocusEmulation");
+  }
 }
 
 function failedInPage(description: string): EvaluateResult {

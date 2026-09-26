@@ -15,7 +15,8 @@
 // `comet_poll` and `comet_stop` follow the same task. A poll of a task the
 // ask left running applies the ask's completion rules, against the page as
 // it was before the prompt was sent, so it returns the answer only once it
-// is complete and new, and otherwise says the task is still working.
+// is complete and new, and otherwise says the task is still working. A poll
+// after an ask whose prompt was never sent says so, and reads no page.
 
 import { errorMessage } from "../error-message.js";
 import type { ProseState } from "../page-scripts.js";
@@ -119,6 +120,11 @@ export type PollOutcome =
   | { readonly kind: "no-task" }
   /** The last task finished too long ago to follow. */
   | { readonly kind: "expired" }
+  /**
+   * The last task's prompt never reached Comet: there is nothing to follow,
+   * whatever the page shows.
+   */
+  | { readonly kind: "not-sent" }
   /** The task completed before this poll, `secondsAgo` seconds ago. */
   | {
       readonly kind: "completed";
@@ -134,9 +140,8 @@ export type PollOutcome =
       readonly progress: PollProgress;
     }
   /**
-   * The task has no answer and is no longer followed: it was stopped, or its
-   * prompt was never sent. The page's status is reported, never its text as
-   * the answer.
+   * The task has no answer and is no longer followed: it was stopped. The
+   * page's status is reported, never its text as the answer.
    */
   | {
       readonly kind: "not-followed";
@@ -241,6 +246,7 @@ export class AskCore {
       return { kind: "no-task" };
     }
     if (!task.isActive && task.isStale()) return { kind: "expired" };
+    if (task.promptNeverSent) return { kind: "not-sent" };
     if (!task.isActive && task.lastResponse !== null) {
       return {
         kind: "completed",

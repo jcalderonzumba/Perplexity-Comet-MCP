@@ -116,6 +116,8 @@ function pollText(
       return "Status: IDLE\nNo active task. Use comet_ask to start a new task.";
     case "expired":
       return "Status: IDLE\nPrevious task session expired. Use comet_ask to start a new task.";
+    case "not-sent":
+      return "Status: IDLE\nThe last task's prompt was not sent, so there is no answer to follow. Use comet_ask to start a new task.";
     case "completed":
       return `Status: COMPLETED (${outcome.secondsAgo}s ago)\n\n${quotePage(outcome.answer)}`;
     case "answered":
@@ -161,7 +163,7 @@ function describeNotFollowed(
 ): string {
   const lines = [
     ...statusLines(progress.status, taskId),
-    "No answer to follow: the task was stopped, or its prompt was never sent.",
+    "No answer to follow: the task was stopped.",
   ];
   const progressText = describeProgress(progress);
   if (progressText) lines.push("", "Progress:", quotePage(progressText));

@@ -156,6 +156,16 @@ export class FakeAskPort extends FakeTabPort implements AskPort {
     return this.inputBar.clickAt(point);
   }
 
+  startFocusEmulation(): Promise<void> {
+    this.calls.push("startFocusEmulation");
+    return this.inputBar.startFocusEmulation();
+  }
+
+  stopFocusEmulation(): Promise<void> {
+    this.calls.push("stopFocusEmulation");
+    return this.inputBar.stopFocusEmulation();
+  }
+
   async stopAgent(): Promise<boolean> {
     this.calls.push("stopAgent");
     return this.hasStopControl;

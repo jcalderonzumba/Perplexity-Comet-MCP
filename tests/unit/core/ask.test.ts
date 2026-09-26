@@ -276,9 +276,40 @@ describe("AskCore.ask: typing and submitting", () => {
       expect(port.sentPrompts).toEqual([]);
       expect(core.task.isActive).toBe(false);
       expect(core.task.lastResponse).toBeNull();
-      expect((await core.poll()).kind).toBe("not-followed");
+      expect((await core.poll()).kind).toBe("not-sent");
     },
   );
+
+  it("submits with Comet's window behind others, focus emulated only around the submit", async () => {
+    const { port, core } = answering(STREAMED_THEN_COMPLETED);
+    port.inputBar.behindOtherWindows = true;
+
+    const outcome = await core.ask({ prompt: "q" });
+
+    expect(answerOf(outcome)).toBe(LONG_ANSWER);
+    expect(port.sentPrompts).toEqual(["q"]);
+    const { calls } = port;
+    expect(calls.indexOf("insertText")).toBeLessThan(
+      calls.indexOf("startFocusEmulation"),
+    );
+    expect(calls.indexOf("stopFocusEmulation")).toBeLessThan(
+      calls.lastIndexOf("readProseState"),
+    );
+    expect(port.inputBar.focusEmulated).toBe(false);
+  });
+
+  it("stops emulating focus when the submit is not taken", async () => {
+    const { port, core } = answering(STREAMED_THEN_COMPLETED);
+    port.inputBar.behindOtherWindows = true;
+    port.inputBar.takesEnter = false;
+    port.inputBar.hasSubmitButton = false;
+
+    const outcome = await core.ask({ prompt: "q" });
+
+    expect(outcome.kind).toBe("failed");
+    expect(port.calls).toContain("stopFocusEmulation");
+    expect(port.inputBar.focusEmulated).toBe(false);
+  });
 
   it("keeps the page's words apart when the input bar's page script fails", async () => {
     const { port, core } = answering(STREAMED_THEN_COMPLETED);
@@ -829,6 +860,27 @@ describe("AskCore.poll", () => {
     await port.wait(TASK_STALE_AFTER_MS);
 
     expect(await core.poll()).toEqual({ kind: "expired" });
+  });
+
+  it("reports a task whose prompt was not sent as not sent, without reading the page, whatever it shows", async () => {
+    const { port, core } = rig();
+    port.before = reading("An answer from before", { hasStopButton: true });
+    port.inputBar.takesEnter = false;
+    port.inputBar.hasSubmitButton = false;
+    expect((await core.ask({ prompt: "q" })).kind).toBe("failed");
+    port.calls.length = 0;
+
+    expect(await core.poll()).toEqual({ kind: "not-sent" });
+    expect(port.calls).toEqual([]);
+  });
+
+  it("reports a task whose connection failed before sending as not sent", async () => {
+    const { port, core } = rig();
+    port.preCheckFails = true;
+    port.recoveryFails = true;
+    await core.ask({ prompt: "q" });
+
+    expect(await core.poll()).toEqual({ kind: "not-sent" });
   });
 
   it("says a timed-out task still streaming is working, its text partial", async () => {

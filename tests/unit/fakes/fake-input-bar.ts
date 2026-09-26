@@ -5,7 +5,10 @@
 // By default it behaves like the live page with the window in front: the
 // text inserted after a selection replaces the field, and Enter submits a
 // field that holds text, emptying it. Each knob turns one step off, as a
-// page that does not take it would. Every call is logged by name in `log`.
+// page that does not take it would; `behindOtherWindows` makes trusted keys
+// and clicks reach the page only while focus is emulated, as the browser
+// does with Comet's window behind others. Every call is logged by name in
+// `log`.
 
 import type { PagePoint } from "../../../src/page-scripts.js";
 
@@ -34,6 +37,12 @@ export class FakeInputBar {
   public hasSubmitButton = true;
   /** When set, the trusted input the origin gate refuses, with this error. */
   public inputRefusal: Error | null = null;
+  /** Whether keys and clicks reach the page only while focus is emulated. */
+  public behindOtherWindows = false;
+  /** Whether the page believes itself focused and visible. */
+  public focusEmulated = false;
+  /** When set, stopping focus emulation fails with this error. */
+  public stopFocusEmulationFailure: Error | null = null;
   /** Runs when the page takes a prompt as submitted. */
   public onSubmit: ((prompt: string) => void) | undefined;
 
@@ -60,7 +69,7 @@ export class FakeInputBar {
   async pressEnter(): Promise<void> {
     this.log.push("pressEnter");
     this.refuseIfSet();
-    if (this.takesEnter) this.submit();
+    if (this.takesEnter && this.reachesPage()) this.submit();
   }
 
   async locateSubmitButton(): Promise<PagePoint | null> {
@@ -73,7 +82,24 @@ export class FakeInputBar {
     this.log.push("clickAt");
     this.refuseIfSet();
     this.clicks.push(point);
-    if (this.takesClick) this.submit();
+    if (this.takesClick && this.reachesPage()) this.submit();
+  }
+
+  async startFocusEmulation(): Promise<void> {
+    this.log.push("startFocusEmulation");
+    this.refuseIfSet();
+    this.focusEmulated = true;
+  }
+
+  async stopFocusEmulation(): Promise<void> {
+    this.log.push("stopFocusEmulation");
+    if (this.stopFocusEmulationFailure) throw this.stopFocusEmulationFailure;
+    this.focusEmulated = false;
+  }
+
+  /** Whether a trusted key or click reaches the page now. */
+  private reachesPage(): boolean {
+    return !this.behindOtherWindows || this.focusEmulated;
   }
 
   private submit(): void {

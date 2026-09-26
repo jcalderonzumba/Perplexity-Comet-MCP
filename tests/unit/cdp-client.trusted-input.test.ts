@@ -35,6 +35,7 @@ const trustedInputs: [string, (client: CometCDPClient) => Promise<void>][] = [
   ["press Enter", (client) => client.pressKey("Enter")],
   ["press Escape", (client) => client.pressKey("Escape")],
   ["click", (client) => client.clickAt({ x: 10, y: 20 })],
+  ["emulate focus", (client) => client.startFocusEmulation()],
 ];
 
 describe("CometCDPClient.insertText", () => {
@@ -119,6 +120,48 @@ describe("CometCDPClient.clickAt", () => {
       "Input.dispatchMouseEvent",
       "Input.dispatchMouseEvent",
     ]);
+  });
+});
+
+describe("CometCDPClient focus emulation", () => {
+  it("starts through Emulation.setFocusEmulationEnabled while the tab is on Perplexity", async () => {
+    await client.startFocusEmulation();
+
+    expect(tab.inputs).toEqual([
+      {
+        method: "Emulation.setFocusEmulationEnabled",
+        params: { enabled: true },
+      },
+    ]);
+  });
+
+  it("stops through Emulation.setFocusEmulationEnabled", async () => {
+    await client.stopFocusEmulation();
+
+    expect(tab.inputs).toEqual([
+      {
+        method: "Emulation.setFocusEmulationEnabled",
+        params: { enabled: false },
+      },
+    ]);
+  });
+
+  it("stops wherever the tab went since, since stopping gives the page nothing", async () => {
+    await client.startFocusEmulation();
+    tab.moveTo("https://example.com/");
+
+    await client.stopFocusEmulation();
+
+    expect(tab.inputs.at(-1)).toEqual({
+      method: "Emulation.setFocusEmulationEnabled",
+      params: { enabled: false },
+    });
+  });
+
+  it("does not stop when not connected", async () => {
+    await expect(new CometCDPClient().stopFocusEmulation()).rejects.toThrow(
+      "Not connected to Comet. Call connect() first.",
+    );
   });
 });
 

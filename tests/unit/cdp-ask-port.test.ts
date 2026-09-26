@@ -151,6 +151,15 @@ describe("cdpAskPort: the input bar", () => {
     ]);
   });
 
+  it("starts and stops focus emulation through the client", async () => {
+    const { client, port } = rig();
+
+    await port.startFocusEmulation();
+    await port.stopFocusEmulation();
+
+    expect(client.calls).toEqual(["startFocusEmulation", "stopFocusEmulation"]);
+  });
+
   it("sends a hostile prompt through trusted text alone: unchanged, and in no page script", async () => {
     const { client, port } = rig();
     document.body.innerHTML = ASK_INPUT_FIXTURE;

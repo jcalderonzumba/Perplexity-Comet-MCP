@@ -61,7 +61,7 @@ async function sendFailure(
 }
 
 describe("sendPrompt: a prompt the page takes", () => {
-  it("selects the input bar, inserts the prompt, reads it back, and submits it with Enter", async () => {
+  it("selects the input bar, inserts the prompt, reads it back, and submits it with Enter while focus is emulated", async () => {
     const port = new FakePromptPort();
 
     await sendPrompt(port, PROMPT, QUIET);
@@ -70,8 +70,10 @@ describe("sendPrompt: a prompt the page takes", () => {
       "selectAskInput",
       "insertText",
       "readAskInput",
+      "startFocusEmulation",
       "pressEnter",
       "readAskInput",
+      "stopFocusEmulation",
     ]);
     expect(port.submitted).toEqual([PROMPT]);
     expect(port.clicks).toEqual([]);
@@ -326,6 +328,127 @@ describe("sendPrompt: a failure names its step", () => {
     expect(failure.step).toBe("submit");
     expect(failure.message).toBe(
       "The prompt was not sent: the submit was not taken: refused to press Enter: the tab is not on https://www.perplexity.ai",
+    );
+  });
+});
+
+describe("sendPrompt: Comet's window behind others", () => {
+  /** A page that takes trusted keys and clicks only while focus is emulated. */
+  function behindOtherWindows(): FakePromptPort {
+    const port = new FakePromptPort();
+    port.behindOtherWindows = true;
+    return port;
+  }
+
+  it("submits with Enter, focus emulated around it and stopped after", async () => {
+    const port = behindOtherWindows();
+
+    await sendPrompt(port, PROMPT, QUIET);
+
+    expect(port.submitted).toEqual([PROMPT]);
+    expect(port.clicks).toEqual([]);
+    expect(port.focusEmulated).toBe(false);
+  });
+
+  it("clicks the Submit button, focus still emulated, when Enter is not taken", async () => {
+    const port = behindOtherWindows();
+    port.takesEnter = false;
+
+    await sendPrompt(port, PROMPT, QUIET);
+
+    expect(port.submitted).toEqual([PROMPT]);
+    expect(port.clicks).toEqual([SUBMIT_BUTTON]);
+    expect(port.log.at(-1)).toBe("stopFocusEmulation");
+    expect(port.focusEmulated).toBe(false);
+  });
+
+  it("types the prompt before emulating focus", async () => {
+    const port = behindOtherWindows();
+
+    await sendPrompt(port, PROMPT, QUIET);
+
+    expect(port.log.indexOf("insertText")).toBeLessThan(
+      port.log.indexOf("startFocusEmulation"),
+    );
+  });
+
+  it.each([
+    ["and the page shows no Submit button", false, true],
+    ["nor a click on the Submit button", true, false],
+  ])(
+    "stops emulating focus when the submit fails, Enter not taken %s",
+    async (_case, hasSubmitButton, takesClick) => {
+      const port = behindOtherWindows();
+      port.takesEnter = false;
+      port.hasSubmitButton = hasSubmitButton;
+      port.takesClick = takesClick;
+
+      const failure = await sendFailure(port);
+
+      expect(failure.step).toBe("submit");
+      expect(port.log.at(-1)).toBe("stopFocusEmulation");
+      expect(port.focusEmulated).toBe(false);
+    },
+  );
+
+  it("stops emulating focus when the Enter is refused", async () => {
+    class RefusingEnterBar extends FakePromptPort {
+      override async pressEnter(): Promise<void> {
+        this.log.push("pressEnter");
+        throw new Error(
+          "refused to press Enter: the tab is not on https://www.perplexity.ai",
+        );
+      }
+    }
+    const port = new RefusingEnterBar();
+
+    const failure = await sendFailure(port);
+
+    expect(failure.step).toBe("submit");
+    expect(port.log.at(-1)).toBe("stopFocusEmulation");
+    expect(port.focusEmulated).toBe(false);
+  });
+
+  it("names submission, and presses nothing, when the tab's origin refuses focus emulation", async () => {
+    class RefusingFocusBar extends FakePromptPort {
+      override async startFocusEmulation(): Promise<void> {
+        this.log.push("startFocusEmulation");
+        throw new Error(
+          "refused to emulate focus: the tab is not on https://www.perplexity.ai",
+        );
+      }
+    }
+    const port = new RefusingFocusBar();
+
+    const failure = await sendFailure(port);
+
+    expect(failure.step).toBe("submit");
+    expect(failure.message).toBe(
+      "The prompt was not sent: the submit was not taken: refused to emulate focus: the tab is not on https://www.perplexity.ai",
+    );
+    expect(port.log).not.toContain("pressEnter");
+    expect(port.clicks).toEqual([]);
+  });
+
+  it("keeps a submitted prompt sent when focus emulation cannot be stopped", async () => {
+    const port = behindOtherWindows();
+    port.stopFocusEmulationFailure = new Error("WebSocket is not open");
+
+    await sendPrompt(port, PROMPT, QUIET);
+
+    expect(port.submitted).toEqual([PROMPT]);
+  });
+
+  it("keeps the submit's own failure when focus emulation cannot be stopped", async () => {
+    const port = behindOtherWindows();
+    port.takesEnter = false;
+    port.hasSubmitButton = false;
+    port.stopFocusEmulationFailure = new Error("WebSocket is not open");
+
+    const failure = await sendFailure(port);
+
+    expect(failure.message).toBe(
+      "The prompt was not sent: the submit was not taken, the input bar still holds the prompt after Enter and the page shows no Submit button",
     );
   });
 });

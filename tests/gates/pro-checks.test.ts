@@ -666,6 +666,25 @@ describe("the poll and stop predicates against the core's own replies", () => {
     );
   });
 
+  it("pollIdle [4.1] holds on the poll after an ask whose send failed, though the page shows an answer in progress", async () => {
+    const port = new FakeAskPort();
+    port.before = reading("An earlier answer", { hasStopButton: true });
+    port.inputBar.takesEnter = false;
+    port.inputBar.hasSubmitButton = false;
+    const core = new AskCore({
+      port,
+      mode: {
+        core: new ModeCore(new FakeModePage()),
+        quotePage: wrapUntrustedPageContent,
+      },
+      perplexity: new PerplexityTab(port),
+      cometPort: 9222,
+    });
+    expect((await core.ask({ prompt: "q" })).kind).toBe("failed");
+
+    expect(pollIdle(pollReply(await core.poll()))).toBe(true);
+  });
+
   it("pollIdle [4.1] fails on the poll of a task still working", () => {
     const reply = pollReply({
       kind: "working",

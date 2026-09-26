@@ -207,6 +207,13 @@ describe("describePollOutcome: no task to report", () => {
     });
   });
 
+  it("reports idle when the last task's prompt was not sent", () => {
+    expect(describePollOutcome({ kind: "not-sent" }, quote)).toEqual({
+      text: "Status: IDLE\nThe last task's prompt was not sent, so there is no answer to follow. Use comet_ask to start a new task.",
+      isError: false,
+    });
+  });
+
   it("reports idle when the last task expired", () => {
     expect(describePollOutcome({ kind: "expired" }, quote)).toEqual({
       text: "Status: IDLE\nPrevious task session expired. Use comet_ask to start a new task.",
@@ -308,7 +315,7 @@ describe("describePollOutcome: a task no longer followed", () => {
       text: [
         "Status: COMPLETED",
         `Task: ${TASK_ID}`,
-        "No answer to follow: the task was stopped, or its prompt was never sent.",
+        "No answer to follow: the task was stopped.",
         "",
         "Progress:",
         "<<Steps:\n  • Searching>>",

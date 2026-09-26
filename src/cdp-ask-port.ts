@@ -4,10 +4,10 @@
 // Each method is one call to the client or the Comet module. The page is
 // read only through the tested functions of `page-scripts.ts`, through the
 // client's evaluate that reconnects when the connection drops. The prompt
-// reaches the page only as the client's trusted text, which, like its keys
-// and clicks, the client sends only to a tab on Perplexity's origin. Tabs
-// are read and opened by the shared tab choice, `createCdpPerplexityTab`,
-// never through this port.
+// reaches the page only as the client's trusted text, which, like its keys,
+// its clicks and the focus emulation that lets them through, the client
+// sends only to a tab on Perplexity's origin. Tabs are read and opened by
+// the shared tab choice, `createCdpPerplexityTab`, never through this port.
 
 import type { TrustedKey } from "./cdp-client.js";
 import {
@@ -45,6 +45,9 @@ export interface AskPortClient {
   pressKey(key: TrustedKey): Promise<void>;
   /** A trusted click at a point; refused off Perplexity. */
   clickAt(point: PagePoint): Promise<void>;
+  /** Makes the tab believe itself focused; refused off Perplexity. */
+  startFocusEmulation(): Promise<void>;
+  stopFocusEmulation(): Promise<void>;
 }
 
 /** The part of the Comet module the ask drives. */
@@ -118,6 +121,14 @@ class CdpAskPort implements AskPort {
 
   clickAt(point: PagePoint): Promise<void> {
     return this.client.clickAt(point);
+  }
+
+  startFocusEmulation(): Promise<void> {
+    return this.client.startFocusEmulation();
+  }
+
+  stopFocusEmulation(): Promise<void> {
+    return this.client.stopFocusEmulation();
   }
 
   stopAgent(): Promise<boolean> {

@@ -8,7 +8,11 @@
 // text replaces the selection, so the read-back finds exactly the prompt or
 // the text was not taken. The submit is a trusted Enter, and when the page
 // has not taken it within a bounded wait, a trusted click on the input
-// bar's Submit button.
+// bar's Submit button. The browser drops trusted keys and clicks to a tab
+// whose window is behind others, though it takes the text, so focus is
+// emulated around the submit, and only around it: the tab believes itself
+// focused and visible from the Enter until the prompt is known sent or not,
+// and the window is never raised.
 
 import { errorMessage } from "../error-message.js";
 import type { PagePoint, ProseState } from "../page-scripts.js";
@@ -31,6 +35,14 @@ export interface PromptPort {
   locateSubmitButton(): Promise<PagePoint | null>;
   /** Clicks at a point in the page, as trusted input. */
   clickAt(point: PagePoint): Promise<void>;
+  /**
+   * Makes the page believe itself focused and visible, so trusted keys and
+   * clicks reach it with Comet's window behind others; refused off
+   * Perplexity, like the input it lets through.
+   */
+  startFocusEmulation(): Promise<void>;
+  /** Ends `startFocusEmulation`. */
+  stopFocusEmulation(): Promise<void>;
   readProseState(): Promise<ProseState>;
   /** Milliseconds, on the clock `wait` advances. */
   now(): number;
@@ -78,7 +90,7 @@ export async function sendPrompt(
 ): Promise<void> {
   await selectInputBar(port);
   await typePrompt(port, prompt);
-  await submitPrompt(port, proseBefore);
+  await withFocusEmulated(port, () => submitPrompt(port, proseBefore));
 }
 
 async function selectInputBar(port: PromptPort): Promise<void> {
@@ -119,6 +131,26 @@ function readBackProblem(
   if (text === collapseWhitespace(prompt)) return null;
   if (text === "") return "the input bar reads back empty";
   return "the input bar reads back other text than the prompt";
+}
+
+/**
+ * Runs `submit` with the page's focus emulated, and stops emulating it
+ * whatever `submit` does. Failing to stop never replaces the submit's own
+ * outcome: the prompt is sent or not either way, and a connection too
+ * broken to stop it has ended the emulation with it.
+ */
+async function withFocusEmulated(
+  port: PromptPort,
+  submit: () => Promise<void>,
+): Promise<void> {
+  await during("submit", "the submit was not taken", () =>
+    port.startFocusEmulation(),
+  );
+  try {
+    await submit();
+  } finally {
+    await port.stopFocusEmulation().catch(() => undefined);
+  }
 }
 
 async function submitPrompt(

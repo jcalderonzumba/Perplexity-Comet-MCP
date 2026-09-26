@@ -21,6 +21,8 @@ export class AskTaskState {
   lastResponseTime: number | null = null;
   steps: string[] = [];
   isActive = false;
+  /** The task ended before its prompt reached Comet. */
+  promptNeverSent = false;
 
   constructor(private readonly now: () => number = () => Date.now()) {}
 
@@ -35,6 +37,7 @@ export class AskTaskState {
     this.lastResponseTime = null;
     this.steps = [];
     this.isActive = true;
+    this.promptNeverSent = false;
     return taskId;
   }
 
@@ -48,6 +51,7 @@ export class AskTaskState {
   /** Ends a task whose prompt never reached Comet: it has no answer. */
   abandon(): void {
     this.isActive = false;
+    this.promptNeverSent = true;
   }
 
   /** True with no task, or once the task started too long ago to follow. */
