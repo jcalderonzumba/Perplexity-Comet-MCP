@@ -79,9 +79,9 @@ export interface AgentStatusResult {
 export function extractAgentStatus(): AgentStatusResult {
   const body = document.body.innerText;
 
-  // The stop control, found as `locateStopControl` finds it.
-  const findStopControl = (): HTMLButtonElement | null => {
-    const stopLabel = "Stop response (Esc)";
+  // The input bar's buttons, up to the levels above it `locateStopControl`
+  // searches, so the stop control is found as it finds it.
+  const inputBarButtons = (): HTMLButtonElement[] => {
     const levelsUp = 6;
     const askInput =
       document.querySelector<HTMLElement>("#ask-input") ??
@@ -90,21 +90,29 @@ export function extractAgentStatus(): AgentStatusResult {
       ) ??
       document.querySelector<HTMLElement>("textarea");
     let container = askInput?.parentElement ?? null;
-    for (let level = 0; container && level < levelsUp; level++) {
-      const stop = [
-        ...container.querySelectorAll<HTMLButtonElement>("button[aria-label]"),
-      ].find(
-        (button) =>
-          (button.getAttribute("aria-label") ?? "")
-            .replace(/\s+/g, " ")
-            .trim() === stopLabel,
-      );
-      if (stop) return stop;
+    for (let level = 1; container?.parentElement && level < levelsUp; level++) {
       container = container.parentElement;
     }
-    return null;
+    return container ? [...container.querySelectorAll("button")] : [];
   };
-  const hasActiveStopButton = findStopControl() !== null;
+  const labelOf = (button: Element): string =>
+    (button.getAttribute("aria-label") ?? "").replace(/\s+/g, " ").trim();
+  const showsStopIcon = (button: Element): boolean =>
+    [...button.querySelectorAll("use")].some(
+      (use) =>
+        (use.getAttribute("href") ?? use.getAttribute("xlink:href")) ===
+        "#pplx-icon-player-stop-filled",
+    );
+  const nearInputBar = inputBarButtons();
+  const hasActiveStopButton = nearInputBar.some(
+    (button) => labelOf(button) === "Stop response (Esc)",
+  );
+  // On a page in another language the stop control's label is translated,
+  // so its filled stop icon, which in the input bar only `Stop dictation`
+  // shares, reads as an answer in progress too: never as complete.
+  const hasStopIconBesideDictation = nearInputBar.some(
+    (button) => showsStopIcon(button) && labelOf(button) !== "Stop dictation",
+  );
 
   // More comprehensive loading detection
   const hasLoadingSpinner =
@@ -293,7 +301,7 @@ export function extractAgentStatus(): AgentStatusResult {
   let status: "idle" | "working" | "completed" = "idle";
 
   // FIRST: Check if actively working (stop button is the strongest indicator)
-  if (hasActiveStopButton) {
+  if (hasActiveStopButton || hasStopIconBesideDictation) {
     status = "working";
   } else if (hasLoadingSpinner || hasThinkingIndicator) {
     status = "working";
@@ -519,7 +527,10 @@ export function locateSubmitButton(): PagePoint | null {
 // icon is shared by the input bar's "Stop dictation" button and by the
 // answer's read-aloud "Stop", so the label decides, compared exactly and in
 // English, as the mode menu's labels are. `extractAgentStatus` finds it with
-// the same search, written inside it.
+// the same search, written inside it; it also reads that icon under any
+// other label but `Stop dictation`, near the input bar, as an answer in
+// progress, since a page in another language translates the label. Only a
+// click needs the exact control.
 
 /**
  * The centre of the input bar's stop control, looked for a few levels up

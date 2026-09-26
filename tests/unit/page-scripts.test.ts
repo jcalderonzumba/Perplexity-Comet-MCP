@@ -782,6 +782,55 @@ describe("extractAgentStatus reads the latest turn's answer", () => {
   });
 });
 
+// A page in another language: Perplexity translates the stop control's
+// label, so its icon, which only `Stop dictation` shares in the input bar,
+// is what keeps an answer in progress from reading as complete.
+describe("extractAgentStatus on a page in another language", () => {
+  /** The one-word thread, its input bar's placeholder in Russian. */
+  function loadRussianThread(): void {
+    document.body.innerHTML = ONE_WORD_THREAD;
+    const placeholder = [...document.querySelectorAll("div")].find(
+      (div) => div.textContent === "Ask a follow-up",
+    ) as HTMLElement;
+    placeholder.textContent = "Задайте уточняющий вопрос";
+  }
+
+  it("reads the input bar's stop icon under a translated label as an answer in progress, never complete", () => {
+    loadRussianThread();
+    latestAnswerRoot().innerHTML = "<p>Столица Франции —</p>";
+    replaceSubmitButtonWith(iconButton("Остановить ответ (Esc)"));
+
+    expect(runInPage(extractAgentStatus)).toMatchObject({
+      status: "working",
+      response: "",
+    });
+  });
+
+  it("still reads a complete answer while the input bar shows Stop dictation", () => {
+    document.body.innerHTML = ONE_WORD_THREAD;
+    (
+      document.querySelector('button[aria-label="Dictation"]') as HTMLElement
+    ).outerHTML = iconButton("Stop dictation");
+
+    expect(runInPage(extractAgentStatus)).toMatchObject({
+      status: "completed",
+      response: "Paris",
+    });
+  });
+
+  it("still reads a complete answer beside the read-aloud player's stop icon", () => {
+    document.body.innerHTML = ONE_WORD_THREAD;
+    answerBlocks()
+      .at(-1)
+      ?.insertAdjacentHTML("beforeend", iconButton("Остановить"));
+
+    expect(runInPage(extractAgentStatus)).toMatchObject({
+      status: "completed",
+      response: "Paris",
+    });
+  });
+});
+
 // The latest turn, by the index each question block carries: a hidden tab
 // renders only the turns near the view, so the index, not a count of the
 // blocks, says which turn is the latest.
