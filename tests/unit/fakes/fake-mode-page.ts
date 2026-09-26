@@ -7,6 +7,10 @@
 // than `RECLOSE_WINDOW_MS` before, in which case the page closes it again at
 // once; selecting an item checks it, renames the button and closes the menu;
 // Escape closes the menu. Time only passes through `wait`.
+//
+// With `windowHidden`, it is a tab whose window is behind others: the
+// browser drops trusted clicks and key presses to it unless its focus is
+// emulated, as the live page did on 2026-09-26.
 
 import type { ModePage } from "../../../src/core/mode.js";
 import {
@@ -34,6 +38,8 @@ export interface FakeModePageOptions {
   buttonAppearsAfterMs?: number;
   /** Whether the menu is open at the start. */
   menuOpen?: boolean;
+  /** Whether the tab's window is behind others, so input needs emulated focus. */
+  windowHidden?: boolean;
 }
 
 export class FakeModePage implements ModePage {
@@ -45,6 +51,16 @@ export class FakeModePage implements ModePage {
   public readonly scriptArguments: PageArgument[][] = [];
   public escapes = 0;
   public waitedMs = 0;
+  /**
+   * Every input and every change of focus emulation, oldest first:
+   * "focus:on", "focus:off", "click:<target>", "escape", and "dropped:…"
+   * for input the hidden window never received.
+   */
+  public readonly inputEvents: string[] = [];
+  /** Whether the page's focus is emulated now. */
+  public focusEmulated = false;
+  /** When set, starting focus emulation throws it, as a refused CDP call. */
+  public emulationRefusal: Error | null = null;
 
   /** Clicks on the button that the page ignores before one opens the menu. */
   public ignoredButtonClicks = 0;
@@ -66,6 +82,7 @@ export class FakeModePage implements ModePage {
   private buttonAppearsAt: number;
   private menuOpen: boolean;
   private lastClosedAt = Number.NEGATIVE_INFINITY;
+  private readonly windowHidden: boolean;
 
   constructor(options: FakeModePageOptions = {}) {
     this.labels = options.labels ?? [
@@ -78,6 +95,7 @@ export class FakeModePage implements ModePage {
     this.hasButton = options.hasButton ?? true;
     this.buttonAppearsAt = options.buttonAppearsAfterMs ?? 0;
     this.menuOpen = options.menuOpen ?? false;
+    this.windowHidden = options.windowHidden ?? false;
   }
 
   /** Whether the menu is open now. */
@@ -123,18 +141,43 @@ export class FakeModePage implements ModePage {
 
   async clickAt(point: PagePoint): Promise<void> {
     const target = this.targetAt(point);
+    if (this.dropsInput()) {
+      this.inputEvents.push(`dropped:click:${target}`);
+      return;
+    }
+    this.inputEvents.push(`click:${target}`);
     this.clicks.push(target);
     if (target === "button") this.clickButton();
     else if (target.startsWith("item:")) this.select(target.slice(5));
   }
 
   async pressEscape(): Promise<void> {
+    if (this.dropsInput()) {
+      this.inputEvents.push("dropped:escape");
+      return;
+    }
+    this.inputEvents.push("escape");
     this.escapes++;
     if (this.escapeCloses) this.close();
   }
 
   async wait(ms: number): Promise<void> {
     this.waitedMs += ms;
+  }
+
+  async startFocusEmulation(): Promise<void> {
+    if (this.emulationRefusal) throw this.emulationRefusal;
+    this.focusEmulated = true;
+    this.inputEvents.push("focus:on");
+  }
+
+  async stopFocusEmulation(): Promise<void> {
+    this.focusEmulated = false;
+    this.inputEvents.push("focus:off");
+  }
+
+  private dropsInput(): boolean {
+    return this.windowHidden && !this.focusEmulated;
   }
 
   private answer(script: unknown, args: PageArgument[]): unknown {

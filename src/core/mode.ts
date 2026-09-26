@@ -5,6 +5,9 @@
 // the item the catalogue names, then reopens the menu to read the checked
 // item back, and reports success only when the page shows the mode asked
 // for. Every wait is bounded, and every path that opened the menu closes it.
+// A switch runs with the page's focus emulated, so its clicks and Escape
+// reach a tab whose window is behind others, which the browser otherwise
+// drops them for; emulation ends with the switch, whatever it does.
 // Failures are data naming what the page showed; the adapter words and
 // wraps them (`describeModeFailure`), since page text is untrusted.
 
@@ -37,6 +40,12 @@ export interface ModePage {
   clickAt(point: PagePoint): Promise<void>;
   pressEscape(): Promise<void>;
   wait(ms: number): Promise<void>;
+  /**
+   * Makes the tab take trusted input as if its window were focused, until
+   * `stopFocusEmulation`; refused off Perplexity.
+   */
+  startFocusEmulation(): Promise<void>;
+  stopFocusEmulation(): Promise<void>;
 }
 
 /**
@@ -81,7 +90,9 @@ export type ModeFailure =
       buttonText: string;
     }
   | { kind: "menu-left-open"; mode: ToolMode }
-  | { kind: "page-error"; mode: ToolMode; message: string };
+  | { kind: "page-error"; mode: ToolMode; message: string }
+  /** `message` is the server's own refusal, not page text. */
+  | { kind: "focus-not-emulated"; mode: ToolMode; message: string };
 
 export type SwitchResult =
   | { ok: true; mode: ToolMode }
@@ -141,6 +152,8 @@ function failureDetail(
       return "the mode menu did not close";
     case "page-error":
       return `the page failed: ${quotePage(failure.message)}`;
+    case "focus-not-emulated":
+      return `the page's focus could not be emulated, so its clicks would not be taken (${failure.message})`;
   }
 }
 
@@ -230,7 +243,33 @@ export class ModeCore {
       : { status: "failed", mode, failure: result.failure };
   }
 
+  /**
+   * Selects on the page with its focus emulated, and stops emulating it
+   * whatever the selection does. Failing to stop never replaces the
+   * selection's own result: a connection too broken to stop it has ended
+   * the emulation with it.
+   */
   private async selectOnPage(
+    mode: ToolMode,
+    label: string,
+  ): Promise<SwitchResult> {
+    try {
+      await this.page.startFocusEmulation();
+    } catch (error) {
+      return fail({
+        kind: "focus-not-emulated",
+        mode,
+        message: errorMessage(error),
+      });
+    }
+    try {
+      return await this.selectAndClose(mode, label);
+    } finally {
+      await this.page.stopFocusEmulation().catch(() => undefined);
+    }
+  }
+
+  private async selectAndClose(
     mode: ToolMode,
     label: string,
   ): Promise<SwitchResult> {

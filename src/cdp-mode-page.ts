@@ -12,7 +12,8 @@
 // Clicks and Escape are trusted input, clicks at points a page script
 // returns. The client sends them only while the browser reports the tab's
 // top frame on Perplexity's own origin, so a page elsewhere, imitating the
-// mode button or an open menu, never steers them.
+// mode button or an open menu, never steers them; the same holds for the
+// focus emulation that lets them reach a tab whose window is behind others.
 
 import type { TrustedKey } from "./cdp-client.js";
 import { ModeCore, type ModePage } from "./core/mode.js";
@@ -33,6 +34,9 @@ export interface ModePageClient {
   evaluate(expression: string): Promise<EvaluateResult>;
   clickAt(point: PagePoint): Promise<void>;
   pressKey(key: TrustedKey): Promise<void>;
+  /** Makes the tab believe itself focused; refused off Perplexity. */
+  startFocusEmulation(): Promise<void>;
+  stopFocusEmulation(): Promise<void>;
 }
 
 class CdpModePage implements ModePage {
@@ -63,6 +67,14 @@ class CdpModePage implements ModePage {
 
   wait(ms: number): Promise<void> {
     return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  startFocusEmulation(): Promise<void> {
+    return this.client.startFocusEmulation();
+  }
+
+  stopFocusEmulation(): Promise<void> {
+    return this.client.stopFocusEmulation();
   }
 }
 
