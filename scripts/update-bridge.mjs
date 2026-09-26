@@ -9,8 +9,8 @@
  * a build that offers every tool replaces the entry, with `claude mcp`; if
  * adding the new entry fails, the previous one is put back. The new entry
  * keeps the current one's environment; its port is `COMET_PORT` from the
- * environment, else the current entry's, else the server's default. A running
- * Claude Code session keeps the server it started with.
+ * environment, else the current entry's, else the server's default. A new
+ * Claude Code session runs the new build.
  */
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
