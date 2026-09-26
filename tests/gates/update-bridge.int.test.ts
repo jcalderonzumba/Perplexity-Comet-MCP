@@ -61,6 +61,14 @@ describe("moving to the tip of main", { timeout: GIT_HEAVY_TEST_MS }, () => {
     expect(sandbox.callsTo("claude")).toEqual([]);
   });
 
+  it("changes nothing when an entry on the tip sets no port and none is asked for", () => {
+    sandbox.configure({ command: "npx", args: ["-y", spec(MAIN_TIP)] });
+    const outcome = sandbox.update();
+    expect(outcome.status).toBe(0);
+    expect(outcome.stdout).toContain("already runs");
+    expect(sandbox.callsTo("claude")).toEqual([]);
+  });
+
   it("adds the entry, on the server's default port, when there is none", () => {
     sandbox.configure(null);
     const outcome = sandbox.update();

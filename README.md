@@ -110,7 +110,7 @@ npm run bridge:update                 # the tip of main on GitHub
 npm run bridge:update -- <commit-sha> # a given commit, for example to go back
 ```
 
-It builds that commit with npx and asks it for its tools first, and replaces the user-scope `comet-bridge` entry only when every tool answers; if adding the new entry fails, it puts the old one back. It keeps the entry's environment, with `COMET_PORT` taken from your environment when you set it there, and does nothing when the entry already runs that commit on that port. Start a new Claude Code session to run the new build. It needs `git`, `npx` and `claude` on `PATH`, and runs on macOS and Linux.
+It builds that commit with npx and asks it for its tools first, and replaces the user-scope `comet-bridge` entry only when every tool answers; if adding the new entry fails, it puts the old one back. It keeps the entry's environment, with `COMET_PORT` taken from your environment when you set it there, and does nothing when the entry already runs that commit on that port. Start a new Claude Code session to run the new build. It passes the entry, its environment included, to `claude mcp add-json` on the command line, as `claude mcp add -e` does, so the values are briefly visible in the process list. It needs `git`, `npx` and `claude` on `PATH`, and runs on macOS and Linux.
 
 ### Other MCP clients
 

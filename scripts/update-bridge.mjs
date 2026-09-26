@@ -60,8 +60,9 @@ function tipOfMain() {
 function currentEntry() {
   const file = join(process.env.CLAUDE_CONFIG_DIR ?? homedir(), ".claude.json");
   if (!existsSync(file)) return null;
+  const text = readFileSync(file, "utf8");
   try {
-    return bridgeEntryIn(readFileSync(file, "utf8"));
+    return bridgeEntryIn(text);
   } catch (error) {
     throw new UpdateFailed(
       `${file} is not valid JSON (${error instanceof Error ? error.message : String(error)}); ${BRIDGE_NAME} left unchanged`,
@@ -147,7 +148,8 @@ async function main() {
   const current = currentEntry();
   const was = pinnedSha(current);
   const port = bridgePort(process.env, current);
-  if (was === sha && current?.env?.COMET_PORT === port) {
+  // The port the entry runs on, which is the server's default when it sets none.
+  if (was === sha && bridgePort({}, current) === port) {
     console.log(`${BRIDGE_NAME} already runs ${short(sha)}; nothing to do.`);
     return;
   }
@@ -165,7 +167,8 @@ async function main() {
 }
 
 // Exits explicitly: after a build that closes before answering, the SDK's
-// timer for the unanswered request would keep the process alive for a minute.
+// timer for the unanswered request, the build limit of five minutes, would
+// keep the process alive until it runs out.
 main().then(
   () => process.exit(0),
   (error) => {
