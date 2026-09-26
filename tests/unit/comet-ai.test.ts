@@ -1,3 +1,6 @@
+import { readdirSync, readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import { CometAI } from "../../src/comet-ai.js";
 import { FakeCdpClient } from "./fakes/fake-cdp-client.js";
@@ -133,5 +136,35 @@ describe("CometAI.getAgentStatus", () => {
     expect(js).toContain("function extractAgentStatus");
     // Wrapped as an immediately-invoked function expression
     expect(js.endsWith(")()")).toBe(true);
+  });
+});
+
+// The prompt is typed and submitted with trusted CDP input alone. Input
+// made in page script (`execCommand`, a synthetic key event, a form's
+// submit event) reports success without the window's focus and types
+// nothing, so none of it is left anywhere under `src/`.
+describe("src/ sends no input made in page script", () => {
+  const SRC = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "src");
+  const sources = readdirSync(SRC, { recursive: true, encoding: "utf8" })
+    .filter((file) => file.endsWith(".ts"))
+    .map((file) => [file, readFileSync(join(SRC, file), "utf8")] as const);
+
+  it.each([
+    ["execCommand call", /execCommand/],
+    ["synthetic KeyboardEvent", /new KeyboardEvent/],
+    ["form submit", /form\.submit|new Event\(\s*['"]submit['"]/],
+  ])("holds no %s", (_, pattern) => {
+    expect(sources.length).toBeGreaterThan(0);
+    const offenders = sources.filter(([, text]) => pattern.test(text));
+    expect(offenders.map(([file]) => file)).toEqual([]);
+  });
+
+  it("gives the Comet module no way to send a prompt of its own", () => {
+    const ai = new CometAI(new FakeCdpClient()) as unknown as Record<
+      string,
+      unknown
+    >;
+    expect(ai.sendPrompt).toBeUndefined();
+    expect(ai.submitPrompt).toBeUndefined();
   });
 });

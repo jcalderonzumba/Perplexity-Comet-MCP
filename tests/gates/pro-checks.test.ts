@@ -1156,7 +1156,8 @@ const EARLIER_ANSWER_RUN_ON = answer(
 
 /**
  * Comet as the Pro runs of 2026-09-24 and 2026-09-25 found it, each reply in
- * the shape the server gives today, a timeout in the ask core's words: the
+ * the shape the server gives today, a timeout in the ask core's words, and
+ * the prompt typed and submitted with trusted input, so [2.5] answers: the
  * checks the known-failures list names fail, and every other check holds.
  */
 const TODAY: Replies = {
@@ -1168,9 +1169,7 @@ const TODAY: Replies = {
   [CALLS.rememberAgain]: answer("Got it: 9473."),
   [CALLS.recallInNewChat]: IDLE_TIMED_OUT,
   [CALLS.essay]: timedOut("working", "Rome was founded, according to legend"),
-  [CALLS.context]: error(
-    "Error: Prompt text not found in input - typing may have failed",
-  ),
+  [CALLS.context]: answer("The project name is Artemis."),
   [CALLS.paragraphs]: answer("CHARLIE closes the three paragraphs."),
   [CALLS.heading]: answer("I can certainly help you with an overview."),
   [CALLS.tabs]: [NO_TABS, NO_TABS, NO_TABS],
@@ -1278,7 +1277,7 @@ describe("runProBattery", () => {
       undefined,
       noWait,
     );
-    expect(summaryLine(checks)).toBe("Results: 17 passed, 0 failed, 13 known");
+    expect(summaryLine(checks)).toBe("Results: 18 passed, 0 failed, 12 known");
     expect(batteryPassed(checks)).toBe(true);
     expect(
       checks
@@ -1432,7 +1431,7 @@ describe("runProBattery", () => {
     );
     expect(verdicts(checks)).toMatchObject({
       "1.5": "KNOWN",
-      "2.5": "KNOWN",
+      "2.5": "FAIL",
       "2.6-whole-answer": "KNOWN",
     });
   });

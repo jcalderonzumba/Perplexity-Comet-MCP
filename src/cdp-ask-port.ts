@@ -3,8 +3,11 @@
 //
 // Each method is one call to the client or the Comet module. The page is
 // read only through the tested functions of `page-scripts.ts`, through the
-// client's evaluate that reconnects when the connection drops.
+// client's evaluate that reconnects when the connection drops. The prompt
+// reaches the page only as the client's trusted text, which, like its keys
+// and clicks, the client sends only to a tab on Perplexity's origin.
 
+import type { TrustedKey } from "./cdp-client.js";
 import {
   AskCore,
   type AskPort,
@@ -14,10 +17,14 @@ import {
 } from "./core/ask.js";
 import type { ModeTool } from "./core/mode-tool.js";
 import {
+  locateSubmitButton,
+  type PagePoint,
   type ProseState,
   pageScriptExpression,
+  readAskInput,
   readPageAddress,
   readProseState,
+  selectAskInput,
 } from "./page-scripts.js";
 import type { EvaluateResult } from "./types.js";
 
@@ -34,13 +41,18 @@ export interface AskPortClient {
   safeEvaluate(expression: string): Promise<EvaluateResult>;
   isOnPerplexityTab(): Promise<boolean>;
   ensureOnPerplexityTab(): Promise<boolean>;
+  /** Trusted text at the focused element; refused off Perplexity. */
+  insertText(text: string): Promise<void>;
+  /** A trusted key press; refused off Perplexity. */
+  pressKey(key: TrustedKey): Promise<void>;
+  /** A trusted click at a point; refused off Perplexity. */
+  clickAt(point: PagePoint): Promise<void>;
 }
 
 /** The part of the Comet module the ask drives. */
 export interface AskPortComet {
   getAgentStatus(): Promise<AskStatus>;
   resetStabilityTracking(): void;
-  sendPrompt(prompt: string): Promise<unknown>;
   stopAgent(): Promise<boolean>;
 }
 
@@ -102,8 +114,28 @@ class CdpAskPort implements AskPort {
     this.comet.resetStabilityTracking();
   }
 
-  sendPrompt(prompt: string): Promise<unknown> {
-    return this.comet.sendPrompt(prompt);
+  selectAskInput(): Promise<boolean> {
+    return this.runPageScript(selectAskInput);
+  }
+
+  readAskInput(): Promise<string | null> {
+    return this.runPageScript(readAskInput);
+  }
+
+  locateSubmitButton(): Promise<PagePoint | null> {
+    return this.runPageScript(locateSubmitButton);
+  }
+
+  insertText(text: string): Promise<void> {
+    return this.client.insertText(text);
+  }
+
+  pressEnter(): Promise<void> {
+    return this.client.pressKey("Enter");
+  }
+
+  clickAt(point: PagePoint): Promise<void> {
+    return this.client.clickAt(point);
   }
 
   stopAgent(): Promise<boolean> {

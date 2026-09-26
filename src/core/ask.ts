@@ -3,7 +3,8 @@
 //
 // An ask validates its arguments before anything reaches the browser,
 // shapes the prompt, brings the connection to a Perplexity tab, puts back
-// the mode `comet_mode` last set, sends the prompt, and waits for an answer
+// the mode `comet_mode` last set, sends the prompt (typed and submitted
+// with trusted input by `ask-send.ts`), and waits for an answer
 // that is new: one that differs from the response on the page before the
 // prompt was sent. When its time runs out it says so and keeps the task
 // active, so the answer is never presented as complete before it is. The
@@ -16,10 +17,19 @@
 // is complete and new, and otherwise says the task is still working.
 
 import type { ProseState } from "../page-scripts.js";
-import { readAskRequest, shapePrompt, withContext } from "./ask-input.js";
+import {
+  type AskRequest,
+  readAskRequest,
+  shapePrompt,
+  withContext,
+} from "./ask-input.js";
 import { type ModeNotice, reapplyModeBeforeAsk } from "./ask-mode.js";
+import { PromptNotSent, type PromptPort, sendPrompt } from "./ask-send.js";
 import { AskTaskState } from "./ask-task.js";
 import type { ModeTool } from "./mode-tool.js";
+import { PageScriptFailed } from "./page-script-failed.js";
+
+export { PageScriptFailed };
 
 export const PERPLEXITY_HOME = "https://www.perplexity.ai/";
 
@@ -44,26 +54,11 @@ export interface AskStatus {
 }
 
 /**
- * A page script that threw in the page. Its message is the server's words;
- * `pageDetail` is what the page's exception says, text the page chooses, so
- * it reaches a reply only through the adapter's UNTRUSTED wrapper.
+ * What the ask core needs from the browser, the send step's needs among
+ * them; each adapter supplies one. A read through a page script rejects
+ * with `PageScriptFailed` when the script throws in the page.
  */
-export class PageScriptFailed extends Error {
-  constructor(
-    readonly scriptName: string,
-    readonly pageDetail: string,
-  ) {
-    super(`${scriptName} failed in the page`);
-    this.name = "PageScriptFailed";
-  }
-}
-
-/**
- * What the ask core needs from the browser; each adapter supplies one. A read
- * through a page script rejects with `PageScriptFailed` when the script
- * throws in the page.
- */
-export interface AskPort {
+export interface AskPort extends PromptPort {
   /** Checks the connection is alive; throws when it is not. */
   preOperationCheck(): Promise<unknown>;
   /** Starts Comet with its debug port on `port`, or finds it running. */
@@ -79,16 +74,11 @@ export interface AskPort {
   isOnPerplexityTab(): Promise<boolean>;
   /** Moves the connection back to a Perplexity tab; false when it cannot. */
   ensureOnPerplexityTab(): Promise<boolean>;
-  readProseState(): Promise<ProseState>;
   readStatus(): Promise<AskStatus>;
   /** Forgets the responses seen, before a new prompt is sent. */
   resetStabilityTracking(): void;
-  sendPrompt(prompt: string): Promise<unknown>;
   /** Stops the answer in progress; false when there was nothing to stop. */
   stopAgent(): Promise<boolean>;
-  /** Milliseconds, on the clock `wait` advances. */
-  now(): number;
-  wait(ms: number): Promise<void>;
 }
 
 /** The ask's waits, in milliseconds. */
@@ -232,6 +222,16 @@ export class AskCore {
     const prompt = withContext(request.prompt, request.context);
     this.task.start(prompt);
     this.watch = null;
+    const outcome = await this.connectSendAndWait(request, prompt);
+    if (outcome.kind === "failed" && this.watch === null) this.task.abandon();
+    return outcome;
+  }
+
+  /** The ask once its task has started, any failure as an outcome. */
+  private async connectSendAndWait(
+    request: AskRequest,
+    prompt: string,
+  ): Promise<AskOutcome> {
     let notice = NO_NOTICE;
     try {
       if (!(await this.connectOrRecover())) {
@@ -382,7 +382,7 @@ export class AskCore {
   ): Promise<AskOutcome> {
     this.port.resetStabilityTracking();
     const before = await this.readPageBefore();
-    await this.port.sendPrompt(prompt);
+    await sendPrompt(this.port, prompt, before.prose);
     this.watch = new AnswerWatch(before, this.port.now());
     return this.waitForAnswer(this.watch, timeoutMs, notice);
   }
@@ -576,6 +576,10 @@ function isPage(target: AskTarget): boolean {
 
 /** A failed ask, with the page's part apart when a page script threw. */
 function failure(error: unknown, notice: ModeNotice): AskOutcome {
+  if (error instanceof PromptNotSent && error.pageDetail !== undefined) {
+    const { message, pageDetail } = error;
+    return { kind: "failed", message, pageDetail, notice };
+  }
   if (error instanceof PageScriptFailed) {
     const { message, pageDetail } = error;
     return { kind: "failed", message, pageDetail, notice };

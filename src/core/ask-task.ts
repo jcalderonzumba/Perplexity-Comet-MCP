@@ -45,6 +45,11 @@ export class AskTaskState {
     this.isActive = false;
   }
 
+  /** Ends a task whose prompt never reached Comet: it has no answer. */
+  abandon(): void {
+    this.isActive = false;
+  }
+
   /** True with no task, or once the task started too long ago to follow. */
   isStale(): boolean {
     if (this.taskStartTime === null) return true;

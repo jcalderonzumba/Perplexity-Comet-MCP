@@ -215,7 +215,6 @@ describe("PRO_KNOWN_FAILURES", () => {
       ["2.1", ASK_RELIABILITY],
       ["2.2", ASK_RELIABILITY],
       ["2.3", ASK_RELIABILITY],
-      ["2.5", ASK_RELIABILITY],
       ["2.6-whole-answer", ASK_RELIABILITY],
       ["3.1", AGENTIC_BROWSING],
       ["3.2-agent-tab", AGENTIC_BROWSING],
@@ -229,6 +228,10 @@ describe("PRO_KNOWN_FAILURES", () => {
 
   it("no longer lists [2.4], since a timed-out ask now says its answer may be incomplete", () => {
     expect(PRO_KNOWN_FAILURES.map((entry) => entry.id)).not.toContain("2.4");
+  });
+
+  it("no longer lists [2.5], since the prompt is typed and submitted with trusted input", () => {
+    expect(PRO_KNOWN_FAILURES.map((entry) => entry.id)).not.toContain("2.5");
   });
 
   it("words a short answer run to its timeout as the ask's timeout result now reads", () => {

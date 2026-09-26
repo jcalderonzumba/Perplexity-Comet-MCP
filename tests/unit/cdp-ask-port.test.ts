@@ -1,13 +1,20 @@
 // @vitest-environment jsdom
 
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cdpAskPort, createCdpAskCore } from "../../src/cdp-ask-port.js";
 import { type AskTarget, PageScriptFailed } from "../../src/core/ask.js";
+import { sendPrompt } from "../../src/core/ask-send.js";
 import { ModeCore } from "../../src/core/mode.js";
 import {
+  locateSubmitButton,
   pageScriptExpression,
+  readAskInput,
   readPageAddress,
   readProseState,
+  selectAskInput,
 } from "../../src/page-scripts.js";
 import {
   FakeAskClient,
@@ -123,18 +130,67 @@ describe("cdpAskPort: reading the page", () => {
 });
 
 describe("cdpAskPort: the answer", () => {
-  it("reads the status, resets the stability tracking and sends the prompt through the Comet module", async () => {
+  it("reads the status and resets the stability tracking through the Comet module", async () => {
     const { comet, port } = rig();
 
     expect(await port.readStatus()).toEqual(WORKING_STATUS);
     port.resetStabilityTracking();
-    await port.sendPrompt("What is the capital of France?");
 
-    expect(comet.calls).toEqual([
-      "getAgentStatus",
-      "resetStabilityTracking",
-      "sendPrompt What is the capital of France?",
+    expect(comet.calls).toEqual(["getAgentStatus", "resetStabilityTracking"]);
+  });
+});
+
+const ASK_INPUT_FIXTURE = readFileSync(
+  join(dirname(fileURLToPath(import.meta.url)), "fixtures", "ask-input.html"),
+  "utf8",
+);
+
+describe("cdpAskPort: the input bar", () => {
+  it("selects the input bar, reads it and finds its Submit button with their page scripts", async () => {
+    const { client, port } = rig();
+    document.body.innerHTML = ASK_INPUT_FIXTURE;
+
+    expect(await port.selectAskInput()).toBe(true);
+    expect((await port.readAskInput())?.trim()).toBe(
+      "What is the capital of France?",
+    );
+    expect(await port.locateSubmitButton()).toEqual({
+      x: expect.any(Number),
+      y: expect.any(Number),
+    });
+    expect(client.expressions).toEqual([
+      pageScriptExpression(selectAskInput),
+      pageScriptExpression(readAskInput),
+      pageScriptExpression(locateSubmitButton),
     ]);
+  });
+
+  it("inserts text, presses Enter and clicks as the client's trusted input", async () => {
+    const { client, port } = rig();
+
+    await port.insertText("Paris?");
+    await port.pressEnter();
+    await port.clickAt({ x: 3, y: 4 });
+
+    expect(client.calls).toEqual([
+      "insertText Paris?",
+      "pressKey Enter",
+      "clickAt 3,4",
+    ]);
+  });
+
+  it("sends a hostile prompt through trusted text alone: unchanged, and in no page script", async () => {
+    const { client, port } = rig();
+    document.body.innerHTML = ASK_INPUT_FIXTURE;
+    const hostile = `Say "hi" \\ \`cmd\` \${alert(1)} </script><script>alert(2)</script>`;
+
+    await sendPrompt(port, hostile, { count: 0, lastText: "" });
+
+    expect(client.inserted).toEqual([hostile]);
+    expect(client.submitted).toEqual([hostile]);
+    for (const expression of client.expressions) {
+      expect(expression).not.toContain("alert");
+    }
   });
 });
 
@@ -182,7 +238,6 @@ describe("createCdpAskCore", () => {
     const comet = new FakeAskComet();
     client.preCheckFails = true;
     client.targets = [MAIN];
-    comet.sendFailure = new Error("typing failed");
     const core = createCdpAskCore({
       client,
       comet,
@@ -200,6 +255,10 @@ describe("createCdpAskCore", () => {
       "listTargets",
       "connect main",
     ]);
-    expect(outcome).toMatchObject({ kind: "failed", message: "typing failed" });
+    expect(outcome).toMatchObject({
+      kind: "failed",
+      message:
+        "The prompt was not sent: the input bar was not found on the page",
+    });
   });
 });

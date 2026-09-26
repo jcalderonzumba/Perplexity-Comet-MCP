@@ -69,12 +69,6 @@ export const PRO_KNOWN_FAILURES = [
     owningPlan: ASK_RELIABILITY,
   },
   {
-    id: "2.5",
-    reason:
-      'comet_ask can fail to type the prompt, and then reports "Prompt text not found in input"',
-    owningPlan: ASK_RELIABILITY,
-  },
-  {
     id: "2.6-whole-answer",
     reason:
       "comet_ask may return only the end of a multi-paragraph answer, as another Comet MCP server was seen to do, and no run has shown it whole yet",

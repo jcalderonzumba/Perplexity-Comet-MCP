@@ -1,7 +1,8 @@
-// A fake of the port `AskCore` drives: a model of Comet's tabs and of the
-// Perplexity page an ask reads, in virtual time.
+// A fake of the port `AskCore` drives: a model of Comet's tabs, of the
+// Perplexity page an ask reads, and of its input bar, in virtual time.
 //
-// Before the prompt is sent the page shows `before`. Once it is sent, each
+// The prompt is sent once `inputBar`, the fake input bar, takes it as
+// submitted. Before that the page shows `before`. Once it is sent, each
 // read of the prose state is one poll: it moves to the next of `after`, and
 // the last one stays. An `Error` in `after` makes that poll's reads throw,
 // as a CDP call does when the page goes away; an `Error` as `before` makes
@@ -10,7 +11,8 @@
 // other steps too, so it can check their order.
 
 import type { AskPort, AskStatus, AskTarget } from "../../../src/core/ask.js";
-import type { ProseState } from "../../../src/page-scripts.js";
+import type { PagePoint, ProseState } from "../../../src/page-scripts.js";
+import { FakeInputBar } from "./fake-input-bar.js";
 
 /** What one read of the page shows: its prose blocks and its status. */
 export interface PageReading {
@@ -79,10 +81,12 @@ export class FakeAskPort implements AskPort {
   public before: PageReading | Error = QUIET_PAGE;
   public after: Array<PageReading | Error> = [];
 
+  /** The input bar the prompt is typed into; its knobs fail each step. */
+  public readonly inputBar = new FakeInputBar();
+
   public preCheckFails = false;
   public recoveryFails = false;
   public navigationFails = false;
-  public sendFailure: Error | undefined;
   public onPerplexityTab = true;
   /** Whether the page shows a control that stops the answer. */
   public hasStopControl = true;
@@ -91,6 +95,13 @@ export class FakeAskPort implements AskPort {
 
   private sent = false;
   private poll = -1;
+
+  constructor() {
+    this.inputBar.onSubmit = (prompt) => {
+      this.sentPrompts.push(prompt);
+      this.sent = true;
+    };
+  }
 
   async preOperationCheck(): Promise<void> {
     this.calls.push("preOperationCheck");
@@ -168,12 +179,34 @@ export class FakeAskPort implements AskPort {
     this.calls.push("resetStabilityTracking");
   }
 
-  async sendPrompt(prompt: string): Promise<string> {
-    this.calls.push("sendPrompt");
-    if (this.sendFailure) throw this.sendFailure;
-    this.sentPrompts.push(prompt);
-    this.sent = true;
-    return "Prompt sent";
+  selectAskInput(): Promise<boolean> {
+    this.calls.push("selectAskInput");
+    return this.inputBar.selectAskInput();
+  }
+
+  readAskInput(): Promise<string | null> {
+    this.calls.push("readAskInput");
+    return this.inputBar.readAskInput();
+  }
+
+  insertText(text: string): Promise<void> {
+    this.calls.push("insertText");
+    return this.inputBar.insertText(text);
+  }
+
+  pressEnter(): Promise<void> {
+    this.calls.push("pressEnter");
+    return this.inputBar.pressEnter();
+  }
+
+  locateSubmitButton(): Promise<PagePoint | null> {
+    this.calls.push("locateSubmitButton");
+    return this.inputBar.locateSubmitButton();
+  }
+
+  clickAt(point: PagePoint): Promise<void> {
+    this.calls.push("clickAt");
+    return this.inputBar.clickAt(point);
   }
 
   async stopAgent(): Promise<boolean> {
