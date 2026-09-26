@@ -8,8 +8,9 @@
 // text replaces the selection, so the read-back finds exactly the prompt or
 // the text was not taken. The submit is a trusted Enter, and when the page
 // has not taken it within a bounded wait, a trusted click on the input
-// bar's Submit button. The browser drops trusted keys and clicks to a tab
-// whose window is behind others, though it takes the text, so focus is
+// bar's Submit button. The browser drops trusted keys and clicks to a hidden
+// tab, one not selected in its window, though it takes the text, and may do
+// so for a window behind others, so focus is
 // emulated around the submit, and only around it: the tab believes itself
 // focused and visible from the Enter until the prompt is known sent or not,
 // and the window is never raised.
@@ -61,8 +62,11 @@ export const SEND_TIMING = {
   submitPollMs: 250,
 } as const;
 
-/** The step of sending a prompt that failed. */
-export type SendStep = "input bar" | "text" | "submit";
+/**
+ * The step of sending a prompt that failed: freeing the input bar of an
+ * answer still in progress (`ask-previous.ts`), or one of this module's.
+ */
+export type SendStep = "previous answer" | "input bar" | "text" | "submit";
 
 /**
  * The prompt did not reach Comet; the message names the step. `pageDetail`

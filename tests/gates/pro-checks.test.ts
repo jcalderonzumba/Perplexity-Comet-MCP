@@ -20,7 +20,11 @@ import {
   type ScoredCheck,
   summaryLine,
 } from "../lib/battery-score.mjs";
-import type { DebugPort, ToolReply } from "../lib/no-pro-checks.mjs";
+import {
+  type DebugPort,
+  replyText,
+  type ToolReply,
+} from "../lib/no-pro-checks.mjs";
 import {
   agentOpenedTab,
   agentStopped,
@@ -351,6 +355,39 @@ describe("the ask predicates against the stdio server's own comet_ask replies", 
   const RUNS_OUT = [
     reading("Rome was founded", { hasStopButton: true, steps: ["Writing"] }),
   ];
+
+  it("answerNamesWithoutEcho [2.5] holds on the follow-up after [2.4]'s timeout, which stops [2.4]'s answer first and says so", async () => {
+    const prompt = "What is the project name?";
+    const port = new FakeAskPort();
+    port.after = [reading("Rome was", { hasStopButton: true, latestTurn: 3 })];
+    const core = new AskCore({
+      port,
+      mode: {
+        core: new ModeCore(new FakeModePage()),
+        quotePage: wrapUntrustedPageContent,
+      },
+      perplexity: new PerplexityTab(port),
+      cometPort: 9222,
+    });
+    await core.ask({ prompt: "essay", timeout: 3000 });
+    port.inputBar.answering = true;
+    port.nextAsk(reading("Rome was", { latestTurn: 3 }), [
+      reading("The project is Artemis.", {
+        status: "completed",
+        latestTurn: 4,
+      }),
+    ]);
+
+    const reply = toStdioResult(
+      describeAskOutcome(
+        await core.ask({ prompt, context: "Project name: Artemis" }),
+        wrapUntrustedPageContent,
+      ),
+    );
+
+    expect(replyText(reply)).toMatch(/^Comet was still answering/);
+    expect(answerNamesWithoutEcho(reply, "Artemis", prompt)).toBe(true);
+  });
 
   it("timeoutStated [2.4] holds on the timeout reply", async () => {
     const reply = await askReply(RUNS_OUT, { prompt: "essay", timeout: 3000 });
@@ -1232,11 +1269,11 @@ const EARLIER_ANSWER_RUN_ON = answer(
 /**
  * Comet as the Pro runs of 2026-09-24 to 2026-09-26 found it, with the ask's
  * own defects those runs showed fixed since (short answers, the latest
- * turn's answer, the poll after a stop): each reply in the shape the server
- * gives today, a timeout in the ask core's words, [2.5]'s submit not taken
- * while [2.4]'s essay may still be streaming, and the agent answering
- * without browsing. The checks the known-failures list names fail, and
- * every other check holds.
+ * turn's answer, the poll after a stop, a follow-up sent while [2.4]'s essay
+ * is still streaming): each reply in the shape the server gives today, a
+ * timeout in the ask core's words, and the agent answering without
+ * browsing. The checks the known-failures list names fail, and every other
+ * check holds.
  */
 const TODAY: Replies = {
   [CALLS.connect]: ok("Comet already running with debug port: Chrome/152"),
@@ -1247,9 +1284,7 @@ const TODAY: Replies = {
   [CALLS.rememberAgain]: answer("Got it: 9473."),
   [CALLS.recallInNewChat]: answer("You have not asked me to remember one."),
   [CALLS.essay]: timedOut("working", "Rome was founded, according to legend"),
-  [CALLS.context]: error(
-    "Error: The prompt was not sent: the submit was not taken, the input bar still holds the prompt after Enter and the page shows no Submit button",
-  ),
+  [CALLS.context]: answer("The project is Artemis."),
   [CALLS.paragraphs]: answer("ALPHA one.\n\nBRAVO two.\n\nCHARLIE three."),
   [CALLS.heading]: answer("I can certainly help you with an overview."),
   [CALLS.tabs]: [NO_TABS, NO_TABS, NO_TABS],
@@ -1295,7 +1330,6 @@ const AGENT_TABS = tabListing(AGENT_TAB);
 const FIXED: Replies = {
   ...TODAY,
   [CALLS.essay]: MAY_BE_INCOMPLETE,
-  [CALLS.context]: answer("The project is Artemis."),
   [CALLS.heading]: answer("Example Domain"),
   [CALLS.tabs]: [NO_TABS, AGENT_TABS, AGENT_TABS],
   [CALLS.trending]: answer("octo/widgets, with 12,345 stars"),
@@ -1350,7 +1384,7 @@ describe("runProBattery", () => {
       undefined,
       noWait,
     );
-    expect(summaryLine(checks)).toBe("Results: 23 passed, 0 failed, 7 known");
+    expect(summaryLine(checks)).toBe("Results: 24 passed, 0 failed, 6 known");
     expect(batteryPassed(checks)).toBe(true);
     expect(
       checks
@@ -1506,7 +1540,7 @@ describe("runProBattery", () => {
     );
     expect(verdicts(checks)).toMatchObject({
       "1.5": "FAIL",
-      "2.5": "KNOWN",
+      "2.5": "FAIL",
       "2.6-whole-answer": "FAIL",
     });
   });

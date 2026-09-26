@@ -23,7 +23,6 @@
 
 /** @typedef {{ id: string, verdict: Verdict, note: string, known?: KnownFailure }} ScoredCheck */
 
-const ASK_RELIABILITY = "plan 3 (comet_ask reliability)";
 const AGENTIC_BROWSING = "plan 12 (Agentic browsing)";
 
 /**
@@ -50,12 +49,6 @@ export const NO_PRO_KNOWN_FAILURES = [LEARN_MODE_NOT_SWITCHED];
  * @type {readonly KnownFailure[]}
  */
 export const PRO_KNOWN_FAILURES = [
-  {
-    id: "2.5",
-    reason:
-      "the follow-up is sent while Comet may still be writing [2.4]'s long essay, and the submit is not taken; that Perplexity takes no new prompt while it is still answering the previous question is the likely cause, not yet confirmed",
-    owningPlan: ASK_RELIABILITY,
-  },
   {
     id: "3.1",
     reason: "Comet answers a prompt that names a site without opening the site",

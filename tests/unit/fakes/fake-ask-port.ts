@@ -80,6 +80,11 @@ export class FakeAskPort extends FakeTabPort implements AskPort {
   /** Runs on every navigation, as a real one resets the page's mode. */
   public onNavigate: (() => void) | undefined;
   /**
+   * When set, the answer in progress, whose stop control the input bar
+   * shows, finishes once the clock reaches this time.
+   */
+  public answeringUntilMs: number | null = null;
+  /**
    * Runs at each poll after the prompt was sent, with its number from 0,
    * before the poll's reads return: what happens while the ask waits.
    */
@@ -117,7 +122,20 @@ export class FakeAskPort extends FakeTabPort implements AskPort {
     if (this.navigationFails) throw new Error("Navigation failed");
     this.navigations.push(url);
     this.url = url;
+    // A new page shows no answer in progress.
+    this.inputBar.answering = false;
     this.onNavigate?.();
+  }
+
+  /**
+   * The page as the next ask finds it: `before` until its prompt is sent,
+   * then `after`, poll by poll, as for the first ask.
+   */
+  nextAsk(before: PageReading, after: Array<PageReading | Error>): void {
+    this.before = before;
+    this.after = after;
+    this.sent = false;
+    this.poll = -1;
   }
 
   async readThreadState(): Promise<ThreadState> {
@@ -177,6 +195,13 @@ export class FakeAskPort extends FakeTabPort implements AskPort {
 
   locateStopControl(): Promise<PagePoint | null> {
     this.calls.push("locateStopControl");
+    if (
+      this.answeringUntilMs !== null &&
+      this.waitedMs >= this.answeringUntilMs
+    ) {
+      this.inputBar.answering = false;
+      this.answeringUntilMs = null;
+    }
     return this.inputBar.locateStopControl();
   }
 

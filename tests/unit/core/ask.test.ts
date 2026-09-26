@@ -18,6 +18,7 @@ import { PERPLEXITY_HOME } from "../../../src/perplexity-pages.js";
 import {
   FakeAskPort,
   type PageReading,
+  QUIET_PAGE as QUIET,
   reading,
 } from "../fakes/fake-ask-port.js";
 import { STOP_CONTROL } from "../fakes/fake-input-bar.js";
@@ -1291,6 +1292,158 @@ describe("AskCore.ask: stopped while it waits", () => {
   });
 });
 
+// Perplexity takes no new prompt while its input bar shows the stop control.
+// When the answer in progress is this server's own, from an ask that ran out
+// of time, a new ask replaces that task anyway, so it stops the answer and
+// says so; an answer the server did not start, perhaps the user's own, is
+// never stopped: the ask waits for it within its timeout, and otherwise
+// fails without sending.
+describe("AskCore.ask: while Comet is still answering the previous question", () => {
+  /** A rig whose first ask ran out of time with Comet still answering. */
+  async function afterATimedOutAsk(): Promise<Rig> {
+    const built = answering([
+      reading("Rome was", { hasStopButton: true, latestTurn: 3 }),
+    ]);
+    expect(
+      (await built.core.ask({ prompt: "essay", timeout: 3000 })).kind,
+    ).toBe("timed-out");
+    built.port.inputBar.answering = true;
+    built.port.nextAsk(reading("Rome was", { latestTurn: 3 }), [
+      reading("", { latestTurn: 4 }),
+      reading("Artemis", { status: "completed", latestTurn: 4 }),
+    ]);
+    built.port.calls.length = 0;
+    return built;
+  }
+
+  it("stops this server's own answer before typing, says so, and returns the new answer", async () => {
+    const { port, core } = await afterATimedOutAsk();
+
+    const outcome = await core.ask({ prompt: "q" });
+
+    expect(outcome).toMatchObject({
+      kind: "answered",
+      answer: "Artemis",
+      notice: {
+        line: "Comet was still answering this server's previous question, so that answer was stopped before this prompt was sent.",
+      },
+    });
+    expect(port.inputBar.clicks).toEqual([STOP_CONTROL]);
+    expect(port.calls.indexOf("clickAt")).toBeLessThan(
+      port.calls.indexOf("insertText"),
+    );
+    expect(port.sentPrompts.at(-1)).toBe("q");
+  });
+
+  it("puts the stop's line before the mode step's", async () => {
+    const built = await afterATimedOutAsk();
+    await built.modeCore.switchMode("research");
+    built.modePage.navigateTo("Search");
+    built.modePage.selectionTakes = false;
+
+    const outcome = await built.core.ask({ prompt: "q" });
+
+    expect(outcome.kind).toBe("answered");
+    const line = outcome.kind === "answered" ? (outcome.notice.line ?? "") : "";
+    expect(line).toMatch(
+      /^Comet was still answering this server's previous question/,
+    );
+    expect(line).toMatch(/\n\nMode not applied:/);
+  });
+
+  it("fails without typing when its stop of this server's own answer is not taken", async () => {
+    const { port, core } = await afterATimedOutAsk();
+    port.inputBar.takesStopClick = false;
+
+    const outcome = await core.ask({ prompt: "q" });
+
+    expect(outcome).toMatchObject({
+      kind: "failed",
+      message:
+        "The prompt was not sent: Comet is still answering this server's previous question, and the stop was not taken: the stop control still shows after a click on it",
+    });
+    expect(port.calls).not.toContain("insertText");
+    expect(await core.poll()).toEqual({ kind: "not-sent" });
+  });
+
+  it("never stops an answer this server did not start: it waits for it, then asks, within its timeout", async () => {
+    const { port, core } = rig();
+    port.inputBar.answering = true;
+    port.answeringUntilMs = 4500;
+    port.before = reading("An answer of yours", { latestTurn: 3 });
+    port.after = [
+      reading("", { latestTurn: 4 }),
+      reading("Paris", { status: "completed", latestTurn: 4 }),
+    ];
+
+    const outcome = await core.ask({ prompt: "q", timeout: 60000 });
+
+    expect(answerOf(outcome)).toBe("Paris");
+    expect(outcome.kind === "answered" && outcome.notice.line).toBeNull();
+    expect(port.inputBar.clicks).toEqual([]);
+    expect(port.calls.lastIndexOf("locateStopControl")).toBeLessThan(
+      port.calls.indexOf("insertText"),
+    );
+  });
+
+  it("counts its wait for another answer against its timeout", async () => {
+    const { port, core } = rig();
+    port.inputBar.answering = true;
+    port.answeringUntilMs = 6000;
+    port.after = [reading("Rome was", { latestTurn: 0 })];
+
+    const outcome = await core.ask({ prompt: "q", timeout: 9000 });
+
+    expect(outcome.kind).toBe("timed-out");
+    expect(outcome.kind === "timed-out" && outcome.timeoutMs).toBe(9000);
+    expect(port.waitedMs).toBeLessThan(9000 + 2 * ASK_TIMING.pollMs + 1000);
+  });
+
+  it("fails without sending, naming comet_poll and comet_stop, when another answer outlasts its timeout", async () => {
+    const { port, core } = rig();
+    port.inputBar.answering = true;
+
+    const outcome = await core.ask({ prompt: "q", timeout: 9000 });
+
+    expect(outcome).toMatchObject({ kind: "failed" });
+    const message = outcome.kind === "failed" ? outcome.message : "";
+    expect(message).toMatch(
+      /^The prompt was not sent: Comet was still answering a question this server did not ask when this ask's 9000 ms ran out/,
+    );
+    expect(message).toMatch(/comet_stop/);
+    expect(message).toMatch(/comet_poll/);
+    expect(port.calls).not.toContain("insertText");
+    expect(port.inputBar.clicks).toEqual([]);
+    expect(port.waitedMs).toBeGreaterThanOrEqual(9000);
+    expect(port.waitedMs).toBeLessThan(9000 + ASK_TIMING.pollMs + 1);
+    expect(await core.poll()).toEqual({ kind: "not-sent" });
+  });
+
+  it("never stops an answer in progress after this server's previous ask completed", async () => {
+    const { port, core } = answering([
+      reading("Paris", { status: "completed", latestTurn: 0 }),
+    ]);
+    await core.ask({ prompt: "first" });
+    port.inputBar.answering = true;
+    port.nextAsk(reading("", { latestTurn: 1 }), []);
+
+    const outcome = await core.ask({ prompt: "q", timeout: 3000 });
+
+    expect(outcome.kind).toBe("failed");
+    expect(port.inputBar.clicks).toEqual([]);
+  });
+
+  it("stops nothing for a new chat, whose page shows no answer in progress", async () => {
+    const { port, core } = await afterATimedOutAsk();
+    port.nextAsk(QUIET, [reading("Artemis", { status: "completed" })]);
+
+    const outcome = await core.ask({ prompt: "q", newChat: true });
+
+    expect(answerOf(outcome)).toBe("Artemis");
+    expect(port.inputBar.clicks).toEqual([]);
+  });
+});
+
 describe("src/core/ask.ts and its siblings", () => {
   const CORE = join(
     dirname(fileURLToPath(import.meta.url)),
@@ -1304,6 +1457,7 @@ describe("src/core/ask.ts and its siblings", () => {
     "ask.ts",
     "answer-watch.ts",
     "ask-input.ts",
+    "ask-previous.ts",
     "ask-send.ts",
     "ask-task.ts",
     "ask-reply.ts",
@@ -1322,7 +1476,7 @@ describe("src/core/ask.ts and its siblings", () => {
 
       for (const imported of imports) {
         expect(imported).toMatch(
-          /^(\.\/(ask|answer-watch|ask-input|ask-send|ask-stop|ask-task|ask-reply|ask-mode|ask-tab|perplexity-tab|mode|mode-tool|page-script-failed|thread-turn)\.js|\.\.\/(page-scripts|modes|perplexity-pages|error-message)\.js|node:crypto)$/,
+          /^(\.\/(ask|answer-watch|ask-input|ask-previous|ask-send|ask-stop|ask-task|ask-reply|ask-mode|ask-tab|perplexity-tab|mode|mode-tool|page-script-failed|thread-turn)\.js|\.\.\/(page-scripts|modes|perplexity-pages|error-message)\.js|node:crypto)$/,
         );
       }
     },

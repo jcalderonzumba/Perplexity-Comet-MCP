@@ -31,6 +31,7 @@ import {
   withContext,
 } from "./ask-input.js";
 import { type ModeNotice, reapplyModeBeforeAsk } from "./ask-mode.js";
+import { freeInputBar } from "./ask-previous.js";
 import { PromptNotSent, type PromptPort, sendPrompt } from "./ask-send.js";
 import { type StopOutcome, type StopPort, stopAnswer } from "./ask-stop.js";
 import { AskTab, type AskTabPort } from "./ask-tab.js";
@@ -201,13 +202,25 @@ export class AskCore {
     if (!reading.ok) return { kind: "refused", reason: reading.reason };
     const { request } = reading;
     const prompt = withContext(request.prompt, request.context);
+    const ownAnswerInProgress = this.followsAnAnswer();
     const taskId = this.task.start(prompt);
     this.watch = null;
-    const outcome = await this.connectSendAndWait(request, prompt, taskId);
+    const outcome = await this.connectSendAndWait(request, prompt, {
+      taskId,
+      ownAnswerInProgress,
+    });
     if (outcome.kind === "failed" && !this.sentPromptOf(taskId)) {
       this.task.abandon(taskId);
     }
     return outcome;
+  }
+
+  /**
+   * Whether the task followed now had its prompt sent and has no answer yet:
+   * an answer in progress on the page is then this server's own.
+   */
+  private followsAnAnswer(): boolean {
+    return this.watch !== null && this.task.isFollowing(this.watch.taskId);
   }
 
   /** Whether the prompt of the task `taskId` reached Comet. */
@@ -215,11 +228,16 @@ export class AskCore {
     return this.watch !== null && this.watch.taskId === taskId;
   }
 
-  /** The ask once its task has started, any failure as an outcome. */
+  /**
+   * The ask once its task has started, any failure as an outcome. The input
+   * bar is freed of an answer still in progress before the mode step, which
+   * clicks in it, and the time spent waiting for it counts against the
+   * ask's timeout.
+   */
   private async connectSendAndWait(
     request: AskRequest,
     prompt: string,
-    taskId: string,
+    { taskId, ownAnswerInProgress }: AskStart,
   ): Promise<AskOutcome> {
     let notice = NO_NOTICE;
     try {
@@ -227,10 +245,18 @@ export class AskCore {
         return { kind: "failed", message: CONNECTION_FAILED, notice };
       }
       await this.tab.bringToAskPage(request.newChat);
-      notice = await reapplyModeBeforeAsk(this.options.mode);
+      const free = await freeInputBar(this.port, {
+        own: ownAnswerInProgress,
+        timeoutMs: request.timeoutMs,
+      });
+      notice = startingWith(
+        free.line,
+        await reapplyModeBeforeAsk(this.options.mode),
+      );
       return await this.sendAndWait(shapePrompt(prompt), {
         taskId,
-        timeoutMs: request.timeoutMs,
+        timeoutMs: request.timeoutMs - free.waitedMs,
+        reportedTimeoutMs: request.timeoutMs,
         notice,
       });
     } catch (error) {
@@ -356,7 +382,7 @@ export class AskCore {
    */
   private async waitForAnswer(
     watch: AnswerWatch,
-    { taskId, timeoutMs, notice }: AnswerWait,
+    { taskId, timeoutMs, reportedTimeoutMs, notice }: AnswerWait,
   ): Promise<AskOutcome> {
     const startedAt = this.port.now();
     let errors = 0;
@@ -386,7 +412,7 @@ export class AskCore {
     }
     return {
       kind: "timed-out",
-      timeoutMs,
+      timeoutMs: reportedTimeoutMs,
       progress: await this.progressSoFar(watch),
       notice,
     };
@@ -446,11 +472,26 @@ export class AskCore {
   }
 }
 
+/** The ask's task, and whether an answer in progress would be its server's. */
+interface AskStart {
+  readonly taskId: string;
+  readonly ownAnswerInProgress: boolean;
+}
+
 /** The task an ask waits for, how long, and the notice its result carries. */
 interface AnswerWait {
   readonly taskId: string;
+  /** How long is left to wait for the answer. */
   readonly timeoutMs: number;
+  /** The ask's whole timeout, as its result names it. */
+  readonly reportedTimeoutMs: number;
   readonly notice: ModeNotice;
+}
+
+/** `notice`, with `line` before its own line when there is one. */
+function startingWith(line: string | null, notice: ModeNotice): ModeNotice {
+  if (line === null) return notice;
+  return { line: notice.line === null ? line : `${line}\n\n${notice.line}` };
 }
 
 /** The page's status and steps, with none of its text as a partial answer. */
