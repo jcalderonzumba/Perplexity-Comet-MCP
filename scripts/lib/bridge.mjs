@@ -90,17 +90,19 @@ export function bridgePort(env, entry) {
 }
 
 /**
- * The entry that runs a pinned build on a port.
+ * The entry that runs a pinned build on a port, keeping every other variable
+ * of the environment it replaces (`COMET_PATH`, `COMET_UPLOAD_ROOT`, ...).
  * @param {string} spec
  * @param {string} port
+ * @param {Record<string, string>} [keptEnv]
  * @returns {BridgeEntry}
  */
-export function bridgeEntry(spec, port) {
+export function bridgeEntry(spec, port, keptEnv = {}) {
   return {
     type: "stdio",
     command: "npx",
     args: ["-y", spec],
-    env: { COMET_PORT: port },
+    env: { ...keptEnv, COMET_PORT: port },
   };
 }
 

@@ -113,6 +113,17 @@ describe("bridgeEntry", () => {
   });
 });
 
+describe("bridgeEntry with an environment to keep", () => {
+  it("keeps every other variable and sets COMET_PORT", () => {
+    expect(
+      bridgeEntry(SPEC, "9444", {
+        COMET_PATH: "/opt/Comet",
+        COMET_PORT: "9222",
+      }).env,
+    ).toEqual({ COMET_PATH: "/opt/Comet", COMET_PORT: "9444" });
+  });
+});
+
 describe("BRIDGE_TOOLS", () => {
   it("names every tool the stdio server declares", () => {
     expect([...BRIDGE_TOOLS].sort()).toEqual(

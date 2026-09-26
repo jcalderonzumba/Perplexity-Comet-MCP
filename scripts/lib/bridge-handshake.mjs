@@ -7,13 +7,15 @@ import { StdioClientTransport } from "@modelcontextprotocol/sdk/client/stdio.js"
 
 /**
  * The time a first start may take: npx clones the repository at the commit
- * and builds it before the server answers (about 20 s on the owner's machine).
+ * and builds it before the server answers `initialize` (about 20 s on the
+ * owner's machine). It is each request's timeout, since the SDK's own default
+ * of 60 s would refuse a slow first build.
  */
 export const BUILD_TIMEOUT_MS = 300_000;
 
 /**
  * The names of the tools the entry's server lists. Rejects, with what the
- * server wrote to stderr, when it does not start or answer in time.
+ * server wrote to stderr, when it does not start or a request runs out of time.
  * @param {import("./bridge.mjs").BridgeEntry} entry
  * @param {number} [timeoutMs]
  * @returns {Promise<string[]>}
@@ -28,10 +30,8 @@ export async function toolsOffered(entry, timeoutMs = BUILD_TIMEOUT_MS) {
   const stderr = collect(transport.stderr);
   const client = new Client({ name: "bridge-update", version: "1.0.0" });
   try {
-    const { tools } = await within(timeoutMs, async () => {
-      await client.connect(transport);
-      return client.listTools();
-    });
+    await client.connect(transport, { timeout: timeoutMs });
+    const { tools } = await client.listTools(undefined, { timeout: timeoutMs });
     return tools.map((tool) => tool.name);
   } catch (error) {
     const output = stderr().trim();
@@ -65,26 +65,4 @@ function collect(stream) {
     text += String(chunk);
   });
   return () => text;
-}
-
-/**
- * @template T
- * @param {number} ms
- * @param {() => Promise<T>} work
- * @returns {Promise<T>}
- */
-async function within(ms, work) {
-  /** @type {NodeJS.Timeout | undefined} */
-  let timer;
-  const timeout = new Promise((_, reject) => {
-    timer = setTimeout(
-      () => reject(new Error(`no answer within ${Math.round(ms / 1000)}s`)),
-      ms,
-    );
-  });
-  try {
-    return /** @type {T} */ (await Promise.race([work(), timeout]));
-  } finally {
-    clearTimeout(timer);
-  }
 }

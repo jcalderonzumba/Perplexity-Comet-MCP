@@ -7,10 +7,10 @@
  * It runs `npx -y github:<owner>/<repo>#<sha>` once first, which clones and
  * builds that commit into npx's cache, and asks the build for its tools. Only
  * a build that offers every tool replaces the entry, with `claude mcp`; if
- * adding the new entry fails, the previous one is put back. The port is
- * `COMET_PORT` from the environment, else the current entry's, else the
- * server's default. Sessions already running keep the old server until they
- * reconnect it.
+ * adding the new entry fails, the previous one is put back. The new entry
+ * keeps the current one's environment; its port is `COMET_PORT` from the
+ * environment, else the current entry's, else the server's default. A running
+ * Claude Code session keeps the server it started with.
  */
 import { existsSync, readFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -59,7 +59,14 @@ function tipOfMain() {
 /** `~/.claude.json`, or the one in `CLAUDE_CONFIG_DIR` when that is set. */
 function currentEntry() {
   const file = join(process.env.CLAUDE_CONFIG_DIR ?? homedir(), ".claude.json");
-  return existsSync(file) ? bridgeEntryIn(readFileSync(file, "utf8")) : null;
+  if (!existsSync(file)) return null;
+  try {
+    return bridgeEntryIn(readFileSync(file, "utf8"));
+  } catch (error) {
+    throw new UpdateFailed(
+      `${file} is not valid JSON (${error instanceof Error ? error.message : String(error)}); ${BRIDGE_NAME} left unchanged`,
+    );
+  }
 }
 
 /**
@@ -109,8 +116,21 @@ function replaceEntry(current, next) {
       `claude mcp add-json failed; the previous ${BRIDGE_NAME} entry was restored`,
     );
   throw new UpdateFailed(
-    `claude mcp add-json failed, and so did restoring the previous entry: ${JSON.stringify(current)}`,
+    `claude mcp add-json failed, and so did restoring the previous entry; add it back by hand: ${describeEntry(current)}`,
   );
+}
+
+/**
+ * An entry's command line and the names of its variables, never their values,
+ * which may be secrets.
+ * @param {BridgeEntry} entry
+ */
+function describeEntry(entry) {
+  const commandLine = [entry.command, ...(entry.args ?? [])].join(" ");
+  const names = Object.keys(entry.env ?? {});
+  return names.length === 0
+    ? commandLine
+    : `${commandLine}, with the environment variables ${names.join(", ")}`;
 }
 
 /**
@@ -126,12 +146,13 @@ async function main() {
   const sha = requested ?? tipOfMain();
   const current = currentEntry();
   const was = pinnedSha(current);
-  if (was === sha) {
+  const port = bridgePort(process.env, current);
+  if (was === sha && current?.env?.COMET_PORT === port) {
     console.log(`${BRIDGE_NAME} already runs ${short(sha)}; nothing to do.`);
     return;
   }
   const spec = bridgeSpec(slug, sha);
-  const next = bridgeEntry(spec, bridgePort(process.env, current));
+  const next = bridgeEntry(spec, port, current?.env);
   console.log(
     `Building and checking ${spec} (the first start can take a minute)...`,
   );
@@ -139,7 +160,7 @@ async function main() {
   replaceEntry(current, next);
   console.log(
     `${BRIDGE_NAME}: ${described(was, current)} -> ${short(sha)}. ` +
-      "Reconnect it with /mcp, or start a new session.",
+      "Start a new Claude Code session to use it.",
   );
 }
 

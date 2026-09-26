@@ -101,7 +101,7 @@ claude mcp add -s user comet-bridge -e COMET_PORT=9222 -- \
   node /path/to/Perplexity-Comet-MCP/dist/index.js
 ```
 
-`claude mcp get comet-bridge` shows what it runs.
+`claude mcp get comet-bridge` shows what it runs. When nothing answers on that port, `comet_connect` starts Comet with remote debugging on it; if Comet is already running without it, `comet_connect` stops Comet and starts it again, on macOS and Windows (under WSL it only starts Comet).
 
 To move a pinned `comet-bridge` to a newer commit, run this from a clone of this repository:
 
@@ -110,7 +110,7 @@ npm run bridge:update                 # the tip of main on GitHub
 npm run bridge:update -- <commit-sha> # a given commit, for example to go back
 ```
 
-It builds that commit with npx and asks it for its tools first, and replaces the user-scope `comet-bridge` entry only when every tool answers; if adding the new entry fails, it puts the old one back. It keeps the entry's `COMET_PORT` unless `COMET_PORT` is set in the environment, and does nothing when the entry already runs that commit. Sessions already running keep the old server until you reconnect it with `/mcp`. It needs `git`, `npx` and `claude` on `PATH`, and runs on macOS and Linux. When nothing answers on that port, `comet_connect` starts Comet with remote debugging on it; if Comet is already running without it, `comet_connect` stops Comet and starts it again, on macOS and Windows (under WSL it only starts Comet).
+It builds that commit with npx and asks it for its tools first, and replaces the user-scope `comet-bridge` entry only when every tool answers; if adding the new entry fails, it puts the old one back. It keeps the entry's environment, with `COMET_PORT` taken from your environment when you set it there, and does nothing when the entry already runs that commit on that port. A running Claude Code session keeps the server it started with; start a new session to run the new build. It needs `git`, `npx` and `claude` on `PATH`, and runs on macOS and Linux.
 
 ### Other MCP clients
 

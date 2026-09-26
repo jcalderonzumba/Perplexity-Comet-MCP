@@ -49,7 +49,7 @@ describe("moving to the tip of main", { timeout: GIT_HEAVY_TEST_MS }, () => {
     expect(outcome.stdout).toContain(
       `${OLD.slice(0, 7)} -> ${MAIN_TIP.slice(0, 7)}`,
     );
-    expect(outcome.stdout).toContain("/mcp");
+    expect(outcome.stdout).toContain("new Claude Code session");
   });
 
   it("changes nothing when the entry already runs the tip of main", () => {
@@ -117,6 +117,40 @@ describe("choosing the commit and the port", {
     ]);
   });
 
+  it("moves to COMET_PORT from the environment even on the same commit", () => {
+    sandbox.configure(pinned(MAIN_TIP, "9222"));
+    const outcome = sandbox.update([], { COMET_PORT: "9444" });
+    expect(outcome.status).toBe(0);
+    expect(sandbox.callsTo("claude")).toEqual([
+      REMOVE,
+      addJson(pinned(MAIN_TIP, "9444")),
+    ]);
+  });
+
+  it("keeps every other variable of the entry's environment", () => {
+    const old = {
+      ...pinned(OLD),
+      env: { COMET_PATH: "/opt/Comet", COMET_PORT: "9222" },
+    };
+    sandbox.configure(old);
+    const outcome = sandbox.update();
+    expect(outcome.status).toBe(0);
+    expect(sandbox.callsTo("claude")).toEqual([
+      REMOVE,
+      addJson({ ...pinned(MAIN_TIP), env: old.env }),
+    ]);
+  });
+
+  it("names the file, without a stack trace, when .claude.json is not JSON", () => {
+    sandbox.writeConfig("{ not json");
+    const outcome = sandbox.update();
+    expect(outcome.status).toBe(1);
+    expect(outcome.stderr).toContain(".claude.json is not valid JSON");
+    expect(outcome.stderr).not.toContain("    at ");
+    expect(sandbox.callsTo("npx")).toEqual([]);
+    expect(sandbox.callsTo("claude")).toEqual([]);
+  });
+
   it("reads .claude.json from CLAUDE_CONFIG_DIR when it is set", () => {
     const directory = sandbox.configDirectory();
     sandbox.configure(pinned(MAIN_TIP), directory);
@@ -169,6 +203,37 @@ describe("a configuration step that fails", {
     expect(sandbox.callsTo("claude")).toEqual([
       REMOVE,
       addJson(pinned(MAIN_TIP)),
+      addJson(old),
+    ]);
+  });
+
+  it("says nothing is configured when there was no entry and the add fails", () => {
+    sandbox.configure(null);
+    sandbox.claudeFailsOn("add-json");
+    const outcome = sandbox.update();
+    expect(outcome.status).toBe(1);
+    expect(outcome.stderr).toContain("comet-bridge is not configured");
+    expect(sandbox.callsTo("claude")).toEqual([
+      addJson(pinned(MAIN_TIP, "9223")),
+    ]);
+  });
+
+  it("shows the lost entry, without its values, when the restore fails too", () => {
+    const old = {
+      ...pinned(OLD),
+      env: { COMET_BRIDGE_TOKEN: "s3cret-value", COMET_PORT: "9222" },
+    };
+    sandbox.configure(old);
+    sandbox.claudeFailsOn("add-json");
+    const outcome = sandbox.update();
+    expect(outcome.status).toBe(1);
+    expect(outcome.stderr).toContain("so did restoring");
+    expect(outcome.stderr).toContain(`npx -y ${spec(OLD)}`);
+    expect(outcome.stderr).toContain("COMET_BRIDGE_TOKEN, COMET_PORT");
+    expect(outcome.stderr).not.toContain("s3cret-value");
+    expect(sandbox.callsTo("claude")).toEqual([
+      REMOVE,
+      addJson({ ...pinned(MAIN_TIP), env: old.env }),
       addJson(old),
     ]);
   });

@@ -64,6 +64,11 @@ export class BridgeSandbox {
     );
   }
 
+  /** Writes `~/.claude.json` with this exact text. */
+  writeConfig(text: string): void {
+    writeFileSync(join(this.home, ".claude.json"), text);
+  }
+
   /** A second directory, for `CLAUDE_CONFIG_DIR`. */
   configDirectory(): string {
     const directory = join(this.#root, "config");
