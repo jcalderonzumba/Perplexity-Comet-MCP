@@ -45,21 +45,44 @@ export function serverUnderTest(entry, env) {
   };
 }
 
+const DEBUG_PORT_TIMEOUT_MS = 3000;
+
 /**
  * Whether Comet answers on the debug port, asked without the server, so that
- * a battery never makes the server launch or relaunch Comet.
+ * a battery never makes the server launch or relaunch Comet; and the
+ * addresses of the pages Comet has open, which the Pro battery reads to tell
+ * Perplexity's threads apart.
  * @param {number} port
- * @returns {{ port: number, answers: () => Promise<boolean> }}
+ * @returns {{ port: number, answers: () => Promise<boolean>, pageAddresses: () => Promise<string[]> }}
  */
 export function debugPort(port) {
+  const ask = (/** @type {string} */ path) =>
+    fetch(`http://127.0.0.1:${port}${path}`, {
+      signal: AbortSignal.timeout(DEBUG_PORT_TIMEOUT_MS),
+    });
   return {
     port,
     answers: () =>
-      fetch(`http://127.0.0.1:${port}/json/version`, {
-        signal: AbortSignal.timeout(3000),
-      }).then(
+      ask("/json/version").then(
         (response) => response.ok,
         () => false,
       ),
+    pageAddresses: async () => pageAddressesIn(await ask("/json/list")),
   };
+}
+
+/**
+ * The addresses of the page targets in the debug port's target list.
+ * @param {Response} response
+ * @returns {Promise<string[]>}
+ */
+async function pageAddressesIn(response) {
+  if (!response.ok) {
+    throw new Error(`the debug port's page list answered ${response.status}`);
+  }
+  /** @type {{ type?: string, url?: string }[]} */
+  const targets = await response.json();
+  return targets
+    .filter((target) => target.type === "page")
+    .map((target) => String(target.url));
 }

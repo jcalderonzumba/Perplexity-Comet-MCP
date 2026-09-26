@@ -20,11 +20,7 @@ import {
   type ScoredCheck,
   summaryLine,
 } from "../lib/battery-score.mjs";
-import {
-  type DebugPort,
-  replyText,
-  type ToolReply,
-} from "../lib/no-pro-checks.mjs";
+import { replyText, type ToolReply } from "../lib/no-pro-checks.mjs";
 import {
   agentOpenedTab,
   agentStopped,
@@ -35,6 +31,7 @@ import {
   emptyPromptRefused,
   fileNotFound,
   followUpAnswered,
+  type ProDebugPort,
   pollAfterStop,
   pollIdle,
   RESEARCH_PROMPT,
@@ -242,18 +239,83 @@ describe("followUpAnswered [2.2]", () => {
 
 describe("contextReset [2.3]", () => {
   const FIRST = answer("I will remember 9473.");
+  const FIRST_THREAD = "https://www.perplexity.ai/search/first-thread-1a2b";
+  const NEW_THREAD = "https://www.perplexity.ai/search/new-thread-3c4d";
+  const OTHER_THREAD = "https://www.perplexity.ai/search/other-thread-5e6f";
+  const threads = (before: string[], after: string[]) => ({
+    before,
+    after,
+  });
 
-  it("holds when the new chat's answer does not know the number", () => {
+  it("holds when the new chat answers in a thread that was not open after the first ask", () => {
     expect(
       contextReset({
         first: FIRST,
         fresh: answer("You have not asked me to remember a number."),
+        threads: threads([FIRST_THREAD], [NEW_THREAD]),
       }),
     ).toBe(true);
   });
 
-  it("fails when the new chat still knows the number", () => {
-    expect(contextReset({ first: FIRST, fresh: answer("9473") })).toBe(false);
+  it("holds when the new chat's answer knows the number, which the account's memory can carry into a new thread", () => {
+    expect(
+      contextReset({
+        first: FIRST,
+        fresh: answer("You asked me to remember 9473."),
+        threads: threads(
+          [FIRST_THREAD, OTHER_THREAD],
+          [NEW_THREAD, OTHER_THREAD],
+        ),
+      }),
+    ).toBe(true);
+  });
+
+  it("fails when the new chat's ask answered in a thread already open, as a follow-up would", () => {
+    expect(
+      contextReset({
+        first: FIRST,
+        fresh: answer("You have not asked me to remember a number."),
+        threads: threads([FIRST_THREAD], [FIRST_THREAD]),
+      }),
+    ).toBe(false);
+  });
+
+  it("fails when no thread was open after the first ask, so there is nothing to tell the new one from", () => {
+    expect(
+      contextReset({
+        first: FIRST,
+        fresh: answer("You have not asked me to remember a number."),
+        threads: threads(["https://www.perplexity.ai/"], [NEW_THREAD]),
+      }),
+    ).toBe(false);
+  });
+
+  it("counts only Perplexity's threads, not another page that opened", () => {
+    expect(
+      contextReset({
+        first: FIRST,
+        fresh: answer("You have not asked me to remember a number."),
+        threads: threads(
+          [FIRST_THREAD],
+          [
+            FIRST_THREAD,
+            "https://example.com/search/new-thread-3c4d",
+            "https://www.perplexity.ai/sidecar?copilot=true",
+            "https://www.perplexity.ai/",
+          ],
+        ),
+      }),
+    ).toBe(false);
+  });
+
+  it("tells threads apart by their id, whatever the address's query", () => {
+    expect(
+      contextReset({
+        first: FIRST,
+        fresh: answer("You have not asked me to remember a number."),
+        threads: threads([FIRST_THREAD], [`${FIRST_THREAD}?q=again`]),
+      }),
+    ).toBe(false);
   });
 
   it("fails when the new chat's ask is an error", () => {
@@ -261,14 +323,19 @@ describe("contextReset [2.3]", () => {
       contextReset({
         first: FIRST,
         fresh: error("Error: Prompt text not found in input"),
+        threads: threads([FIRST_THREAD], [NEW_THREAD]),
       }),
     ).toBe(false);
   });
 
   it("fails when the new chat's ask ran out of time", () => {
-    expect(contextReset({ first: FIRST, fresh: STILL_IN_PROGRESS })).toBe(
-      false,
-    );
+    expect(
+      contextReset({
+        first: FIRST,
+        fresh: STILL_IN_PROGRESS,
+        threads: threads([FIRST_THREAD], [NEW_THREAD]),
+      }),
+    ).toBe(false);
   });
 
   it("fails when the first ask is an error, so no number was given", () => {
@@ -276,6 +343,7 @@ describe("contextReset [2.3]", () => {
       contextReset({
         first: error("Error: Not connected to Comet"),
         fresh: answer("You have not asked me to remember a number."),
+        threads: threads([FIRST_THREAD], [NEW_THREAD]),
       }),
     ).toBe(false);
   });
@@ -1151,8 +1219,41 @@ describe("RESEARCH_WORKFLOW", () => {
 // calls, with which arguments, in which order, and how it scores what
 // comes back.
 
-const LISTENING: DebugPort = { port: 9223, answers: async () => true };
-const SILENT: DebugPort = { port: 9223, answers: async () => false };
+/** The thread the first ask of [2.3] leaves open, and the new chat's. */
+const FIRST_THREAD_PAGE = "https://www.perplexity.ai/search/first-thread-1a2b";
+const NEW_THREAD_PAGE = "https://www.perplexity.ai/search/new-thread-3c4d";
+
+/**
+ * A debug port Comet answers on, whose page list reads each of `pageReads`
+ * in turn, the last one again once they run out: by default, the first
+ * ask's thread, then the new chat's in its place.
+ */
+function listening(
+  pageReads: readonly (readonly string[])[] = [
+    [FIRST_THREAD_PAGE],
+    [NEW_THREAD_PAGE],
+  ],
+): ProDebugPort & { reads: number } {
+  const port = {
+    port: 9223,
+    reads: 0,
+    answers: async () => true,
+    pageAddresses: async () => {
+      const read = pageReads[Math.min(port.reads, pageReads.length - 1)];
+      port.reads += 1;
+      return [...(read ?? [])];
+    },
+  };
+  return port;
+}
+
+const SILENT: ProDebugPort = {
+  port: 9223,
+  answers: async () => false,
+  pageAddresses: async () => {
+    throw new Error("the page list is never read when Comet does not answer");
+  },
+};
 const noWait = async () => {};
 
 const ANSWER_ASK = 60000;
@@ -1271,7 +1372,8 @@ const EARLIER_ANSWER_RUN_ON = answer(
  * own defects those runs showed fixed since (short answers, the latest
  * turn's answer, the poll after a stop, a follow-up sent while [2.4]'s essay
  * is still streaming): each reply in the shape the server gives today, a
- * timeout in the ask core's words, and the agent answering without
+ * timeout in the ask core's words, the new chat's answer knowing the
+ * number from the account's memory, and the agent answering without
  * browsing, although the trending repository is named with its stars, as
  * the run of 2026-09-26 found it. The checks the known-failures list names
  * fail, and every other check holds.
@@ -1283,7 +1385,7 @@ const TODAY: Replies = {
   [CALLS.remember]: answer("NOTED"),
   [CALLS.recall]: answer("9473"),
   [CALLS.rememberAgain]: answer("Got it: 9473."),
-  [CALLS.recallInNewChat]: answer("You have not asked me to remember one."),
+  [CALLS.recallInNewChat]: answer("You asked me to remember 9473."),
   [CALLS.essay]: timedOut("working", "Rome was founded, according to legend"),
   [CALLS.context]: answer("The project is Artemis."),
   [CALLS.paragraphs]: answer("ALPHA one.\n\nBRAVO two.\n\nCHARLIE three."),
@@ -1383,7 +1485,7 @@ describe("runProBattery", () => {
   it("scores today's Comet as passed and known, and passes", async () => {
     const checks = await runProBattery(
       fakeServer(TODAY).callTool,
-      LISTENING,
+      listening(),
       undefined,
       noWait,
     );
@@ -1399,7 +1501,7 @@ describe("runProBattery", () => {
   it("scores every known failure as an unexpected pass once its fix lands", async () => {
     const checks = await runProBattery(
       fakeServer(FIXED).callTool,
-      LISTENING,
+      listening(),
       undefined,
       noWait,
     );
@@ -1417,7 +1519,7 @@ describe("runProBattery", () => {
     const reported: string[] = [];
     await runProBattery(
       fakeServer(TODAY).callTool,
-      LISTENING,
+      listening(),
       (check) => reported.push(check.id),
       noWait,
     );
@@ -1426,7 +1528,7 @@ describe("runProBattery", () => {
 
   it("makes these tool calls, in this order", async () => {
     const server = fakeServer(TODAY);
-    await runProBattery(server.callTool, LISTENING, undefined, noWait);
+    await runProBattery(server.callTool, listening(), undefined, noWait);
     expect(server.calls).toEqual([
       CALLS.connect,
       CALLS.session,
@@ -1475,7 +1577,7 @@ describe("runProBattery", () => {
     const tools = declaredTools();
     for (const replies of [TODAY, FIXED]) {
       const server = fakeServer(replies);
-      await runProBattery(server.callTool, LISTENING, undefined, noWait);
+      await runProBattery(server.callTool, listening(), undefined, noWait);
       const violations = server.calls.flatMap((call) => {
         const space = call.indexOf(" ");
         return schemaViolations(
@@ -1506,7 +1608,7 @@ describe("runProBattery", () => {
         [CALLS.missingFile]: error("Error: Not connected to Comet"),
         [CALLS.emptyPrompt]: answer("How can I help you today?"),
       }).callTool,
-      LISTENING,
+      listening(),
       undefined,
       noWait,
     );
@@ -1537,7 +1639,7 @@ describe("runProBattery", () => {
           "Write three short paragraphs about the sea. Start the first with the word ALPHA, the second with the word BRAVO and the third with the word CHARLIE.",
         ),
       }).callTool,
-      LISTENING,
+      listening(),
       undefined,
       noWait,
     );
@@ -1555,7 +1657,7 @@ describe("runProBattery", () => {
         [CALLS.recallInNewChat]: IDLE_TIMED_OUT,
         [CALLS.trending]: EARLIER_ANSWER_RUN_ON,
       }).callTool,
-      LISTENING,
+      listening(),
       undefined,
       noWait,
     );
@@ -1564,10 +1666,64 @@ describe("runProBattery", () => {
     expect(byId(checks, "3.4")).not.toHaveProperty("known");
   });
 
+  it("fails [2.3] when the new chat's ask answers in the thread the first ask left open", async () => {
+    const checks = await runProBattery(
+      fakeServer(TODAY).callTool,
+      listening([[FIRST_THREAD_PAGE], [FIRST_THREAD_PAGE]]),
+      undefined,
+      noWait,
+    );
+    expect(byId(checks, "2.3")).toMatchObject({ verdict: "FAIL" });
+    expect(byId(checks, "2.3")?.note).toMatch(
+      /^a thread of its own: no \(1 thread open after the first ask, 1 after the new chat's\) \/ /,
+    );
+  });
+
+  it("reads the browser's pages once after each of [2.3]'s asks, and at no other time", async () => {
+    const server = fakeServer(TODAY);
+    const readAfter: string[] = [];
+    const port = listening();
+    const recording: ProDebugPort = {
+      ...port,
+      pageAddresses: () => {
+        readAfter.push(server.calls.at(-1) ?? "");
+        return port.pageAddresses();
+      },
+    };
+    const checks = await runProBattery(
+      server.callTool,
+      recording,
+      undefined,
+      noWait,
+    );
+    expect(readAfter).toEqual([CALLS.rememberAgain, CALLS.recallInNewChat]);
+    expect(byId(checks, "2.3")?.note).toMatch(
+      /^a thread of its own: yes \(1 thread open after the first ask, 1 after the new chat's\) \/ /,
+    );
+  });
+
+  it("fails [2.3] with the error when the browser's pages cannot be read", async () => {
+    const checks = await runProBattery(
+      fakeServer(TODAY).callTool,
+      {
+        ...listening(),
+        pageAddresses: async () => {
+          throw new Error("fetch failed");
+        },
+      },
+      undefined,
+      noWait,
+    );
+    expect(byId(checks, "2.3")).toMatchObject({
+      verdict: "FAIL",
+      note: "fetch failed",
+    });
+  });
+
   it("scores [7.2-learn] with the no-pro battery's predicate, as known", async () => {
     const checks = await runProBattery(
       fakeServer(TODAY).callTool,
-      LISTENING,
+      listening(),
       undefined,
       noWait,
     );
@@ -1580,7 +1736,7 @@ describe("runProBattery", () => {
   it("waits before stopping the slow task, and again before polling", async () => {
     const server = fakeServer(TODAY);
     const waits: Array<[number, string]> = [];
-    await runProBattery(server.callTool, LISTENING, undefined, async (ms) => {
+    await runProBattery(server.callTool, listening(), undefined, async (ms) => {
       waits.push([ms, server.calls.at(-1) ?? ""]);
     });
     expect(waits).toEqual([
@@ -1600,7 +1756,12 @@ describe("runProBattery", () => {
       if (key(name, args) === CALLS.slowTask) slowTaskEnded = true;
       return reply;
     };
-    const checks = await runProBattery(callTool, LISTENING, undefined, noWait);
+    const checks = await runProBattery(
+      callTool,
+      listening(),
+      undefined,
+      noWait,
+    );
     expect(byId(checks, "4.3")).toMatchObject({
       verdict: "FAIL",
       note: "TIMEOUT after 10000ms",
@@ -1621,7 +1782,7 @@ describe("runProBattery", () => {
           `Error: Screenshot failed: ${"the page did not answer. ".repeat(8)}`,
         ),
       }).callTool,
-      LISTENING,
+      listening(),
       undefined,
       noWait,
     );
@@ -1635,7 +1796,7 @@ describe("runProBattery", () => {
         ...TODAY,
         [CALLS.screenshot]: new Error("MCP error -32000: Connection closed"),
       }).callTool,
-      LISTENING,
+      listening(),
       undefined,
       noWait,
     );
@@ -1652,7 +1813,7 @@ describe("runProBattery", () => {
       });
       const checks = await runProBattery(
         server.callTool,
-        LISTENING,
+        listening(),
         undefined,
         noWait,
       );

@@ -50,15 +50,15 @@ describe("the server under test", () => {
 });
 
 /**
- * A listener on 127.0.0.1 that answers `status` and records each URL asked,
- * as its `Host` header and path.
+ * A listener on 127.0.0.1 that answers `status` with `body` and records each
+ * URL asked, as its `Host` header and path.
  */
-async function loopbackListener(status: number) {
+async function loopbackListener(status: number, body = "{}") {
   const asked: string[] = [];
   const listener: Server = createServer((request, response) => {
     asked.push(`${request.headers.host}${request.url}`);
     response.writeHead(status, { "content-type": "application/json" });
-    response.end("{}");
+    response.end(body);
   });
   await new Promise<void>((listening) =>
     listener.listen(0, "127.0.0.1", listening),
@@ -104,5 +104,39 @@ describe("the debug-port probe", () => {
   it("answers false when nothing listens on the port", async () => {
     const port = await portNothingListensOn();
     expect(await debugPort(port).answers()).toBe(false);
+  });
+});
+
+describe("the debug port's page list", () => {
+  it("gives the address of each page target the port lists, and of nothing else", async () => {
+    const listener = await loopbackListener(
+      200,
+      JSON.stringify([
+        { type: "page", url: "https://www.perplexity.ai/search/a-thread" },
+        { type: "iframe", url: "https://count.perplexity.ai/bs" },
+        { type: "service_worker", url: "chrome-extension://x/sw.js" },
+        { type: "page", url: "https://www.perplexity.ai/sidecar?copilot=true" },
+      ]),
+    );
+    try {
+      expect(await debugPort(listener.port).pageAddresses()).toEqual([
+        "https://www.perplexity.ai/search/a-thread",
+        "https://www.perplexity.ai/sidecar?copilot=true",
+      ]);
+      expect(listener.asked).toEqual([`127.0.0.1:${listener.port}/json/list`]);
+    } finally {
+      await listener.close();
+    }
+  });
+
+  it("rejects when the port does not answer with its list, so the check fails with the reason", async () => {
+    const listener = await loopbackListener(500);
+    try {
+      await expect(debugPort(listener.port).pageAddresses()).rejects.toThrow(
+        /500/,
+      );
+    } finally {
+      await listener.close();
+    }
   });
 });
