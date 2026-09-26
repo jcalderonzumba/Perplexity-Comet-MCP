@@ -96,6 +96,26 @@ describe("cdpModePage", () => {
     expect(client.calls).toEqual([]);
   });
 
+  it("turns focus emulation on and off with the client's own calls", async () => {
+    const client = new FakePageClient();
+    const page = cdpModePage(client);
+
+    await page.startFocusEmulation();
+    await page.stopFocusEmulation();
+
+    expect(client.focusEmulation).toEqual(["on", "off"]);
+  });
+
+  it("passes on focus emulation the client refuses", async () => {
+    const client = new FakePageClient();
+    client.emulationRefusal = new Error("refused to emulate focus");
+
+    await expect(cdpModePage(client).startFocusEmulation()).rejects.toThrow(
+      "refused to emulate focus",
+    );
+    expect(client.focusEmulation).toEqual([]);
+  });
+
   it("presses Escape with the client's key press", async () => {
     const client = new FakePageClient();
 
@@ -276,6 +296,32 @@ describe("createCdpModeTool", () => {
       failure: { kind: "page-error" },
     });
     expect(client.clicks).toEqual([]);
+  });
+
+  it("fails a switch without a click when the client refuses to emulate focus", async () => {
+    document.body.innerHTML = readFileSync(
+      join(
+        dirname(fileURLToPath(import.meta.url)),
+        "fixtures",
+        "mode-menu.html",
+      ),
+      "utf8",
+    );
+    const client = new FakePageClient();
+    client.emulationRefusal = new Error(
+      "refused to emulate focus: the tab is not on https://www.perplexity.ai",
+    );
+
+    const result = await modeToolOver(client, quote).core.switchMode(
+      "research",
+    );
+
+    expect(result).toMatchObject({
+      ok: false,
+      failure: { kind: "focus-not-emulated" },
+    });
+    expect(client.clicks).toEqual([]);
+    expect(client.keys).toEqual([]);
   });
 
   it("quotes page text with the wrapper it is given", () => {

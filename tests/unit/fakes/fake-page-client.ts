@@ -20,6 +20,10 @@ export class FakePageClient
   public readonly expressions: string[] = [];
   public readonly clicks: PagePoint[] = [];
   public readonly keys: TrustedKey[] = [];
+  /** Each change of focus emulation: "on" or "off". */
+  public readonly focusEmulation: string[] = [];
+  /** When set, starting focus emulation throws it, as off Perplexity. */
+  public emulationRefusal: Error | null = null;
   public inputRefusal: Error | null = null;
 
   async evaluate(expression: string): Promise<EvaluateResult> {
@@ -47,5 +51,14 @@ export class FakePageClient
   async pressKey(key: TrustedKey): Promise<void> {
     if (this.inputRefusal) throw this.inputRefusal;
     this.keys.push(key);
+  }
+
+  async startFocusEmulation(): Promise<void> {
+    if (this.emulationRefusal) throw this.emulationRefusal;
+    this.focusEmulation.push("on");
+  }
+
+  async stopFocusEmulation(): Promise<void> {
+    this.focusEmulation.push("off");
   }
 }

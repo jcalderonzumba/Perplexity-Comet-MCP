@@ -257,6 +257,117 @@ describe("ModeCore.switchMode", () => {
   });
 });
 
+describe("ModeCore.switchMode with Comet's window behind others", () => {
+  it("switches, with the page's focus emulated so its clicks and Escape are taken", async () => {
+    const page = new FakeModePage({ windowHidden: true });
+    const core = new ModeCore(page);
+
+    const result = await core.switchMode("research");
+
+    expect(result).toEqual({ ok: true, mode: "research" });
+    expect(page.checked).toBe("Deep research");
+    expect(page.isMenuOpen).toBe(false);
+    expect(page.inputEvents.filter((e) => e.startsWith("dropped"))).toEqual([]);
+  });
+
+  it("turns emulation on before the first click and off after the Escape, once each", async () => {
+    const page = new FakeModePage();
+
+    await new ModeCore(page).switchMode("research");
+
+    expect(page.inputEvents).toEqual([
+      "focus:on",
+      "click:button",
+      "click:item:Deep research",
+      "click:button",
+      "escape",
+      "focus:off",
+    ]);
+    expect(page.focusEmulated).toBe(false);
+  });
+
+  it("turns emulation off when the menu never opens", async () => {
+    const page = new FakeModePage();
+    page.ignoredButtonClicks = 5;
+
+    const result = await new ModeCore(page).switchMode("research");
+
+    expect(failureOf(result).kind).toBe("menu-did-not-open");
+    expect(page.inputEvents.at(-1)).toBe("focus:off");
+    expect(page.focusEmulated).toBe(false);
+  });
+
+  it("turns emulation off when the page fails mid-switch", async () => {
+    const page = new FakeModePage();
+    page.failingScript = "locateModeMenuItem";
+
+    const result = await new ModeCore(page).switchMode("research");
+
+    expect(failureOf(result).kind).toBe("page-error");
+    expect(page.inputEvents.at(-1)).toBe("focus:off");
+    expect(page.focusEmulated).toBe(false);
+  });
+
+  it("fails naming the refusal, and clicks nothing, when emulation cannot start", async () => {
+    const page = new FakeModePage();
+    page.emulationRefusal = new Error(
+      "refused to emulate focus: the tab is not on https://www.perplexity.ai",
+    );
+    const core = new ModeCore(page);
+
+    const result = await core.switchMode("research");
+
+    expect(failureOf(result)).toEqual({
+      kind: "focus-not-emulated",
+      mode: "research",
+      message:
+        "refused to emulate focus: the tab is not on https://www.perplexity.ai",
+    });
+    expect(page.clicks).toEqual([]);
+    expect(page.escapes).toBe(0);
+    expect(core.rememberedMode).toBeUndefined();
+  });
+
+  it("keeps the switch's own result when turning emulation off fails", async () => {
+    const page = new FakeModePage();
+    page.stopFocusEmulation = async () => {
+      throw new Error("connection closed");
+    };
+
+    const result = await new ModeCore(page).switchMode("research");
+
+    expect(result).toEqual({ ok: true, mode: "research" });
+  });
+
+  it("puts a lost mode back behind other windows, as the ask's mode step does", async () => {
+    const page = new FakeModePage({ windowHidden: true });
+    const core = new ModeCore(page);
+    await core.switchMode("research");
+    page.navigateTo("Search");
+
+    const outcome = await core.ensureMode();
+
+    expect(outcome).toEqual({ status: "applied", mode: "research" });
+    expect(page.checked).toBe("Deep research");
+  });
+
+  it("reads the mode without emulating focus", async () => {
+    const page = new FakeModePage({ windowHidden: true });
+
+    await new ModeCore(page).readMode();
+
+    expect(page.inputEvents).toEqual([]);
+  });
+
+  it("refuses an unselectable mode without emulating focus", async () => {
+    const page = new FakeModePage();
+
+    await new ModeCore(page).switchMode("labs");
+
+    expect(page.inputEvents).toEqual([]);
+  });
+});
+
 describe("ModeCore.readMode", () => {
   it("reads the tool mode from the button without opening the menu", async () => {
     const page = new FakeModePage({ current: "Deep research" });
@@ -478,6 +589,22 @@ describe("describeModeFailure", () => {
       ),
     ).toBe(
       'Cannot switch to research mode: after selecting "Deep research" the menu has no item checked and the mode button reads <<Search>>',
+    );
+  });
+
+  it("states focus emulation that could not start, in the server's own words", () => {
+    const text = describeModeFailure(
+      {
+        kind: "focus-not-emulated",
+        mode: "research",
+        message:
+          "refused to emulate focus: the tab is not on https://www.perplexity.ai",
+      },
+      quote,
+    );
+
+    expect(text).toBe(
+      "Cannot switch to research mode: the page's focus could not be emulated, so its clicks would not be taken (refused to emulate focus: the tab is not on https://www.perplexity.ai)",
     );
   });
 
