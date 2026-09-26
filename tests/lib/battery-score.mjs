@@ -69,6 +69,12 @@ export const PRO_KNOWN_FAILURES = [
     owningPlan: ASK_RELIABILITY,
   },
   {
+    id: "2.5",
+    reason:
+      "the follow-up is sent while Comet may still be writing [2.4]'s long essay, and the submit is not taken; that Perplexity takes no new prompt while it is still answering the previous question is the likely cause, not yet confirmed",
+    owningPlan: ASK_RELIABILITY,
+  },
+  {
     id: "2.6-whole-answer",
     reason:
       "comet_ask may return only the end of a multi-paragraph answer, as another Comet MCP server was seen to do, and no run has shown it whole yet",
