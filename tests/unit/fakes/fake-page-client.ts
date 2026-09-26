@@ -7,17 +7,15 @@
 // refuses it off Perplexity, only when a test sets `inputRefusal`.
 
 import type { TrustedKey } from "../../../src/cdp-client.js";
-import type {
-  ModePageClient,
-  ModeTabClient,
-} from "../../../src/cdp-mode-page.js";
+import type { ModePageClient } from "../../../src/cdp-mode-page.js";
+import type { TabClient } from "../../../src/cdp-perplexity-tab.js";
 import type { PagePoint } from "../../../src/page-scripts.js";
 import type { EvaluateResult } from "../../../src/types.js";
 import { FakeTabPort } from "./fake-tab-port.js";
 
 export class FakePageClient
   extends FakeTabPort
-  implements ModePageClient, ModeTabClient
+  implements ModePageClient, TabClient
 {
   public readonly expressions: string[] = [];
   public readonly clicks: PagePoint[] = [];

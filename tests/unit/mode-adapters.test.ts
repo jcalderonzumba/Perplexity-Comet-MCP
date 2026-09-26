@@ -25,13 +25,23 @@ function sourceFiles(directory = SRC): string[] {
 describe.each(["index.ts", "http-bridge.ts"])("the %s adapter", (file) => {
   const source = sourceOf(file);
 
-  it("builds its mode tool over the CDP client with the shared UNTRUSTED wrapper", () => {
+  it("builds its mode tool over the CDP client with the shared UNTRUSTED wrapper and the shared tab choice", () => {
     expect(source).toContain(
       'import { wrapUntrustedPageContent } from "./untrusted.js";',
     );
     expect(source).toMatch(
-      /createCdpModeTool\(\s*cometClient,\s*wrapUntrustedPageContent,?\s*\)/,
+      /createCdpModeTool\(\s*cometClient,\s*wrapUntrustedPageContent,\s*perplexityTab,?\s*\)/,
     );
+  });
+
+  it("builds one tab choice over the CDP client, for its mode tool and its ask core alike", () => {
+    const builds = source.match(/createCdpPerplexityTab\([^)]*\)/g) ?? [];
+
+    expect(builds).toEqual(["createCdpPerplexityTab(cometClient)"]);
+    expect(source).toMatch(
+      /const perplexityTab = createCdpPerplexityTab\(cometClient\);/,
+    );
+    expect(source).not.toMatch(/new PerplexityTab\b/);
   });
 
   it("answers comet_mode through the mode tool", () => {

@@ -93,13 +93,14 @@ describe.each(ADAPTERS)("the $file adapter's comet_ask", (adapter) => {
     }
   });
 
-  it("builds its ask core once, over the CDP client, with its mode tool and the configured port", () => {
+  it("builds its ask core once, over the CDP client, with its mode tool, the tab choice they share and the configured port", () => {
     const builds = source.match(/createCdpAskCore\(\{[^}]*\}\)/g) ?? [];
 
     expect(builds).toHaveLength(1);
     expect(builds[0]).toMatch(/client:\s*cometClient\b/);
     expect(builds[0]).toMatch(/comet:\s*cometAI\b/);
     expect(builds[0]).toMatch(/mode:\s*modeTool\b/);
+    expect(builds[0]).toMatch(/perplexity:\s*perplexityTab\b/);
     expect(builds[0]).toMatch(/cometPort:\s*DEFAULT_PORT\b/);
     expect(source).toMatch(
       /import \{[^}]*\bDEFAULT_PORT\b[^}]*\} from "\.\/cdp-client\.js";/,

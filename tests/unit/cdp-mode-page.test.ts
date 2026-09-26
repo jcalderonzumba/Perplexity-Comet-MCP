@@ -5,7 +5,11 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cdpModePage, createCdpModeTool } from "../../src/cdp-mode-page.js";
-import type { BrowserTarget } from "../../src/core/perplexity-tab.js";
+import { createCdpPerplexityTab } from "../../src/cdp-perplexity-tab.js";
+import {
+  type BrowserTarget,
+  PerplexityTab,
+} from "../../src/core/perplexity-tab.js";
 import { pageScriptExpression } from "../../src/page-scripts.js";
 import { PERPLEXITY_HOME } from "../../src/perplexity-pages.js";
 import { FakePageClient } from "./fakes/fake-page-client.js";
@@ -20,6 +24,14 @@ import {
 afterEach(() => {
   vi.useRealTimers();
 });
+
+/** The mode tool over `client`, with a tab choice of its own over it. */
+function modeToolOver(
+  client: FakePageClient,
+  quote: (pageText: string) => string,
+): ReturnType<typeof createCdpModeTool> {
+  return createCdpModeTool(client, quote, createCdpPerplexityTab(client));
+}
 
 function echo(text: string): string {
   return text;
@@ -125,7 +137,7 @@ describe("createCdpModeTool: bringing the tab to Perplexity before a switch", ()
 
   /** The tool's move, with the opened tab's wait run on fake timers. */
   async function openPerplexity(client: FakePageClient): Promise<void> {
-    await openPerplexityWith(createCdpModeTool(client, quote));
+    await openPerplexityWith(modeToolOver(client, quote));
   }
 
   async function openPerplexityWith(
@@ -197,9 +209,18 @@ describe("createCdpModeTool: bringing the tab to Perplexity before a switch", ()
     expect(client.openedAt).toEqual([]);
   });
 
+  it("moves through the tab choice it is given, whose record then holds the tab it opened", async () => {
+    const client = openOn(SIDECAR_TAB, USER_TAB);
+    const perplexity = new PerplexityTab(client);
+
+    await openPerplexityWith(createCdpModeTool(client, quote, perplexity));
+
+    expect(perplexity.opened("opened-1")).toBe(true);
+  });
+
   it("reads the tab's address afresh through the client on every switch", async () => {
     const client = openOn(MAIN_TAB, USER_TAB);
-    const tool = createCdpModeTool(client, quote);
+    const tool = modeToolOver(client, quote);
 
     await openPerplexityWith(tool);
     client.url = USER_TAB.url;
@@ -226,7 +247,7 @@ describe("createCdpModeTool", () => {
     );
     const client = new FakePageClient();
 
-    const reading = await createCdpModeTool(client, quote).core.readMode();
+    const reading = await modeToolOver(client, quote).core.readMode();
 
     expect(reading).toEqual({ kind: "known", mode: "search" });
     expect(client.expressions).not.toEqual([]);
@@ -246,7 +267,7 @@ describe("createCdpModeTool", () => {
       "refused to click: the tab is not on https://www.perplexity.ai",
     );
 
-    const result = await createCdpModeTool(client, quote).core.switchMode(
+    const result = await modeToolOver(client, quote).core.switchMode(
       "research",
     );
 
@@ -258,16 +279,14 @@ describe("createCdpModeTool", () => {
   });
 
   it("quotes page text with the wrapper it is given", () => {
-    expect(createCdpModeTool(new FakePageClient(), quote).quotePage).toBe(
-      quote,
-    );
+    expect(modeToolOver(new FakePageClient(), quote).quotePage).toBe(quote);
   });
 
   it("gives each tool a core of its own", () => {
     const client = new FakePageClient();
 
-    expect(createCdpModeTool(client, quote).core).not.toBe(
-      createCdpModeTool(client, quote).core,
+    expect(modeToolOver(client, quote).core).not.toBe(
+      modeToolOver(client, quote).core,
     );
   });
 });

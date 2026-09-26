@@ -11,6 +11,7 @@ import {
 } from "../../src/core/ask-reply.js";
 import { ModeCore } from "../../src/core/mode.js";
 import { answerModeTool } from "../../src/core/mode-tool.js";
+import { PerplexityTab } from "../../src/core/perplexity-tab.js";
 import { toStdioResult } from "../../src/tool-results.js";
 import { wrapUntrustedPageContent } from "../../src/untrusted.js";
 import {
@@ -339,6 +340,7 @@ describe("the ask predicates against the stdio server's own comet_ask replies", 
         core: new ModeCore(new FakeModePage()),
         quotePage: wrapUntrustedPageContent,
       },
+      perplexity: new PerplexityTab(port),
       cometPort: 9222,
     });
     return toStdioResult(

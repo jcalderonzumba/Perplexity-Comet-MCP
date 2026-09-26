@@ -12,6 +12,7 @@ import { ASK_DEFAULT_TIMEOUT_MS } from "../../../src/core/ask-input.js";
 import { SEND_TIMING } from "../../../src/core/ask-send.js";
 import { TASK_STALE_AFTER_MS } from "../../../src/core/ask-task.js";
 import { ModeCore } from "../../../src/core/mode.js";
+import { PerplexityTab } from "../../../src/core/perplexity-tab.js";
 import type { PageArgument } from "../../../src/page-scripts.js";
 import { PERPLEXITY_HOME } from "../../../src/perplexity-pages.js";
 import {
@@ -55,6 +56,7 @@ interface Rig {
   port: FakeAskPort;
   modePage: LoggedModePage;
   modeCore: ModeCore;
+  perplexity: PerplexityTab;
   core: AskCore;
 }
 
@@ -62,12 +64,14 @@ function rig(): Rig {
   const port = new FakeAskPort();
   const modePage = new LoggedModePage(port.calls);
   const modeCore = new ModeCore(modePage);
+  const perplexity = new PerplexityTab(port);
   const core = new AskCore({
     port,
     mode: { core: modeCore, quotePage: quote },
+    perplexity,
     cometPort: COMET_PORT,
   });
-  return { port, modePage, modeCore, core };
+  return { port, modePage, modeCore, perplexity, core };
 }
 
 /** A rig whose page answers with `after`, poll by poll. */
@@ -366,6 +370,15 @@ describe("AskCore.ask: the tab it asks in", () => {
       expect(answerOf(outcome)).toBe(LONG_ANSWER);
     },
   );
+
+  it("records the tab it opens in the tab choice it is given, the one comet_mode shares", async () => {
+    const { core, perplexity } = openOn(SIDECAR_TAB, USER_TAB);
+
+    await core.ask({ prompt: "q" });
+
+    expect(core.tab.perplexity).toBe(perplexity);
+    expect(perplexity.opened("opened-1")).toBe(true);
+  });
 
   it("does not take a user's page that names Perplexity in its address for Perplexity", async () => {
     const { port, core } = openOn(LOOKALIKE_TAB);

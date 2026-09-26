@@ -26,6 +26,7 @@ import { URL } from "url";
 import { createCdpAskCore } from "./cdp-ask-port.js";
 import { cometClient, DEFAULT_PORT } from "./cdp-client.js";
 import { createCdpModeTool } from "./cdp-mode-page.js";
+import { createCdpPerplexityTab } from "./cdp-perplexity-tab.js";
 import { cometAI } from "./comet-ai.js";
 import {
   describeAskOutcome,
@@ -76,9 +77,17 @@ if (!BRIDGE_TOKEN) {
 // Tool Handlers (extracted from index.ts for reuse)
 // ============================================================================
 
+// The tab choice comet_ask and comet_mode share, and with it the one record
+// of the tabs the server opened, whichever of them opened a tab.
+const perplexityTab = createCdpPerplexityTab(cometClient);
+
 // The mode tool, and the mode it remembers, shared by comet_mode and
 // comet_ask for as long as the bridge runs.
-const modeTool = createCdpModeTool(cometClient, wrapUntrustedPageContent);
+const modeTool = createCdpModeTool(
+  cometClient,
+  wrapUntrustedPageContent,
+  perplexityTab,
+);
 
 // The ask core, and the task comet_poll and comet_stop follow, for as long
 // as the bridge runs. It puts back the mode comet_mode last set, and starts
@@ -87,6 +96,7 @@ const askCore = createCdpAskCore({
   client: cometClient,
   comet: cometAI,
   mode: modeTool,
+  perplexity: perplexityTab,
   cometPort: DEFAULT_PORT,
 });
 

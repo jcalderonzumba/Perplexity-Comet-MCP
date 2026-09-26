@@ -11,7 +11,7 @@ import { PERPLEXITY_HOME } from "../perplexity-pages.js";
 import {
   type BrowserTarget,
   isMainPageTarget,
-  PerplexityTab,
+  type PerplexityTab,
   type TabPort,
 } from "./perplexity-tab.js";
 
@@ -35,16 +35,16 @@ export const ASK_TAB_TIMING = {
 
 /** The connection an ask runs on, and the tab it asks in. */
 export class AskTab {
-  /** The tab choice; it remembers the tabs it opened. */
-  readonly perplexity: PerplexityTab;
-
   constructor(
     private readonly port: AskTabPort,
     /** The debug port Comet is started on when the connection is lost. */
     private readonly cometPort: number,
-  ) {
-    this.perplexity = new PerplexityTab(port);
-  }
+    /**
+     * The tab choice, which remembers the tabs it opened; the adapter's
+     * `comet_mode` shares it, so the record holds the tabs either opened.
+     */
+    readonly perplexity: PerplexityTab,
+  ) {}
 
   /** True when connected, after starting Comet again if the check failed. */
   async connectOrRecover(): Promise<boolean> {

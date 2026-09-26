@@ -16,7 +16,7 @@ import {
   PageScriptFailed,
 } from "./core/ask.js";
 import type { ModeTool } from "./core/mode-tool.js";
-import type { BrowserTarget } from "./core/perplexity-tab.js";
+import type { BrowserTarget, PerplexityTab } from "./core/perplexity-tab.js";
 import {
   locateSubmitButton,
   type PagePoint,
@@ -168,18 +168,22 @@ export interface CdpAskCoreOptions {
   readonly comet: AskPortComet;
   /** The adapter's `comet_mode` tool, whose remembered mode the ask puts back. */
   readonly mode: Pick<ModeTool, "core" | "quotePage">;
+  /** The tab choice that mode tool shares, from `createCdpPerplexityTab`. */
+  readonly perplexity: PerplexityTab;
   /** The debug port Comet is started on when the connection is lost. */
   readonly cometPort: number;
 }
 
 /**
  * The ask core over the CDP client. Each adapter builds one when it starts,
- * with the mode tool its `comet_mode` uses and the configured debug port.
+ * with the mode tool its `comet_mode` uses, the tab choice they share, and
+ * the configured debug port.
  */
 export function createCdpAskCore(options: CdpAskCoreOptions): AskCore {
   return new AskCore({
     port: cdpAskPort(options.client, options.comet),
     mode: options.mode,
+    perplexity: options.perplexity,
     cometPort: options.cometPort,
   });
 }

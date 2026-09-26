@@ -2,10 +2,12 @@
 // adapters build when they start, the move to Perplexity's main page the
 // `comet_mode` tool makes before a switch, and the tool built from them.
 //
-// The move is the ask's own tab choice, `PerplexityTab`: the connection goes
-// to Perplexity's main page as its one rule decides, never to the sidecar or
-// a user's page, and a new tab is opened on Perplexity's home page when no
-// main page is open. No tab is navigated.
+// The move is the ask's own tab choice, the one `PerplexityTab` the adapter
+// shares between its ask and its mode tool: the connection goes to
+// Perplexity's main page as its one rule decides, never to the sidecar or a
+// user's page, and a new tab is opened on Perplexity's home page when no
+// main page is open, into the record of opened tabs the ask keeps too. No
+// tab is navigated.
 //
 // Clicks and Escape are trusted input, clicks at points a page script
 // returns. The client sends them only while the browser reports the tab's
@@ -15,11 +17,7 @@
 import type { TrustedKey } from "./cdp-client.js";
 import { ModeCore, type ModePage } from "./core/mode.js";
 import type { ModeTool } from "./core/mode-tool.js";
-import {
-  type BrowserTarget,
-  PerplexityTab,
-  type TabPort,
-} from "./core/perplexity-tab.js";
+import type { PerplexityTab } from "./core/perplexity-tab.js";
 import {
   type PageArgument,
   type PagePoint,
@@ -35,16 +33,6 @@ export interface ModePageClient {
   evaluate(expression: string): Promise<EvaluateResult>;
   clickAt(point: PagePoint): Promise<void>;
   pressKey(key: TrustedKey): Promise<void>;
-}
-
-/** The part of the CDP client the move to Perplexity's main page drives. */
-export interface ModeTabClient {
-  listTargets(): Promise<readonly BrowserTarget[]>;
-  connect(targetId: string): Promise<unknown>;
-  /** The connected tab's top-frame address, read through CDP. */
-  pageAddress(): Promise<string>;
-  /** Opens a new tab on `url`, without connecting to it. */
-  newTab(url: string): Promise<BrowserTarget>;
 }
 
 class CdpModePage implements ModePage {
@@ -83,17 +71,6 @@ export function cdpModePage(client: ModePageClient): ModePage {
   return new CdpModePage(client);
 }
 
-/** The tab choice's port over `client`. */
-function cdpTabPort(client: ModeTabClient): TabPort {
-  return {
-    listTargets: () => client.listTargets(),
-    connect: (targetId) => client.connect(targetId),
-    pageAddress: () => client.pageAddress(),
-    newTab: (url) => client.newTab(url),
-    wait: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
-  };
-}
-
 function errorDetail(
   details: NonNullable<EvaluateResult["exceptionDetails"]>,
 ): string {
@@ -102,17 +79,18 @@ function errorDetail(
 
 /**
  * The `comet_mode` tool over `client`, with a mode core of its own. Each
- * adapter builds one when it starts, passing its UNTRUSTED wrapper.
+ * adapter builds one when it starts, passing its UNTRUSTED wrapper and the
+ * tab choice its ask core shares.
  */
 export function createCdpModeTool(
-  client: ModePageClient & ModeTabClient,
+  client: ModePageClient,
   quotePage: (pageText: string) => string,
+  perplexity: PerplexityTab,
 ): ModeTool {
-  const tab = new PerplexityTab(cdpTabPort(client));
   return {
     core: new ModeCore(cdpModePage(client)),
     openPerplexity: async () => {
-      await tab.bringToMainPage();
+      await perplexity.bringToMainPage();
     },
     quotePage,
   };

@@ -31,6 +31,7 @@ import { AskTab, type AskTabPort } from "./ask-tab.js";
 import { AskTaskState } from "./ask-task.js";
 import type { ModeTool } from "./mode-tool.js";
 import { PageScriptFailed } from "./page-script-failed.js";
+import type { PerplexityTab } from "./perplexity-tab.js";
 
 export { PageScriptFailed };
 
@@ -162,6 +163,11 @@ export interface AskCoreOptions {
   readonly port: AskPort;
   /** The mode tool whose remembered mode the ask puts back. */
   readonly mode: Pick<ModeTool, "core" | "quotePage">;
+  /**
+   * The tab choice, shared with that mode tool, so the one record of the
+   * tabs the server opened holds the ones either opened.
+   */
+  readonly perplexity: PerplexityTab;
   /** The debug port Comet is started on when the connection is lost. */
   readonly cometPort: number;
 }
@@ -188,7 +194,7 @@ export class AskCore {
   constructor(private readonly options: AskCoreOptions) {
     this.port = options.port;
     this.task = new AskTaskState(() => options.port.now());
-    this.tab = new AskTab(options.port, options.cometPort);
+    this.tab = new AskTab(options.port, options.cometPort, options.perplexity);
   }
 
   async ask(args: Record<string, unknown> | undefined): Promise<AskOutcome> {

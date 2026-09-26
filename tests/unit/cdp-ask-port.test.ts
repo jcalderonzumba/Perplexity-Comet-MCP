@@ -5,6 +5,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cdpAskPort, createCdpAskCore } from "../../src/cdp-ask-port.js";
+import { createCdpPerplexityTab } from "../../src/cdp-perplexity-tab.js";
 import { PageScriptFailed } from "../../src/core/ask.js";
 import { sendPrompt } from "../../src/core/ask-send.js";
 import { ModeCore } from "../../src/core/mode.js";
@@ -228,6 +229,7 @@ describe("createCdpAskCore", () => {
       client,
       comet,
       mode: { core: new ModeCore(new FakeModePage()), quotePage: (t) => t },
+      perplexity: createCdpPerplexityTab(client),
       cometPort: 9555,
     });
 
