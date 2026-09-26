@@ -71,7 +71,7 @@ export const PRO_KNOWN_FAILURES = [
   {
     id: "2.5",
     reason:
-      'comet_ask can fail to type the prompt, and then reports "Prompt text not found in input"',
+      "the follow-up is sent while Comet may still be writing [2.4]'s long essay, and the submit is not taken; that Perplexity takes no new prompt while it is still answering the previous question is the likely cause, not yet confirmed",
     owningPlan: ASK_RELIABILITY,
   },
   {

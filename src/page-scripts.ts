@@ -441,7 +441,72 @@ export function locateModeMenuItem(label: string): PagePoint | null {
   return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
 }
 
-/** The address of the page, as the page itself reports it. */
-export function readPageAddress(): string {
-  return window.location.href;
+// The input bar: as read from the live page on 2026-09-26, Perplexity's
+// input bar is a Lexical editor, a contenteditable `div#ask-input` with
+// role "textbox", on the home page and in a thread alike; a textarea on
+// older pages. Its Submit button (`aria-label="Submit"`) sits a few levels
+// up beside it, and shows only while the field holds text. The prompt
+// never reaches these scripts: it is inserted through CDP once
+// `selectAskInput` has focused the field.
+
+/**
+ * Focuses the input bar and selects everything in it, so the text inserted
+ * next replaces whatever it held; false when the page has no input bar.
+ */
+export function selectAskInput(): boolean {
+  const findAskInput = (): HTMLElement | null =>
+    document.querySelector<HTMLElement>("#ask-input") ??
+    document.querySelector<HTMLElement>(
+      '[contenteditable="true"][role="textbox"]',
+    ) ??
+    document.querySelector<HTMLElement>("textarea");
+
+  const input = findAskInput();
+  if (!input) return false;
+  input.focus();
+  if (input instanceof HTMLTextAreaElement) input.select();
+  else window.getSelection()?.selectAllChildren(input);
+  return true;
+}
+
+/** The text the input bar holds, or null when the page has no input bar. */
+export function readAskInput(): string | null {
+  const findAskInput = (): HTMLElement | null =>
+    document.querySelector<HTMLElement>("#ask-input") ??
+    document.querySelector<HTMLElement>(
+      '[contenteditable="true"][role="textbox"]',
+    ) ??
+    document.querySelector<HTMLElement>("textarea");
+
+  const input = findAskInput();
+  if (!input) return null;
+  return input instanceof HTMLTextAreaElement ? input.value : input.innerText;
+}
+
+/**
+ * The centre of the input bar's enabled Submit button, looked for a few
+ * levels up from the input bar, or null when there is none.
+ */
+export function locateSubmitButton(): PagePoint | null {
+  const findAskInput = (): HTMLElement | null =>
+    document.querySelector<HTMLElement>("#ask-input") ??
+    document.querySelector<HTMLElement>(
+      '[contenteditable="true"][role="textbox"]',
+    ) ??
+    document.querySelector<HTMLElement>("textarea");
+  const levelsUp = 6;
+
+  let container = findAskInput()?.parentElement ?? null;
+  for (let level = 0; container && level < levelsUp; level++) {
+    const button = container.querySelector<HTMLButtonElement>(
+      'button[aria-label="Submit"]',
+    );
+    if (button) {
+      if (button.disabled) return null;
+      const rect = button.getBoundingClientRect();
+      return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
+    }
+    container = container.parentElement;
+  }
+  return null;
 }

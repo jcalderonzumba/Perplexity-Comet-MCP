@@ -8,6 +8,7 @@
 // Failures are data naming what the page showed; the adapter words and
 // wraps them (`describeModeFailure`), since page text is untrusted.
 
+import { errorMessage } from "../error-message.js";
 import {
   isToolMode,
   MODE_CATALOGUE,
@@ -362,10 +363,6 @@ function fail(failure: ModeFailure): SwitchResult {
 
 function pageError(mode: ToolMode, error: unknown): ModeFailure {
   return { kind: "page-error", mode, message: errorMessage(error) };
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }
 
 function checkedLabelOf(items: ModeMenuItem[]): string | null {

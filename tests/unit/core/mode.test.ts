@@ -502,13 +502,13 @@ describe("src/core/mode.ts", () => {
     "utf8",
   );
 
-  it("imports only the mode catalogue and the page scripts, never an adapter or the CDP client", () => {
+  it("imports only the mode catalogue, the page scripts and the error-message helper, never an adapter or the CDP client", () => {
     const imported = [
       ...source.matchAll(/(?:from|import)\s*\(?\s*"([^"]+)"/g),
     ].map((match) => match[1]);
 
     expect(new Set(imported)).toEqual(
-      new Set(["../modes.js", "../page-scripts.js"]),
+      new Set(["../error-message.js", "../modes.js", "../page-scripts.js"]),
     );
   });
 

@@ -8,11 +8,13 @@ import {
   extractAgentStatus,
   locateModeButton,
   locateModeMenuItem,
+  locateSubmitButton,
   type PageArgument,
   pageScriptExpression,
+  readAskInput,
   readModeMenuItems,
-  readPageAddress,
   readProseState,
+  selectAskInput,
 } from "../../src/page-scripts.js";
 
 beforeEach(() => {
@@ -33,16 +35,6 @@ function markVisible(el: HTMLElement): void {
     },
   });
 }
-
-describe("readPageAddress", () => {
-  it("returns the address of the page it runs in", () => {
-    window.history.pushState({}, "", "/search/a-thread?q=1");
-
-    expect(readPageAddress()).toBe(
-      `${window.location.origin}/search/a-thread?q=1`,
-    );
-  });
-});
 
 describe("readProseState", () => {
   it("returns count=0 and empty lastText for an empty DOM", () => {
@@ -411,5 +403,144 @@ describe("locateModeMenuItem", () => {
     expect(runInPage(locateModeMenuItem, hostile)).toBeNull();
     expect(document.body).not.toBeNull();
     expect(runInPage(readModeMenuItems)).toHaveLength(3);
+  });
+});
+
+// The input bar and its Submit button, on a fixture of the live home page
+// with a prompt typed in.
+
+const ASK_INPUT_FIXTURE = readFileSync(
+  join(dirname(fileURLToPath(import.meta.url)), "fixtures", "ask-input.html"),
+  "utf8",
+);
+
+const FIXTURE_PROMPT = "What is the capital of France?";
+
+function loadAskInputFixture(): void {
+  document.body.innerHTML = ASK_INPUT_FIXTURE;
+}
+
+function askInput(): HTMLElement {
+  return document.getElementById("ask-input") as HTMLElement;
+}
+
+function submitButton(): HTMLButtonElement {
+  return document.querySelector(
+    'button[aria-label="Submit"]',
+  ) as HTMLButtonElement;
+}
+
+/** A page whose input bar is a textarea holding `value`, as older pages had. */
+function loadTextareaInputBar(value: string): HTMLTextAreaElement {
+  document.body.innerHTML = `<form><textarea placeholder="Ask anything"></textarea><button aria-label="Submit" type="button"></button></form>`;
+  const textarea = document.querySelector("textarea") as HTMLTextAreaElement;
+  textarea.value = value;
+  return textarea;
+}
+
+describe("selectAskInput", () => {
+  beforeEach(loadAskInputFixture);
+
+  it("focuses the input bar and selects everything in it, so inserted text replaces it", () => {
+    expect(runInPage(selectAskInput)).toBe(true);
+
+    expect(document.activeElement).toBe(askInput());
+    expect(window.getSelection()?.toString().trim()).toBe(FIXTURE_PROMPT);
+  });
+
+  it("selects the whole value of a textarea input bar", () => {
+    const textarea = loadTextareaInputBar("a draft");
+
+    expect(runInPage(selectAskInput)).toBe(true);
+
+    expect(document.activeElement).toBe(textarea);
+    expect([textarea.selectionStart, textarea.selectionEnd]).toEqual([0, 7]);
+  });
+
+  it("returns false, focusing and selecting nothing, on a page without an input bar", () => {
+    document.body.innerHTML = "<main><p>An article</p></main>";
+
+    expect(runInPage(selectAskInput)).toBe(false);
+    expect(document.activeElement).toBe(document.body);
+  });
+
+  it("never takes an editable region that is not a text box for the input bar", () => {
+    document.body.innerHTML = `<div contenteditable="true">notes</div>`;
+
+    expect(runInPage(selectAskInput)).toBe(false);
+  });
+});
+
+describe("readAskInput", () => {
+  beforeEach(loadAskInputFixture);
+
+  it("returns the text the input bar holds", () => {
+    expect(runInPage(readAskInput)?.trim()).toBe(FIXTURE_PROMPT);
+  });
+
+  it("returns what an empty input bar holds: no text", () => {
+    askInput().innerHTML = '<p dir="auto"><br></p>';
+
+    expect(runInPage(readAskInput)).toBe("");
+  });
+
+  it("returns a textarea input bar's value", () => {
+    loadTextareaInputBar("a draft");
+
+    expect(runInPage(readAskInput)).toBe("a draft");
+  });
+
+  it("returns null on a page without an input bar", () => {
+    document.body.innerHTML = "<main><p>An article</p></main>";
+
+    expect(runInPage(readAskInput)).toBeNull();
+  });
+});
+
+describe("locateSubmitButton", () => {
+  beforeEach(loadAskInputFixture);
+
+  it("returns the centre point of the input bar's Submit button", () => {
+    expect(runInPage(locateSubmitButton)).toEqual(anyPoint);
+  });
+
+  it("finds the Submit button beside a textarea input bar", () => {
+    loadTextareaInputBar("a draft");
+
+    expect(runInPage(locateSubmitButton)).toEqual(anyPoint);
+  });
+
+  it("returns null when the input bar shows no Submit button, as with an empty field", () => {
+    submitButton().remove();
+
+    expect(runInPage(locateSubmitButton)).toBeNull();
+  });
+
+  it("returns null when the Submit button is disabled", () => {
+    submitButton().disabled = true;
+
+    expect(runInPage(locateSubmitButton)).toBeNull();
+  });
+
+  it("returns null on a page without an input bar, whatever buttons it has", () => {
+    document.body.innerHTML = `<main><button aria-label="Submit" type="button"></button></main>`;
+
+    expect(runInPage(locateSubmitButton)).toBeNull();
+  });
+
+  it("never takes a Submit button far from the input bar", () => {
+    submitButton().remove();
+    const far = document.createElement("div");
+    far.innerHTML = `<button aria-label="Submit" type="button"></button>`;
+    let deep: HTMLElement = document.body;
+    for (let level = 0; level < 8; level++) {
+      const wrapper = document.createElement("div");
+      deep.appendChild(wrapper);
+      deep = wrapper;
+    }
+    deep.appendChild(askInput());
+    document.body.appendChild(far);
+
+    expect(runInPage(locateSubmitButton)).toBeNull();
   });
 });

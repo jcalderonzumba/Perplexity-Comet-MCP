@@ -1,13 +1,21 @@
 // @vitest-environment jsdom
 
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cdpAskPort, createCdpAskCore } from "../../src/cdp-ask-port.js";
-import { type AskTarget, PageScriptFailed } from "../../src/core/ask.js";
+import { createCdpPerplexityTab } from "../../src/cdp-perplexity-tab.js";
+import { PageScriptFailed } from "../../src/core/ask.js";
+import { sendPrompt } from "../../src/core/ask-send.js";
 import { ModeCore } from "../../src/core/mode.js";
+import type { BrowserTarget } from "../../src/core/perplexity-tab.js";
 import {
+  locateSubmitButton,
   pageScriptExpression,
-  readPageAddress,
+  readAskInput,
   readProseState,
+  selectAskInput,
 } from "../../src/page-scripts.js";
 import {
   FakeAskClient,
@@ -16,7 +24,7 @@ import {
 } from "./fakes/fake-ask-client.js";
 import { FakeModePage } from "./fakes/fake-mode-page.js";
 
-const MAIN: AskTarget = {
+const MAIN: BrowserTarget = {
   id: "main",
   type: "page",
   url: "https://www.perplexity.ai/search/a-thread",
@@ -59,24 +67,11 @@ describe("cdpAskPort: the connection and the tabs", () => {
     expect(await port.listTargets()).toEqual([MAIN]);
   });
 
-  it("finds the main tab among the client's categorised tabs", async () => {
-    const { client, port } = rig();
+  it("neither reads nor opens tabs itself: the shared tab choice does that", () => {
+    const { port } = rig();
 
-    expect(await port.mainTab()).toBeNull();
-    client.mainTab = MAIN;
-    expect(await port.mainTab()).toEqual(MAIN);
-  });
-
-  it("asks the client whether the tab is on Perplexity, and to move it there", async () => {
-    const { client, port } = rig();
-    client.onPerplexity = false;
-
-    expect(await port.isOnPerplexityTab()).toBe(false);
-    expect(await port.ensureOnPerplexityTab()).toBe(false);
-    expect(client.calls).toEqual([
-      "isOnPerplexityTab",
-      "ensureOnPerplexityTab",
-    ]);
+    expect("pageAddress" in port).toBe(false);
+    expect("newTab" in port).toBe(false);
   });
 });
 
@@ -92,49 +87,91 @@ describe("cdpAskPort: reading the page", () => {
     expect(client.expressions).toEqual([pageScriptExpression(readProseState)]);
   });
 
-  it("reads the tab's address with its page script", async () => {
-    const { client, port } = rig();
-    window.history.pushState({}, "", "/search/a-thread");
-
-    expect(await port.currentUrl()).toBe(
-      `${window.location.origin}/search/a-thread`,
-    );
-    expect(client.expressions).toEqual([pageScriptExpression(readPageAddress)]);
-  });
-
   it("rejects with the page's error, kept apart from its own words, when a page script fails", async () => {
     const { client, port } = rig();
     client.pageFailure = "TypeError: document is gone";
 
     const proseFailure = await port.readProseState().catch((error) => error);
-    const addressFailure = await port.currentUrl().catch((error) => error);
 
     expect(proseFailure).toBeInstanceOf(PageScriptFailed);
     expect(proseFailure).toMatchObject({
       message: "readProseState failed in the page",
       pageDetail: "TypeError: document is gone",
     });
-    expect(addressFailure).toBeInstanceOf(PageScriptFailed);
-    expect(addressFailure).toMatchObject({
-      message: "readPageAddress failed in the page",
-      pageDetail: "TypeError: document is gone",
-    });
   });
 });
 
 describe("cdpAskPort: the answer", () => {
-  it("reads the status, resets the stability tracking and sends the prompt through the Comet module", async () => {
+  it("reads the status and resets the stability tracking through the Comet module", async () => {
     const { comet, port } = rig();
 
     expect(await port.readStatus()).toEqual(WORKING_STATUS);
     port.resetStabilityTracking();
-    await port.sendPrompt("What is the capital of France?");
 
-    expect(comet.calls).toEqual([
-      "getAgentStatus",
-      "resetStabilityTracking",
-      "sendPrompt What is the capital of France?",
+    expect(comet.calls).toEqual(["getAgentStatus", "resetStabilityTracking"]);
+  });
+});
+
+const ASK_INPUT_FIXTURE = readFileSync(
+  join(dirname(fileURLToPath(import.meta.url)), "fixtures", "ask-input.html"),
+  "utf8",
+);
+
+describe("cdpAskPort: the input bar", () => {
+  it("selects the input bar, reads it and finds its Submit button with their page scripts", async () => {
+    const { client, port } = rig();
+    document.body.innerHTML = ASK_INPUT_FIXTURE;
+
+    expect(await port.selectAskInput()).toBe(true);
+    expect((await port.readAskInput())?.trim()).toBe(
+      "What is the capital of France?",
+    );
+    expect(await port.locateSubmitButton()).toEqual({
+      x: expect.any(Number),
+      y: expect.any(Number),
+    });
+    expect(client.expressions).toEqual([
+      pageScriptExpression(selectAskInput),
+      pageScriptExpression(readAskInput),
+      pageScriptExpression(locateSubmitButton),
     ]);
+  });
+
+  it("inserts text, presses Enter and clicks as the client's trusted input", async () => {
+    const { client, port } = rig();
+
+    await port.insertText("Paris?");
+    await port.pressEnter();
+    await port.clickAt({ x: 3, y: 4 });
+
+    expect(client.calls).toEqual([
+      "insertText Paris?",
+      "pressKey Enter",
+      "clickAt 3,4",
+    ]);
+  });
+
+  it("starts and stops focus emulation through the client", async () => {
+    const { client, port } = rig();
+
+    await port.startFocusEmulation();
+    await port.stopFocusEmulation();
+
+    expect(client.calls).toEqual(["startFocusEmulation", "stopFocusEmulation"]);
+  });
+
+  it("sends a hostile prompt through trusted text alone: unchanged, and in no page script", async () => {
+    const { client, port } = rig();
+    document.body.innerHTML = ASK_INPUT_FIXTURE;
+    const hostile = `Say "hi" \\ \`cmd\` \${alert(1)} </script><script>alert(2)</script>`;
+
+    await sendPrompt(port, hostile, { count: 0, lastText: "" });
+
+    expect(client.inserted).toEqual([hostile]);
+    expect(client.submitted).toEqual([hostile]);
+    for (const expression of client.expressions) {
+      expect(expression).not.toContain("alert");
+    }
   });
 });
 
@@ -182,11 +219,11 @@ describe("createCdpAskCore", () => {
     const comet = new FakeAskComet();
     client.preCheckFails = true;
     client.targets = [MAIN];
-    comet.sendFailure = new Error("typing failed");
     const core = createCdpAskCore({
       client,
       comet,
       mode: { core: new ModeCore(new FakeModePage()), quotePage: (t) => t },
+      perplexity: createCdpPerplexityTab(client),
       cometPort: 9555,
     });
 
@@ -200,6 +237,10 @@ describe("createCdpAskCore", () => {
       "listTargets",
       "connect main",
     ]);
-    expect(outcome).toMatchObject({ kind: "failed", message: "typing failed" });
+    expect(outcome).toMatchObject({
+      kind: "failed",
+      message:
+        "The prompt was not sent: the input bar was not found on the page",
+    });
   });
 });

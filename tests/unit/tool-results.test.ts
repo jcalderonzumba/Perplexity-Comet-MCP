@@ -15,6 +15,7 @@ import {
   describeStopOutcome,
 } from "../../src/core/ask-reply.js";
 import { ModeCore } from "../../src/core/mode.js";
+import { PerplexityTab } from "../../src/core/perplexity-tab.js";
 import { toBridgeResult, toStdioResult } from "../../src/tool-results.js";
 import { wrapUntrustedPageContent } from "../../src/untrusted.js";
 import { FakeAskPort, reading } from "./fakes/fake-ask-port.js";
@@ -235,6 +236,7 @@ describe("a page script's failure, as each adapter renders it", () => {
         core: new ModeCore(new FakeModePage()),
         quotePage: wrapUntrustedPageContent,
       },
+      perplexity: new PerplexityTab(port),
       cometPort: 9333,
     });
   }

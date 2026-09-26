@@ -207,7 +207,7 @@ describe("PRO_KNOWN_FAILURES", () => {
   const ASK_RELIABILITY = "plan 3 (comet_ask reliability)";
   const AGENTIC_BROWSING = "plan 12 (Agentic browsing)";
 
-  it("lists the checks the Pro runs of 2026-09-24 and 2026-09-25 failed, and the new ones, each with its owner", () => {
+  it("lists the checks the Pro runs of 2026-09-24 to 2026-09-26 failed, and the new ones, each with its owner", () => {
     expect(
       PRO_KNOWN_FAILURES.map((entry) => [entry.id, entry.owningPlan]),
     ).toEqual([
@@ -229,6 +229,14 @@ describe("PRO_KNOWN_FAILURES", () => {
 
   it("no longer lists [2.4], since a timed-out ask now says its answer may be incomplete", () => {
     expect(PRO_KNOWN_FAILURES.map((entry) => entry.id)).not.toContain("2.4");
+  });
+
+  it("lists [2.5] for its submit not taken while Comet may still be answering [2.4], a cause still to confirm", () => {
+    const entry = PRO_KNOWN_FAILURES.find((known) => known.id === "2.5");
+    expect(entry?.reason).toMatch(/the submit is not taken/);
+    expect(entry?.reason).toMatch(/still answering the previous question/);
+    expect(entry?.reason).toMatch(/not yet confirmed/);
+    expect(entry?.reason).not.toMatch(/Prompt text not found in input/);
   });
 
   it("words a short answer run to its timeout as the ask's timeout result now reads", () => {

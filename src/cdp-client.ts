@@ -5,7 +5,9 @@ import { type ChildProcess, execSync, spawn } from "child_process";
 import CDP from "chrome-remote-interface";
 import { existsSync } from "fs";
 import { platform } from "os";
+import { errorMessage } from "./error-message.js";
 import type { PagePoint } from "./page-scripts.js";
+import { isPerplexityMainPage, PERPLEXITY_ORIGIN } from "./perplexity-pages.js";
 import type {
   CDPTarget,
   CDPVersion,
@@ -223,9 +225,11 @@ export async function clickAtPoint(
   await input.dispatchMouseEvent({ type: "mouseReleased", ...press });
 }
 
-/** The slice of the CDP Page domain that `readTopFrameOrigin` uses. */
+/** The slice of the CDP Page domain that reads the tab's top frame. */
 export interface FrameTreeAPI {
-  getFrameTree(): Promise<{ frameTree: { frame: { securityOrigin: string } } }>;
+  getFrameTree(): Promise<{
+    frameTree: { frame: { url: string; securityOrigin: string } };
+  }>;
 }
 
 /**
@@ -236,6 +240,88 @@ export interface FrameTreeAPI {
 export async function readTopFrameOrigin(page: FrameTreeAPI): Promise<string> {
   const { frameTree } = await page.getFrameTree();
   return frameTree.frame.securityOrigin;
+}
+
+/**
+ * The address of the tab's top frame, as the browser reports it, read
+ * afresh through CDP for the same reasons as its origin.
+ */
+export async function readTopFrameAddress(page: FrameTreeAPI): Promise<string> {
+  const { frameTree } = await page.getFrameTree();
+  return frameTree.frame.url;
+}
+
+/** A key the server presses. */
+export type TrustedKey = "Enter" | "Escape";
+
+/** The parameters of the CDP `Input.dispatchKeyEvent` calls `pressKeyOn` sends. */
+export interface KeyEventParams {
+  type: "keyDown" | "rawKeyDown" | "keyUp";
+  key: TrustedKey;
+  code: string;
+  windowsVirtualKeyCode: number;
+  text?: string;
+  unmodifiedText?: string;
+}
+
+/** The slice of the CDP Input domain trusted input uses. */
+export interface TrustedInputAPI extends MouseInputAPI {
+  dispatchKeyEvent(params: KeyEventParams): Promise<unknown>;
+  insertText(params: { text: string }): Promise<unknown>;
+}
+
+/** What a real key press carries for each key, as a US keyboard sends it. */
+const KEY_CODES: Record<
+  TrustedKey,
+  { code: string; windowsVirtualKeyCode: number; text?: string }
+> = {
+  Enter: { code: "Enter", windowsVirtualKeyCode: 13, text: "\r" },
+  Escape: { code: "Escape", windowsVirtualKeyCode: 27 },
+};
+
+/**
+ * Refuses `action` unless the browser reports the tab's top frame on
+ * Perplexity's origin. Every trusted input the server sends passes here,
+ * and so does the focus emulation that lets it reach a tab behind other
+ * windows: the origin is read through CDP, never page script, and read
+ * immediately before the input, so a tab that navigated since the last one
+ * gets nothing. An origin that cannot be read refuses the input. A refusal
+ * names only Perplexity's origin, never the tab's: the site's operator
+ * chooses that one, and the refusal reaches replies as the server's words.
+ */
+async function refuseOffPerplexity(
+  page: FrameTreeAPI,
+  action: string,
+): Promise<void> {
+  let origin: string;
+  try {
+    origin = await readTopFrameOrigin(page);
+  } catch (error) {
+    throw new Error(
+      `refused to ${action}: the tab's origin could not be read (${errorMessage(error)})`,
+    );
+  }
+  if (origin !== PERPLEXITY_ORIGIN) {
+    throw new Error(
+      `refused to ${action}: the tab is not on ${PERPLEXITY_ORIGIN}`,
+    );
+  }
+}
+
+/**
+ * Press and release `key` with the codes a real key press carries; a key
+ * that types text (Enter) sends it on the way down, as a keyboard does.
+ */
+async function pressKeyOn(
+  input: TrustedInputAPI,
+  key: TrustedKey,
+): Promise<void> {
+  const { text, ...codes } = KEY_CODES[key];
+  const down = text
+    ? ({ type: "keyDown", text, unmodifiedText: text } as const)
+    : ({ type: "rawKeyDown" } as const);
+  await input.dispatchKeyEvent({ ...down, key, ...codes });
+  await input.dispatchKeyEvent({ type: "keyUp", key, ...codes });
 }
 
 // Detect if running in WSL (must be before windowsFetch)
@@ -609,8 +695,7 @@ export class CometCDPClient {
       return result;
     } catch (error: unknown) {
       this.consecutiveSuccesses = 0;
-      const errorMessage =
-        error instanceof Error ? error.message : String(error);
+      const message = errorMessage(error);
 
       const connectionErrors = [
         "WebSocket",
@@ -634,7 +719,7 @@ export class CometCDPClient {
       ];
 
       const isConnectionError = connectionErrors.some((e) =>
-        errorMessage.toLowerCase().includes(e.toLowerCase()),
+        message.toLowerCase().includes(e.toLowerCase()),
       );
 
       if (
@@ -760,12 +845,8 @@ export class CometCDPClient {
 
     return {
       main:
-        targets.find(
-          (t) =>
-            t.type === "page" &&
-            t.url.includes("perplexity.ai") &&
-            !t.url.includes("sidecar"),
-        ) || null,
+        targets.find((t) => t.type === "page" && isPerplexityMainPage(t.url)) ||
+        null,
       sidecar:
         targets.find((t) => t.type === "page" && t.url.includes("sidecar")) ||
         null,
@@ -790,82 +871,6 @@ export class CometCDPClient {
           !t.url.includes("chrome-extension"),
       ),
     };
-  }
-
-  /**
-   * Ensure we're connected to the main Perplexity tab
-   * Used during agentic browsing when Comet may open new tabs
-   */
-  async ensureOnPerplexityTab(): Promise<boolean> {
-    try {
-      // First check if current connection is valid and on Perplexity.
-      // Reject the sidecar URL — same reason as in reconnect(): the
-      // sidecar matches `perplexity.ai` but is a different tab.
-      if (this.client) {
-        try {
-          const urlResult = await this.client.Runtime.evaluate({
-            expression: "window.location.href",
-            timeout: 2000,
-          });
-          const currentUrl = urlResult.result.value as string;
-          if (
-            currentUrl?.includes("perplexity.ai") &&
-            !currentUrl.includes("sidecar")
-          ) {
-            return true; // Already on Perplexity main tab
-          }
-        } catch {
-          // Current connection is stale, continue to reconnect
-        }
-      }
-
-      // Find and connect to Perplexity main tab
-      const tabs = await this.listTabsCategorized();
-      if (tabs.main) {
-        await this.connect(tabs.main.id);
-        this.invalidateHealthCache();
-        return true;
-      }
-
-      // Fallback: find any Perplexity tab that isn't the sidecar.
-      const targets = await this.listTargets();
-      const perplexityTab = targets.find(
-        (t) =>
-          t.type === "page" &&
-          t.url.includes("perplexity.ai") &&
-          !t.url.includes("sidecar"),
-      );
-
-      if (perplexityTab) {
-        await this.connect(perplexityTab.id);
-        this.invalidateHealthCache();
-        return true;
-      }
-
-      return false;
-    } catch {
-      return false;
-    }
-  }
-
-  /**
-   * Check if we're currently connected to the Perplexity tab
-   */
-  async isOnPerplexityTab(): Promise<boolean> {
-    if (!this.client) return false;
-    try {
-      const result = await this.client.Runtime.evaluate({
-        expression: "window.location.href",
-        timeout: 2000,
-      });
-      const url = result.result.value as string;
-      // Sidecar URLs match `perplexity.ai` but are a different surface; treat
-      // them as "not the main tab" so callers don't dispatch sendPrompt /
-      // stopAgent there.
-      return !!url && url.includes("perplexity.ai") && !url.includes("sidecar");
-    } catch {
-      return false;
-    }
   }
 
   // ============ TAB REGISTRY METHODS ============
@@ -1792,27 +1797,69 @@ export class CometCDPClient {
   }
 
   /**
-   * Press a key
+   * Insert `text` at the focused element, as an IME would, whether or not
+   * the window has focus. Only on Perplexity (see `refuseOffPerplexity`).
+   *
+   * `Input.insertText` is marked experimental in the protocol: a Comet that
+   * changes it shows up when the caller reads the field back and finds the
+   * text not taken, never as a silent success.
    */
-  async pressKey(key: string): Promise<void> {
-    this.ensureConnected();
-    await this.client!.Input.dispatchKeyEvent({ type: "keyDown", key });
-    await this.client!.Input.dispatchKeyEvent({ type: "keyUp", key });
+  async insertText(text: string): Promise<void> {
+    const { Input } = await this.onPerplexity("insert text");
+    await Input.insertText({ text });
+  }
+
+  /** Press and release `key` as a real key press. Only on Perplexity. */
+  async pressKey(key: TrustedKey): Promise<void> {
+    const { Input } = await this.onPerplexity(`press ${key}`);
+    await pressKeyOn(Input, key);
   }
 
   /**
    * Click at a point in the page, in viewport CSS pixels, with real pointer
-   * events (see `clickAtPoint`)
+   * events (see `clickAtPoint`). Only on Perplexity.
    */
   async clickAt(point: PagePoint): Promise<void> {
-    this.ensureConnected();
-    await clickAtPoint(this.client!.Input, point);
+    const { Input } = await this.onPerplexity("click");
+    await clickAtPoint(Input, point);
   }
 
-  /** The security origin of the connected tab's top frame, read now. */
-  async pageOrigin(): Promise<string> {
+  /**
+   * Make the tab believe itself focused and visible, so trusted keys and
+   * clicks reach it while Comet's window is behind others or the tab is not
+   * the selected one: the browser drops them otherwise, while text
+   * insertion still lands. Only on Perplexity, like the input it lets
+   * through, and on until `stopFocusEmulation`; the window is not raised.
+   *
+   * `Emulation.setFocusEmulationEnabled` is marked experimental in the
+   * protocol: a Comet that changes it shows up as a submit not taken.
+   */
+  async startFocusEmulation(): Promise<void> {
+    const { Emulation } = await this.onPerplexity("emulate focus");
+    await Emulation.setFocusEmulationEnabled({ enabled: true });
+  }
+
+  /**
+   * End `startFocusEmulation`. Not gated on the tab's origin: stopping lets
+   * nothing more through, and must happen wherever the tab went since.
+   */
+  async stopFocusEmulation(): Promise<void> {
     this.ensureConnected();
-    return readTopFrameOrigin(this.client!.Page);
+    await this.client!.Emulation.setFocusEmulationEnabled({ enabled: false });
+  }
+
+  /** The connection, once the connected tab is known to be on Perplexity. */
+  private async onPerplexity(action: string): Promise<CDP.Client> {
+    this.ensureConnected();
+    const client = this.client!;
+    await refuseOffPerplexity(client.Page, action);
+    return client;
+  }
+
+  /** The address of the connected tab's top frame, read now through CDP. */
+  async pageAddress(): Promise<string> {
+    this.ensureConnected();
+    return readTopFrameAddress(this.client!.Page);
   }
 
   /**

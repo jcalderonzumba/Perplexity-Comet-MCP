@@ -1,0 +1,80 @@
+<!--
+  Perplexity's input bar on its home page with a prompt typed in, as read
+  from the live page on 2026-09-26 and trimmed to structure: classes,
+  styles, icon paths and the file input's accept list removed; the prompt
+  is invented. The input bar is a Lexical editor: a contenteditable div
+  holding one paragraph per line. The Submit button appears only once the
+  field holds text; with the field empty the page shows no Submit button.
+  A thread's follow-up input bar has the same id, role and Submit button.
+-->
+<div>
+  <div>
+    <div>
+      <!-- biome-ignore lint/a11y/useFocusableInteractive: Perplexity's own markup, kept as the page ships it -->
+      <!-- biome-ignore lint/a11y/useSemanticElements: Perplexity's own markup, kept as the page ships it -->
+      <div
+        id="ask-input"
+        role="textbox"
+        aria-placeholder="Ask anything…"
+        contenteditable="true"
+        data-lexical-editor="true"
+      >
+        <p dir="auto"><span data-lexical-text="true">What is the capital of France?</span></p>
+      </div>
+    </div>
+  </div>
+  <div>
+    <div>
+      <input type="file" />
+      <button
+        aria-label="Add files or tools"
+        type="button"
+        data-state="closed"
+        aria-expanded="false"
+      >
+        <div><div><svg aria-hidden="true"></svg></div></div>
+      </button>
+      <div>
+        <div aria-hidden="true" data-testid="ask-input-mode-toggle-indicator"></div>
+        <span data-testid="ask-input-mode-toggle-width-wrapper">
+          <span>
+            <button id="radix-_r_u_" type="button" data-state="closed">
+              <span><svg aria-hidden="true"></svg></span>
+              <span>Search</span>
+            </button>
+          </span>
+        </span>
+        <span data-testid="ask-input-mode-toggle-width-wrapper">
+          <span>
+            <span data-state="closed">
+              <button type="button">
+                <span><svg aria-hidden="true"></svg></span>
+                <span>Computer</span>
+              </button>
+            </span>
+          </span>
+        </span>
+      </div>
+    </div>
+    <div>
+      <div>
+        <button
+          aria-label="Model"
+          type="button"
+          data-state="closed"
+          aria-expanded="false"
+        >
+          <span>Model</span>
+        </button>
+      </div>
+      <div>
+        <button aria-label="Dictation" type="button" data-state="closed">
+          <div><div><svg aria-hidden="true"></svg></div></div>
+        </button>
+      </div>
+      <button aria-label="Submit" type="button" data-state="closed">
+        <div><div><svg aria-hidden="true"></svg></div></div>
+      </button>
+    </div>
+  </div>
+</div>

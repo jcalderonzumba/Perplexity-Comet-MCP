@@ -79,6 +79,31 @@ describe("AskTaskState", () => {
     expect(task.isActive).toBe(false);
   });
 
+  it("abandons a task whose prompt was never sent: no answer, and no longer followed", () => {
+    const clock = manualClock();
+    const task = new AskTaskState(clock.now);
+    task.start("a prompt");
+
+    task.abandon();
+
+    expect(task.isActive).toBe(false);
+    expect(task.lastResponse).toBeNull();
+    expect(task.lastPrompt).toBe("a prompt");
+    expect(task.promptNeverSent).toBe(true);
+  });
+
+  it("knows a task's prompt was sent until the task is abandoned, and again once the next task starts", () => {
+    const clock = manualClock();
+    const task = new AskTaskState(clock.now);
+    task.start("a prompt");
+    expect(task.promptNeverSent).toBe(false);
+
+    task.abandon();
+    task.start("the next prompt");
+
+    expect(task.promptNeverSent).toBe(false);
+  });
+
   it("is stale with no task, and five minutes after the task started", () => {
     const clock = manualClock();
     const task = new AskTaskState(clock.now);

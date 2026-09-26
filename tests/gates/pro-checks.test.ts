@@ -11,6 +11,7 @@ import {
 } from "../../src/core/ask-reply.js";
 import { ModeCore } from "../../src/core/mode.js";
 import { answerModeTool } from "../../src/core/mode-tool.js";
+import { PerplexityTab } from "../../src/core/perplexity-tab.js";
 import { toStdioResult } from "../../src/tool-results.js";
 import { wrapUntrustedPageContent } from "../../src/untrusted.js";
 import {
@@ -339,6 +340,7 @@ describe("the ask predicates against the stdio server's own comet_ask replies", 
         core: new ModeCore(new FakeModePage()),
         quotePage: wrapUntrustedPageContent,
       },
+      perplexity: new PerplexityTab(port),
       cometPort: 9222,
     });
     return toStdioResult(
@@ -662,6 +664,25 @@ describe("the poll and stop predicates against the core's own replies", () => {
     expect(pollIdle(pollReply({ kind: "answered", answer: "Paris" }))).toBe(
       true,
     );
+  });
+
+  it("pollIdle [4.1] holds on the poll after an ask whose send failed, though the page shows an answer in progress", async () => {
+    const port = new FakeAskPort();
+    port.before = reading("An earlier answer", { hasStopButton: true });
+    port.inputBar.takesEnter = false;
+    port.inputBar.hasSubmitButton = false;
+    const core = new AskCore({
+      port,
+      mode: {
+        core: new ModeCore(new FakeModePage()),
+        quotePage: wrapUntrustedPageContent,
+      },
+      perplexity: new PerplexityTab(port),
+      cometPort: 9222,
+    });
+    expect((await core.ask({ prompt: "q" })).kind).toBe("failed");
+
+    expect(pollIdle(pollReply(await core.poll()))).toBe(true);
   });
 
   it("pollIdle [4.1] fails on the poll of a task still working", () => {
@@ -1155,8 +1176,9 @@ const EARLIER_ANSWER_RUN_ON = answer(
 );
 
 /**
- * Comet as the Pro runs of 2026-09-24 and 2026-09-25 found it, each reply in
- * the shape the server gives today, a timeout in the ask core's words: the
+ * Comet as the Pro runs of 2026-09-24 to 2026-09-26 found it, each reply in
+ * the shape the server gives today, a timeout in the ask core's words, and
+ * [2.5]'s submit not taken while [2.4]'s essay may still be streaming: the
  * checks the known-failures list names fail, and every other check holds.
  */
 const TODAY: Replies = {
@@ -1169,7 +1191,7 @@ const TODAY: Replies = {
   [CALLS.recallInNewChat]: IDLE_TIMED_OUT,
   [CALLS.essay]: timedOut("working", "Rome was founded, according to legend"),
   [CALLS.context]: error(
-    "Error: Prompt text not found in input - typing may have failed",
+    "Error: The prompt was not sent: the submit was not taken, the input bar still holds the prompt after Enter and the page shows no Submit button",
   ),
   [CALLS.paragraphs]: answer("CHARLIE closes the three paragraphs."),
   [CALLS.heading]: answer("I can certainly help you with an overview."),

@@ -1,25 +1,26 @@
 // A fake of the CDP client surface the mode page drives: `evaluate` runs the
 // expression in the test's own global scope, as `Runtime.evaluate` runs it
 // in the page, and reports a thrown error as CDP does, in
-// `exceptionDetails`, without rejecting. Clicks, keys, navigations and
-// origin reads are recorded. The tab's origin is Perplexity's until a test
-// sets another; a navigation moves it to the address's origin.
+// `exceptionDetails`, without rejecting. Clicks and keys are recorded. Its
+// tabs are the tab fake's, which it extends: connected to Perplexity's main
+// page until a test moves it. Trusted input is refused, as the real client
+// refuses it off Perplexity, only when a test sets `inputRefusal`.
 
-import type {
-  ModePageClient,
-  PerplexityNavigator,
-} from "../../../src/cdp-mode-page.js";
+import type { TrustedKey } from "../../../src/cdp-client.js";
+import type { ModePageClient } from "../../../src/cdp-mode-page.js";
+import type { TabClient } from "../../../src/cdp-perplexity-tab.js";
 import type { PagePoint } from "../../../src/page-scripts.js";
 import type { EvaluateResult } from "../../../src/types.js";
+import { FakeTabPort } from "./fake-tab-port.js";
 
-export class FakePageClient implements ModePageClient, PerplexityNavigator {
+export class FakePageClient
+  extends FakeTabPort
+  implements ModePageClient, TabClient
+{
   public readonly expressions: string[] = [];
   public readonly clicks: PagePoint[] = [];
-  public readonly keys: string[] = [];
-  public readonly navigations: string[] = [];
-  public currentState: { currentUrl?: string } = {};
-  public origin = "https://www.perplexity.ai";
-  public originReads = 0;
+  public readonly keys: TrustedKey[] = [];
+  public inputRefusal: Error | null = null;
 
   async evaluate(expression: string): Promise<EvaluateResult> {
     this.expressions.push(expression);
@@ -39,21 +40,12 @@ export class FakePageClient implements ModePageClient, PerplexityNavigator {
   }
 
   async clickAt(point: PagePoint): Promise<void> {
+    if (this.inputRefusal) throw this.inputRefusal;
     this.clicks.push(point);
   }
 
-  async pageOrigin(): Promise<string> {
-    this.originReads++;
-    return this.origin;
-  }
-
-  async pressKey(key: string): Promise<void> {
+  async pressKey(key: TrustedKey): Promise<void> {
+    if (this.inputRefusal) throw this.inputRefusal;
     this.keys.push(key);
-  }
-
-  async navigate(url: string, waitForLoad = true): Promise<void> {
-    this.navigations.push(`${url} wait=${waitForLoad}`);
-    this.currentState = { currentUrl: url };
-    this.origin = new URL(url).origin;
   }
 }

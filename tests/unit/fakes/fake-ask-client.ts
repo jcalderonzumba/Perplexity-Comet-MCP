@@ -2,20 +2,32 @@
 //
 // `FakeAskClient.safeEvaluate` runs the expression in the test's own global
 // scope, as `Runtime.evaluate` runs it in the page, and reports a thrown
-// error as CDP does, in `exceptionDetails`, without rejecting. Every call is
-// logged by name in `calls`, with its argument when it has one.
+// error as CDP does, in `exceptionDetails`, without rejecting. Its trusted
+// text lands in the focused element, as `Input.insertText` does, and its
+// Enter submits what that element holds and empties it, as Perplexity's
+// input bar does. It also serves as the tab choice's client, reading the
+// connected tab's `address` and opening tabs. Every call is logged by name
+// in `calls`, with its argument when it has one.
 
 import type { AskPortClient, AskPortComet } from "../../../src/cdp-ask-port.js";
-import type { AskStatus, AskTarget } from "../../../src/core/ask.js";
+import type { TrustedKey } from "../../../src/cdp-client.js";
+import type { TabClient } from "../../../src/cdp-perplexity-tab.js";
+import type { AskStatus } from "../../../src/core/ask.js";
+import type { BrowserTarget } from "../../../src/core/perplexity-tab.js";
+import type { PagePoint } from "../../../src/page-scripts.js";
 import type { EvaluateResult } from "../../../src/types.js";
 
-export class FakeAskClient implements AskPortClient {
+export class FakeAskClient implements AskPortClient, TabClient {
   public readonly calls: string[] = [];
   public readonly expressions: string[] = [];
-  public targets: AskTarget[] = [];
-  public mainTab: AskTarget | null = null;
+  /** Every text given to the trusted insertion. */
+  public readonly inserted: string[] = [];
+  /** Every text an Enter submitted from the focused element. */
+  public readonly submitted: string[] = [];
+  public targets: BrowserTarget[] = [];
+  /** The connected tab's address, as the browser reports it. */
+  public address = "https://www.perplexity.ai/";
   public preCheckFails = false;
-  public onPerplexity = true;
   /** When set, every page script fails in the page with this error. */
   public pageFailure: string | undefined;
 
@@ -29,7 +41,7 @@ export class FakeAskClient implements AskPortClient {
     return "Comet started";
   }
 
-  async listTargets(): Promise<AskTarget[]> {
+  async listTargets(): Promise<BrowserTarget[]> {
     this.calls.push("listTargets");
     return [...this.targets];
   }
@@ -47,9 +59,14 @@ export class FakeAskClient implements AskPortClient {
     this.calls.push(`navigate ${url} wait=${waitForLoad}`);
   }
 
-  async listTabsCategorized(): Promise<{ main: AskTarget | null }> {
-    this.calls.push("listTabsCategorized");
-    return { main: this.mainTab };
+  async pageAddress(): Promise<string> {
+    this.calls.push("pageAddress");
+    return this.address;
+  }
+
+  async newTab(url: string): Promise<BrowserTarget> {
+    this.calls.push(`newTab ${url}`);
+    return { id: "new-tab", type: "page", url };
   }
 
   async safeEvaluate(expression: string): Promise<EvaluateResult> {
@@ -64,14 +81,34 @@ export class FakeAskClient implements AskPortClient {
     }
   }
 
-  async isOnPerplexityTab(): Promise<boolean> {
-    this.calls.push("isOnPerplexityTab");
-    return this.onPerplexity;
+  async insertText(text: string): Promise<void> {
+    this.calls.push(`insertText ${text}`);
+    this.inserted.push(text);
+    const focused = document.activeElement;
+    if (focused instanceof HTMLElement && focused !== document.body) {
+      focused.textContent = text;
+    }
   }
 
-  async ensureOnPerplexityTab(): Promise<boolean> {
-    this.calls.push("ensureOnPerplexityTab");
-    return this.onPerplexity;
+  async pressKey(key: TrustedKey): Promise<void> {
+    this.calls.push(`pressKey ${key}`);
+    const focused = document.activeElement;
+    if (key !== "Enter" || !(focused instanceof HTMLElement)) return;
+    if (focused === document.body || !focused.textContent) return;
+    this.submitted.push(focused.textContent);
+    focused.textContent = "";
+  }
+
+  async clickAt(point: PagePoint): Promise<void> {
+    this.calls.push(`clickAt ${point.x},${point.y}`);
+  }
+
+  async startFocusEmulation(): Promise<void> {
+    this.calls.push("startFocusEmulation");
+  }
+
+  async stopFocusEmulation(): Promise<void> {
+    this.calls.push("stopFocusEmulation");
   }
 }
 
@@ -95,7 +132,6 @@ export const WORKING_STATUS: AskStatus = {
 export class FakeAskComet implements AskPortComet {
   public readonly calls: string[] = [];
   public status: AskStatus = WORKING_STATUS;
-  public sendFailure: Error | undefined;
   /** Whether the page shows a control that stops the answer. */
   public hasStopControl = true;
 
@@ -106,12 +142,6 @@ export class FakeAskComet implements AskPortComet {
 
   resetStabilityTracking(): void {
     this.calls.push("resetStabilityTracking");
-  }
-
-  async sendPrompt(prompt: string): Promise<string> {
-    this.calls.push(`sendPrompt ${prompt}`);
-    if (this.sendFailure) throw this.sendFailure;
-    return "Prompt sent";
   }
 
   async stopAgent(): Promise<boolean> {
