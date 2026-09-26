@@ -35,6 +35,7 @@ describe("AskTaskState", () => {
   it("starts with no task", () => {
     const task = new AskTaskState(manualClock().now);
 
+    expect(task.state).toBe("none");
     expect(task.currentTaskId).toBeNull();
     expect(task.isActive).toBe(false);
     expect(task.steps).toEqual([]);
@@ -49,15 +50,27 @@ describe("AskTaskState", () => {
     expect(id).toMatch(TASK_ID);
     expect(task.currentTaskId).toBe(id);
     expect(task.lastPrompt).toBe("hello");
+    expect(task.state).toBe("active");
     expect(task.isActive).toBe(true);
     expect(task.taskStartTime).toBe(clock.now());
   });
 
+  it("records the steps seen, as a copy", () => {
+    const task = new AskTaskState(manualClock().now);
+    task.start("a prompt");
+    const steps = ["Searching"];
+
+    task.recordSteps(steps);
+    steps.push("Reading");
+
+    expect(task.steps).toEqual(["Searching"]);
+  });
+
   it("forgets the previous task's answer and steps when a new one starts", () => {
     const task = new AskTaskState(manualClock().now);
-    task.start("first");
-    task.steps = ["old step"];
-    task.complete("first answer");
+    const first = task.start("first");
+    task.recordSteps(["old step"]);
+    task.complete(first, "first answer");
 
     task.start("second");
 
@@ -69,39 +82,96 @@ describe("AskTaskState", () => {
   it("completes a task: its answer kept, stamped, no longer active", () => {
     const clock = manualClock();
     const task = new AskTaskState(clock.now);
-    task.start("a prompt");
+    const id = task.start("a prompt");
     clock.advance(4000);
 
-    task.complete("the answer");
+    expect(task.complete(id, "the answer")).toBe(true);
 
+    expect(task.state).toBe("completed");
     expect(task.lastResponse).toBe("the answer");
     expect(task.lastResponseTime).toBe(clock.now());
     expect(task.isActive).toBe(false);
   });
 
+  it("stops a task: no answer, and no longer followed", () => {
+    const task = new AskTaskState(manualClock().now);
+    const id = task.start("a prompt");
+
+    task.stop();
+
+    expect(task.state).toBe("stopped");
+    expect(task.isActive).toBe(false);
+    expect(task.isFollowing(id)).toBe(false);
+    expect(task.lastResponse).toBeNull();
+  });
+
+  it("never completes a task once it is stopped", () => {
+    const task = new AskTaskState(manualClock().now);
+    const id = task.start("a prompt");
+    task.stop();
+
+    expect(task.complete(id, "the stopped page's text")).toBe(false);
+
+    expect(task.state).toBe("stopped");
+    expect(task.lastResponse).toBeNull();
+  });
+
+  it("never completes a newer task with an older task's answer", () => {
+    const task = new AskTaskState(manualClock().now);
+    const older = task.start("first");
+    const newer = task.start("second");
+
+    expect(task.isFollowing(older)).toBe(false);
+    expect(task.complete(older, "the first answer")).toBe(false);
+
+    expect(task.isFollowing(newer)).toBe(true);
+    expect(task.lastResponse).toBeNull();
+  });
+
+  it("never abandons a newer task for an older one's failure", () => {
+    const task = new AskTaskState(manualClock().now);
+    const older = task.start("first");
+    task.start("second");
+
+    task.abandon(older);
+
+    expect(task.state).toBe("active");
+  });
+
+  it("leaves a completed task completed when stopped", () => {
+    const task = new AskTaskState(manualClock().now);
+    const id = task.start("a prompt");
+    task.complete(id, "the answer");
+
+    task.stop();
+
+    expect(task.state).toBe("completed");
+    expect(task.lastResponse).toBe("the answer");
+  });
+
   it("abandons a task whose prompt was never sent: no answer, and no longer followed", () => {
     const clock = manualClock();
     const task = new AskTaskState(clock.now);
-    task.start("a prompt");
+    const id = task.start("a prompt");
 
-    task.abandon();
+    task.abandon(id);
 
+    expect(task.state).toBe("not-sent");
     expect(task.isActive).toBe(false);
     expect(task.lastResponse).toBeNull();
     expect(task.lastPrompt).toBe("a prompt");
-    expect(task.promptNeverSent).toBe(true);
   });
 
   it("knows a task's prompt was sent until the task is abandoned, and again once the next task starts", () => {
     const clock = manualClock();
     const task = new AskTaskState(clock.now);
-    task.start("a prompt");
-    expect(task.promptNeverSent).toBe(false);
+    const id = task.start("a prompt");
+    expect(task.state).toBe("active");
 
-    task.abandon();
+    task.abandon(id);
     task.start("the next prompt");
 
-    expect(task.promptNeverSent).toBe(false);
+    expect(task.state).toBe("active");
   });
 
   it("is stale with no task, and five minutes after the task started", () => {

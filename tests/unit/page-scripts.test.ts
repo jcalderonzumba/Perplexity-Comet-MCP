@@ -8,12 +8,13 @@ import {
   extractAgentStatus,
   locateModeButton,
   locateModeMenuItem,
+  locateStopControl,
   locateSubmitButton,
   type PageArgument,
   pageScriptExpression,
   readAskInput,
   readModeMenuItems,
-  readProseState,
+  readThreadState,
   selectAskInput,
 } from "../../src/page-scripts.js";
 
@@ -22,10 +23,10 @@ beforeEach(() => {
 });
 
 /**
- * jsdom does not compute layout, so `offsetParent` is always `null`.
- * `extractAgentStatus` uses `offsetParent !== null` as a visibility check
- * for stop buttons. To exercise the "working" path we have to mark
- * specific elements as visible.
+ * jsdom does not compute layout, so `offsetParent` is always `null`. The
+ * stop-button check `extractAgentStatus` had before the stop control counted
+ * only buttons whose `offsetParent` was set; the tests that show a button is
+ * not the stop control mark it visible, so that check would have taken it.
  */
 function markVisible(el: HTMLElement): void {
   Object.defineProperty(el, "offsetParent", {
@@ -36,51 +37,37 @@ function markVisible(el: HTMLElement): void {
   });
 }
 
-describe("readProseState", () => {
-  it("returns count=0 and empty lastText for an empty DOM", () => {
-    const state = readProseState();
-    expect(state).toEqual({ count: 0, lastText: "" });
+// Without turn markup, the thread state falls back to the page's prose
+// elements: how many there are, and the start of the last one.
+describe("readThreadState on a page that shows no turn", () => {
+  it("reads no turn, no prose and no text on an empty page", () => {
+    expect(readThreadState()).toEqual({
+      latestTurn: null,
+      proseCount: 0,
+      lastProseText: "",
+    });
   });
 
-  it("returns the count and full lastText (under 100 chars) for one prose block", () => {
-    document.body.innerHTML = `<div class="prose">Short answer here.</div>`;
-    const state = readProseState();
-    expect(state.count).toBe(1);
-    expect(state.lastText).toBe("Short answer here.");
-  });
-
-  it("returns the last prose block's text when several are present", () => {
+  it("counts the prose elements and reads the last one's text", () => {
     document.body.innerHTML = `
       <div class="prose">first</div>
       <div class="prose-md">middle</div>
       <div class="prose">last block</div>
     `;
-    const state = readProseState();
-    expect(state.count).toBe(3);
-    expect(state.lastText).toBe("last block");
+    expect(readThreadState()).toEqual({
+      latestTurn: null,
+      proseCount: 3,
+      lastProseText: "last block",
+    });
   });
 
-  it("truncates lastText at 100 characters", () => {
-    const longText = "x".repeat(250);
-    document.body.innerHTML = `<div class="prose">${longText}</div>`;
-    const state = readProseState();
-    expect(state.count).toBe(1);
-    expect(state.lastText.length).toBe(100);
-    expect(state.lastText).toBe("x".repeat(100));
+  it("reads the first 100 characters of the last prose element", () => {
+    document.body.innerHTML = `<div class="prose">${"x".repeat(250)}</div>`;
+    expect(readThreadState().lastProseText).toBe("x".repeat(100));
   });
 });
 
 describe("extractAgentStatus", () => {
-  it("returns 'working' when a visible stop button is present", () => {
-    document.body.innerHTML = `<button aria-label="Stop">stop</button>`;
-    const btn = document.querySelector("button") as HTMLButtonElement;
-    markVisible(btn);
-
-    const result = extractAgentStatus();
-    expect(result.status).toBe("working");
-    expect(result.hasStopButton).toBe(true);
-  });
-
   it("returns 'completed' when 'Reviewed N sources' is present, prose has content, no stop button", () => {
     document.body.innerHTML = `
       <main>
@@ -125,37 +112,14 @@ describe("extractAgentStatus", () => {
   });
 
   it("does NOT treat 'Finished reading sources' as a completion marker", () => {
-    const main = document.createElement("main");
-    const m = document.createElement("div");
-    m.textContent = "Finished reading sources";
-    const btn = document.createElement("button");
-    btn.setAttribute("aria-label", "Stop");
-    btn.textContent = "stop";
-    main.append(m, btn);
-    document.body.append(main);
-    markVisible(btn);
+    loadAskInputFixture();
+    showStopControl();
+    const step = document.createElement("div");
+    step.textContent = "Finished reading sources";
+    document.body.prepend(step);
 
-    const result = extractAgentStatus();
-    // Stop button visible -> still working, regardless of "Finished reading".
-    expect(result.status).toBe("working");
-  });
-
-  it("picks the response after the LAST 'steps completed' marker", () => {
-    // Multi-turn chat: the older turn's marker must NOT win over the newer one.
-    const main = document.createElement("main");
-    const turn1 = document.createElement("div");
-    turn1.textContent =
-      "3 steps completed Previous turn answer text here, long enough to exceed thresholds easily. Ask anything";
-    const turn2 = document.createElement("div");
-    turn2.textContent =
-      "5 steps completed New turn answer that we actually want returned to the caller. Ask a follow-up";
-    main.append(turn1, turn2);
-    document.body.append(main);
-
-    const result = extractAgentStatus();
-    expect(result.status).toBe("completed");
-    expect(result.response).toContain("New turn answer");
-    expect(result.response).not.toContain("Previous turn answer");
+    // The stop control shows -> still working, regardless of "Finished reading".
+    expect(runInPage(extractAgentStatus).status).toBe("working");
   });
 
   it("extracts and dedupes step descriptions matching the working patterns", () => {
@@ -542,5 +506,376 @@ describe("locateSubmitButton", () => {
     document.body.appendChild(far);
 
     expect(runInPage(locateSubmitButton)).toBeNull();
+  });
+});
+
+// The stop control: while Perplexity answers, its input bar shows a button
+// labelled "Stop response (Esc)" with a filled stop icon where the Submit
+// button sits, as Perplexity's input bar script renders it (read from the
+// script the page loads, 2026-09-26). Two other buttons share its icon and
+// are never the stop control: "Stop dictation", in the input bar while
+// dictating, and the "Stop" of the answer's read-aloud player.
+
+const STOP_ICON = `<svg role="img" aria-hidden="true"><use xlink:href="#pplx-icon-player-stop-filled"></use></svg>`;
+
+function iconButton(label: string, icon = STOP_ICON): string {
+  return `<button aria-label="${label}" type="button"><div><div>${icon}</div><div></div></div></button>`;
+}
+
+/** The input bar as Perplexity shows it while an answer is streaming. */
+function showStopControl(): void {
+  submitButton().outerHTML = iconButton("Stop response (Esc)");
+}
+
+/** Replaces the Submit button with `markup`, beside the input bar. */
+function replaceSubmitButtonWith(markup: string): void {
+  submitButton().outerHTML = markup;
+}
+
+/** An "Expand pane"-style button: a labelled icon drawn with an SVG rect. */
+const RECT_ICON_BUTTON = `<button aria-label="Expand pane" type="button"><svg><rect width="10" height="10"></rect></svg></button>`;
+
+describe("locateStopControl", () => {
+  beforeEach(loadAskInputFixture);
+
+  it("returns the centre point of the input bar's stop control", () => {
+    showStopControl();
+
+    expect(runInPage(locateStopControl)).toEqual(anyPoint);
+  });
+
+  it("returns null when the input bar shows Submit, as when no answer is streaming", () => {
+    expect(runInPage(locateStopControl)).toBeNull();
+  });
+
+  it("never takes a button with an SVG rect for the stop control", () => {
+    replaceSubmitButtonWith(RECT_ICON_BUTTON);
+
+    expect(runInPage(locateStopControl)).toBeNull();
+  });
+
+  it("never takes the input bar's Stop dictation button for the stop control", () => {
+    replaceSubmitButtonWith(iconButton("Stop dictation"));
+
+    expect(runInPage(locateStopControl)).toBeNull();
+  });
+
+  it.each([
+    ["the read-aloud player's Stop", "Stop"],
+    ["a Cancel button", "Cancel"],
+    [
+      "a label that only contains the stop control's",
+      "Stop response (Esc) now",
+    ],
+  ])("never takes %s for the stop control", (_case, label) => {
+    replaceSubmitButtonWith(iconButton(label));
+
+    expect(runInPage(locateStopControl)).toBeNull();
+  });
+
+  it("never takes a stop-labelled button far from the input bar", () => {
+    document.body.innerHTML = `<main><div>${iconButton("Stop response (Esc)")}</div></main>`;
+
+    expect(runInPage(locateStopControl)).toBeNull();
+  });
+});
+
+describe("extractAgentStatus and the stop control", () => {
+  beforeEach(loadAskInputFixture);
+
+  it("reads the stop control as an answer in progress", () => {
+    showStopControl();
+
+    expect(runInPage(extractAgentStatus)).toMatchObject({
+      status: "working",
+      hasStopButton: true,
+    });
+  });
+
+  it.each([
+    ["an Expand pane-style button with an SVG rect", RECT_ICON_BUTTON],
+    ["the Stop dictation button", iconButton("Stop dictation")],
+    ["the read-aloud player's Stop button", iconButton("Stop")],
+  ])("never reads %s as the stop control", (_case, markup) => {
+    replaceSubmitButtonWith(markup);
+    for (const button of document.querySelectorAll("button")) {
+      markVisible(button);
+    }
+
+    expect(runInPage(extractAgentStatus).hasStopButton).toBe(false);
+  });
+});
+
+// The answer, on fixtures of live threads: Perplexity lays a thread out as a
+// flat list of blocks, each question in a `data-workflow-entry` block and
+// its answer in the `data-workflow-final-text` block after it.
+
+function readFixture(name: string): string {
+  return readFileSync(
+    join(dirname(fileURLToPath(import.meta.url)), "fixtures", name),
+    "utf8",
+  );
+}
+
+const ONE_WORD_THREAD = readFixture("thread-one-word.html");
+const SEVERAL_TURNS_THREAD = readFixture("thread-several-turns.html");
+
+/** "Answer <turn> part <from>. … Answer <turn> part <to>.", as invented. */
+function parts(turn: number, from: number, to = from): string {
+  const numbers = Array.from({ length: to - from + 1 }, (_, i) => from + i);
+  return numbers.map((part) => `Answer ${turn} part ${part}.`).join(" ");
+}
+
+/** Turn 4's answer, the latest in the several-turn fixture. */
+const TURN_4_ANSWER = [
+  parts(4, 1),
+  "Heading 4.2",
+  parts(4, 3),
+  parts(4, 4),
+  parts(4, 5, 11),
+  parts(4, 12, 19),
+  parts(4, 20, 24),
+  parts(4, 25, 27),
+  parts(4, 28),
+  parts(4, 29, 33),
+  parts(4, 34),
+  parts(4, 35, 36),
+  parts(4, 37),
+].join("\n\n");
+
+/** Turn 3's answer: headings, two lists, and a line break in a paragraph. */
+const TURN_3_ANSWER = [
+  parts(3, 1),
+  "Heading 3.2",
+  parts(3, 3),
+  `- ${parts(3, 4)}`,
+  `- ${parts(3, 5)}`,
+  parts(3, 6),
+  "Heading 3.7",
+  `${parts(3, 8, 10)}\n${parts(3, 11)}`,
+  `- ${parts(3, 12)}`,
+  `- ${parts(3, 13)}`,
+  parts(3, 14),
+].join("\n\n");
+
+function answerBlocks(): HTMLElement[] {
+  return [
+    ...document.querySelectorAll<HTMLElement>("[data-workflow-final-text]"),
+  ];
+}
+
+function latestAnswerRoot(): HTMLElement {
+  return answerBlocks().at(-1)?.querySelector(".prose") as HTMLElement;
+}
+
+/** Removes turn 4, question and answer, leaving turn 3 the latest. */
+function removeTurn4(): void {
+  document.querySelector('[data-workflow-entry="4"]')?.remove();
+  answerBlocks().at(-1)?.remove();
+}
+
+describe("extractAgentStatus reads the latest turn's answer", () => {
+  it("reads a one-word answer as a completed answer", () => {
+    document.body.innerHTML = ONE_WORD_THREAD;
+
+    expect(runInPage(extractAgentStatus)).toMatchObject({
+      status: "completed",
+      response: "Paris",
+      hasStopButton: false,
+    });
+  });
+
+  it("keeps an answer that starts with a UI label's word", () => {
+    document.body.innerHTML = ONE_WORD_THREAD;
+    latestAnswerRoot().innerHTML = "<p>Search results show three vendors.</p>";
+
+    expect(runInPage(extractAgentStatus).response).toBe(
+      "Search results show three vendors.",
+    );
+  });
+
+  it("returns every paragraph of a long answer, headings included, citation chips left out", () => {
+    document.body.innerHTML = SEVERAL_TURNS_THREAD;
+
+    expect(runInPage(extractAgentStatus)).toMatchObject({
+      status: "completed",
+      response: TURN_4_ANSWER,
+    });
+  });
+
+  it("returns only the latest turn's answer in a thread of several turns", () => {
+    document.body.innerHTML = SEVERAL_TURNS_THREAD;
+
+    const { response } = runInPage(extractAgentStatus);
+
+    expect(response).toContain(parts(4, 1));
+    expect(response).not.toContain("Answer 3");
+    expect(response).not.toContain("Answer 2");
+  });
+
+  it("returns each list item of an answer, with the paragraphs around the list", () => {
+    document.body.innerHTML = SEVERAL_TURNS_THREAD;
+    removeTurn4();
+
+    expect(runInPage(extractAgentStatus).response).toBe(TURN_3_ANSWER);
+  });
+
+  it("never returns an earlier turn's answer while the latest turn has none yet", () => {
+    document.body.innerHTML = SEVERAL_TURNS_THREAD;
+    answerBlocks().at(-1)?.remove();
+
+    const result = runInPage(extractAgentStatus);
+
+    expect(result.status).not.toBe("completed");
+    expect(result.response).toBe("");
+  });
+
+  it("never cuts a long answer", () => {
+    document.body.innerHTML = ONE_WORD_THREAD;
+    const long = "word ".repeat(5000).trim();
+    latestAnswerRoot().innerHTML = `<p>${long}</p>`;
+
+    expect(runInPage(extractAgentStatus).response).toBe(long);
+  });
+
+  it("reads a code block's code, and not its caption or copy button", () => {
+    document.body.innerHTML = ONE_WORD_THREAD;
+    // A code block as the live page renders one, trimmed to structure.
+    latestAnswerRoot().innerHTML = `<p>Run this:</p><div><pre><figure><figcaption><span>text</span><div><button aria-label="Copy code" type="button"></button></div></figcaption><span><code>const a = 1;\n  const b = 2;\n</code></span></figure></pre></div>`;
+
+    expect(runInPage(extractAgentStatus).response).toBe(
+      "Run this:\n\nconst a = 1;\n  const b = 2;",
+    );
+  });
+
+  it("numbers the items of an ordered list", () => {
+    document.body.innerHTML = ONE_WORD_THREAD;
+    latestAnswerRoot().innerHTML = `<p>Steps:</p><ol><li><p>Open it.</p></li><li><p>Read it.</p></li></ol>`;
+
+    expect(runInPage(extractAgentStatus).response).toBe(
+      "Steps:\n\n1. Open it.\n\n2. Read it.",
+    );
+  });
+
+  it("reads a table row by row, cells apart", () => {
+    document.body.innerHTML = ONE_WORD_THREAD;
+    latestAnswerRoot().innerHTML = `<table><thead><tr><th>City</th><th>Country</th></tr></thead><tbody><tr><td>Paris</td><td>France</td></tr></tbody></table>`;
+
+    expect(runInPage(extractAgentStatus).response).toBe(
+      "City | Country\n\nParis | France",
+    );
+  });
+
+  it("reads the last answer block of a page without turn blocks, never navigation or a UI label", () => {
+    document.body.innerHTML = `
+      <nav><div class="prose">A navigation entry long enough to pass for text</div></nav>
+      <main>
+        <div class="prose">Rome.</div>
+        <div class="prose">Library</div>
+      </main>
+      <div>Ask a follow-up</div>`;
+
+    expect(runInPage(extractAgentStatus)).toMatchObject({
+      status: "completed",
+      response: "Rome.",
+    });
+  });
+});
+
+// A page in another language: Perplexity translates the stop control's
+// label, so its icon, which only `Stop dictation` shares in the input bar,
+// is what keeps an answer in progress from reading as complete.
+describe("extractAgentStatus on a page in another language", () => {
+  /** The one-word thread, its input bar's placeholder in Russian. */
+  function loadRussianThread(): void {
+    document.body.innerHTML = ONE_WORD_THREAD;
+    const placeholder = [...document.querySelectorAll("div")].find(
+      (div) => div.textContent === "Ask a follow-up",
+    ) as HTMLElement;
+    placeholder.textContent = "Задайте уточняющий вопрос";
+  }
+
+  it("reads the input bar's stop icon under a translated label as an answer in progress, never complete", () => {
+    loadRussianThread();
+    latestAnswerRoot().innerHTML = "<p>Столица Франции —</p>";
+    replaceSubmitButtonWith(iconButton("Остановить ответ (Esc)"));
+
+    expect(runInPage(extractAgentStatus)).toMatchObject({
+      status: "working",
+      response: "",
+    });
+  });
+
+  it("still reads a complete answer while the input bar shows Stop dictation", () => {
+    document.body.innerHTML = ONE_WORD_THREAD;
+    (
+      document.querySelector('button[aria-label="Dictation"]') as HTMLElement
+    ).outerHTML = iconButton("Stop dictation");
+
+    expect(runInPage(extractAgentStatus)).toMatchObject({
+      status: "completed",
+      response: "Paris",
+    });
+  });
+
+  it("still reads a complete answer beside the read-aloud player's stop icon", () => {
+    document.body.innerHTML = ONE_WORD_THREAD;
+    answerBlocks()
+      .at(-1)
+      ?.insertAdjacentHTML("beforeend", iconButton("Остановить"));
+
+    expect(runInPage(extractAgentStatus)).toMatchObject({
+      status: "completed",
+      response: "Paris",
+    });
+  });
+});
+
+// The latest turn, by the index each question block carries: a hidden tab
+// renders only the turns near the view, so the index, not a count of the
+// blocks, says which turn is the latest.
+describe("readThreadState on a thread", () => {
+  it("reads the latest turn's index from its question block", () => {
+    document.body.innerHTML = SEVERAL_TURNS_THREAD;
+
+    expect(runInPage(readThreadState).latestTurn).toBe(4);
+  });
+
+  it("reads turn 0 on a thread of one turn", () => {
+    document.body.innerHTML = ONE_WORD_THREAD;
+
+    expect(runInPage(readThreadState).latestTurn).toBe(0);
+  });
+
+  it("reads a new turn as soon as its question shows, before its answer", () => {
+    document.body.innerHTML = SEVERAL_TURNS_THREAD;
+    const question = document.createElement("div");
+    question.setAttribute("data-workflow-entry", "5");
+    question.textContent = "The next question";
+    answerBlocks().at(-1)?.after(question);
+
+    expect(runInPage(readThreadState).latestTurn).toBe(5);
+  });
+
+  it("reads the highest index, whatever order the blocks are in", () => {
+    document.body.innerHTML = `
+      <div data-workflow-entry="7">q</div>
+      <div data-workflow-entry="12">q</div>
+      <div data-workflow-entry="9">q</div>
+    `;
+
+    expect(runInPage(readThreadState).latestTurn).toBe(12);
+  });
+
+  it("reads no turn on Perplexity's home page", () => {
+    loadAskInputFixture();
+
+    expect(runInPage(readThreadState).latestTurn).toBeNull();
+  });
+
+  it("ignores a question block whose index is not a number", () => {
+    document.body.innerHTML = `<div data-workflow-entry="">q</div><div data-workflow-entry="x">q</div>`;
+
+    expect(runInPage(readThreadState).latestTurn).toBeNull();
   });
 });

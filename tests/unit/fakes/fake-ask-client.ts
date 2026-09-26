@@ -125,27 +125,15 @@ export const WORKING_STATUS: AskStatus = {
   currentStep: "Searching",
   response: "Paris is",
   hasStopButton: true,
-  isStable: false,
   agentBrowsingUrl: "",
 };
 
 export class FakeAskComet implements AskPortComet {
   public readonly calls: string[] = [];
   public status: AskStatus = WORKING_STATUS;
-  /** Whether the page shows a control that stops the answer. */
-  public hasStopControl = true;
 
   async getAgentStatus(): Promise<AskStatus> {
     this.calls.push("getAgentStatus");
     return this.status;
-  }
-
-  resetStabilityTracking(): void {
-    this.calls.push("resetStabilityTracking");
-  }
-
-  async stopAgent(): Promise<boolean> {
-    this.calls.push("stopAgent");
-    return this.hasStopControl;
   }
 }

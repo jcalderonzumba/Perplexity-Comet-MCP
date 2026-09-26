@@ -20,7 +20,7 @@ import {
   type ScoredCheck,
   summaryLine,
 } from "../lib/battery-score.mjs";
-import type { DebugPort, ToolReply } from "../lib/no-pro-checks.mjs";
+import { replyText, type ToolReply } from "../lib/no-pro-checks.mjs";
 import {
   agentOpenedTab,
   agentStopped,
@@ -31,6 +31,7 @@ import {
   emptyPromptRefused,
   fileNotFound,
   followUpAnswered,
+  type ProDebugPort,
   pollAfterStop,
   pollIdle,
   RESEARCH_PROMPT,
@@ -238,18 +239,83 @@ describe("followUpAnswered [2.2]", () => {
 
 describe("contextReset [2.3]", () => {
   const FIRST = answer("I will remember 9473.");
+  const FIRST_THREAD = "https://www.perplexity.ai/search/first-thread-1a2b";
+  const NEW_THREAD = "https://www.perplexity.ai/search/new-thread-3c4d";
+  const OTHER_THREAD = "https://www.perplexity.ai/search/other-thread-5e6f";
+  const threads = (before: string[], after: string[]) => ({
+    before,
+    after,
+  });
 
-  it("holds when the new chat's answer does not know the number", () => {
+  it("holds when the new chat answers in a thread that was not open after the first ask", () => {
     expect(
       contextReset({
         first: FIRST,
         fresh: answer("You have not asked me to remember a number."),
+        threads: threads([FIRST_THREAD], [NEW_THREAD]),
       }),
     ).toBe(true);
   });
 
-  it("fails when the new chat still knows the number", () => {
-    expect(contextReset({ first: FIRST, fresh: answer("9473") })).toBe(false);
+  it("holds when the new chat's answer knows the number, which the account's memory can carry into a new thread", () => {
+    expect(
+      contextReset({
+        first: FIRST,
+        fresh: answer("You asked me to remember 9473."),
+        threads: threads(
+          [FIRST_THREAD, OTHER_THREAD],
+          [NEW_THREAD, OTHER_THREAD],
+        ),
+      }),
+    ).toBe(true);
+  });
+
+  it("fails when the new chat's ask answered in a thread already open, as a follow-up would", () => {
+    expect(
+      contextReset({
+        first: FIRST,
+        fresh: answer("You have not asked me to remember a number."),
+        threads: threads([FIRST_THREAD], [FIRST_THREAD]),
+      }),
+    ).toBe(false);
+  });
+
+  it("fails when no thread was open after the first ask, so there is nothing to tell the new one from", () => {
+    expect(
+      contextReset({
+        first: FIRST,
+        fresh: answer("You have not asked me to remember a number."),
+        threads: threads(["https://www.perplexity.ai/"], [NEW_THREAD]),
+      }),
+    ).toBe(false);
+  });
+
+  it("counts only Perplexity's threads, not another page that opened", () => {
+    expect(
+      contextReset({
+        first: FIRST,
+        fresh: answer("You have not asked me to remember a number."),
+        threads: threads(
+          [FIRST_THREAD],
+          [
+            FIRST_THREAD,
+            "https://example.com/search/new-thread-3c4d",
+            "https://www.perplexity.ai/sidecar?copilot=true",
+            "https://www.perplexity.ai/",
+          ],
+        ),
+      }),
+    ).toBe(false);
+  });
+
+  it("tells threads apart by their id, whatever the address's query", () => {
+    expect(
+      contextReset({
+        first: FIRST,
+        fresh: answer("You have not asked me to remember a number."),
+        threads: threads([FIRST_THREAD], [`${FIRST_THREAD}?q=again`]),
+      }),
+    ).toBe(false);
   });
 
   it("fails when the new chat's ask is an error", () => {
@@ -257,14 +323,19 @@ describe("contextReset [2.3]", () => {
       contextReset({
         first: FIRST,
         fresh: error("Error: Prompt text not found in input"),
+        threads: threads([FIRST_THREAD], [NEW_THREAD]),
       }),
     ).toBe(false);
   });
 
   it("fails when the new chat's ask ran out of time", () => {
-    expect(contextReset({ first: FIRST, fresh: STILL_IN_PROGRESS })).toBe(
-      false,
-    );
+    expect(
+      contextReset({
+        first: FIRST,
+        fresh: STILL_IN_PROGRESS,
+        threads: threads([FIRST_THREAD], [NEW_THREAD]),
+      }),
+    ).toBe(false);
   });
 
   it("fails when the first ask is an error, so no number was given", () => {
@@ -272,6 +343,7 @@ describe("contextReset [2.3]", () => {
       contextReset({
         first: error("Error: Not connected to Comet"),
         fresh: answer("You have not asked me to remember a number."),
+        threads: threads([FIRST_THREAD], [NEW_THREAD]),
       }),
     ).toBe(false);
   });
@@ -351,6 +423,39 @@ describe("the ask predicates against the stdio server's own comet_ask replies", 
   const RUNS_OUT = [
     reading("Rome was founded", { hasStopButton: true, steps: ["Writing"] }),
   ];
+
+  it("answerNamesWithoutEcho [2.5] holds on the follow-up after [2.4]'s timeout, which stops [2.4]'s answer first and says so", async () => {
+    const prompt = "What is the project name?";
+    const port = new FakeAskPort();
+    port.after = [reading("Rome was", { hasStopButton: true, latestTurn: 3 })];
+    const core = new AskCore({
+      port,
+      mode: {
+        core: new ModeCore(new FakeModePage()),
+        quotePage: wrapUntrustedPageContent,
+      },
+      perplexity: new PerplexityTab(port),
+      cometPort: 9222,
+    });
+    await core.ask({ prompt: "essay", timeout: 3000 });
+    port.inputBar.answering = true;
+    port.nextAsk(reading("Rome was", { latestTurn: 3 }), [
+      reading("The project is Artemis.", {
+        status: "completed",
+        latestTurn: 4,
+      }),
+    ]);
+
+    const reply = toStdioResult(
+      describeAskOutcome(
+        await core.ask({ prompt, context: "Project name: Artemis" }),
+        wrapUntrustedPageContent,
+      ),
+    );
+
+    expect(replyText(reply)).toMatch(/^Comet was still answering/);
+    expect(answerNamesWithoutEcho(reply, "Artemis", prompt)).toBe(true);
+  });
 
   it("timeoutStated [2.4] holds on the timeout reply", async () => {
     const reply = await askReply(RUNS_OUT, { prompt: "essay", timeout: 3000 });
@@ -701,12 +806,66 @@ describe("the poll and stop predicates against the core's own replies", () => {
     expect(pollIdle(reply)).toBe(false);
   });
 
+  /** The ask core the stdio server builds, over `port`. */
+  function askCoreOver(port: FakeAskPort): AskCore {
+    return new AskCore({
+      port,
+      mode: {
+        core: new ModeCore(new FakeModePage()),
+        quotePage: wrapUntrustedPageContent,
+      },
+      perplexity: new PerplexityTab(port),
+      cometPort: 9222,
+    });
+  }
+
+  it("agentStopped [4.3] and pollAfterStop [4.3b] hold on the core's stop and the poll after it, whatever the stopped page reads", async () => {
+    const port = new FakeAskPort();
+    port.after = [reading("Rome was", { hasStopButton: true })];
+    const core = askCoreOver(port);
+    expect((await core.ask({ prompt: "q", timeout: 3000 })).kind).toBe(
+      "timed-out",
+    );
+    port.inputBar.answering = true;
+
+    const stop = toStdioResult(describeStopOutcome(await core.stop()));
+    port.after = [reading("Rome was founded", { status: "completed" })];
+    const poll = pollReply(await core.poll());
+
+    expect(agentStopped(stop)).toBe(true);
+    expect(pollAfterStop(poll)).toBe(true);
+  });
+
+  it("answered fails on the reply of an ask whose task was stopped while it waited", async () => {
+    const port = new FakeAskPort();
+    port.after = [
+      reading("Rome was", { hasStopButton: true }),
+      reading("Rome was founded", { status: "completed" }),
+    ];
+    const core = askCoreOver(port);
+    port.onPoll = async (poll) => {
+      if (poll !== 1) return;
+      port.inputBar.answering = true;
+      await core.stop();
+    };
+
+    const outcome = await core.ask({ prompt: "q", timeout: 60000 });
+    const reply = toStdioResult(
+      describeAskOutcome(outcome, wrapUntrustedPageContent),
+    );
+
+    expect(outcome.kind).toBe("stopped");
+    expect(answered(reply)).toBe(false);
+  });
+
   it("agentStopped [4.3] holds on the stop that stopped, and fails on the one that did not", () => {
     expect(
-      agentStopped(toStdioResult(describeStopOutcome({ stopped: true }))),
+      agentStopped(toStdioResult(describeStopOutcome({ kind: "stopped" }))),
     ).toBe(true);
     expect(
-      agentStopped(toStdioResult(describeStopOutcome({ stopped: false }))),
+      agentStopped(
+        toStdioResult(describeStopOutcome({ kind: "nothing-to-stop" })),
+      ),
     ).toBe(false);
   });
 });
@@ -1060,8 +1219,41 @@ describe("RESEARCH_WORKFLOW", () => {
 // calls, with which arguments, in which order, and how it scores what
 // comes back.
 
-const LISTENING: DebugPort = { port: 9223, answers: async () => true };
-const SILENT: DebugPort = { port: 9223, answers: async () => false };
+/** The thread the first ask of [2.3] leaves open, and the new chat's. */
+const FIRST_THREAD_PAGE = "https://www.perplexity.ai/search/first-thread-1a2b";
+const NEW_THREAD_PAGE = "https://www.perplexity.ai/search/new-thread-3c4d";
+
+/**
+ * A debug port Comet answers on, whose page list reads each of `pageReads`
+ * in turn, the last one again once they run out: by default, the first
+ * ask's thread, then the new chat's in its place.
+ */
+function listening(
+  pageReads: readonly (readonly string[])[] = [
+    [FIRST_THREAD_PAGE],
+    [NEW_THREAD_PAGE],
+  ],
+): ProDebugPort & { reads: number } {
+  const port = {
+    port: 9223,
+    reads: 0,
+    answers: async () => true,
+    pageAddresses: async () => {
+      const read = pageReads[Math.min(port.reads, pageReads.length - 1)];
+      port.reads += 1;
+      return [...(read ?? [])];
+    },
+  };
+  return port;
+}
+
+const SILENT: ProDebugPort = {
+  port: 9223,
+  answers: async () => false,
+  pageAddresses: async () => {
+    throw new Error("the page list is never read when Comet does not answer");
+  },
+};
 const noWait = async () => {};
 
 const ANSWER_ASK = 60000;
@@ -1161,7 +1353,7 @@ function timedOut(status: "working" | "idle", partialAnswer = ""): ToolReply {
   );
 }
 
-/** A one-word answer the ask does not read as complete, run to its timeout. */
+/** A one-word answer run to its timeout, as the runs before phase 4 showed. */
 const SHORT_ANSWER_TIMED_OUT = timedOut("working", "VERI");
 
 /** A short answer the ask does not read as complete, as [2.3]'s run showed. */
@@ -1176,29 +1368,34 @@ const EARLIER_ANSWER_RUN_ON = answer(
 );
 
 /**
- * Comet as the Pro runs of 2026-09-24 to 2026-09-26 found it, each reply in
- * the shape the server gives today, a timeout in the ask core's words, and
- * [2.5]'s submit not taken while [2.4]'s essay may still be streaming: the
- * checks the known-failures list names fail, and every other check holds.
+ * Comet as the Pro runs of 2026-09-24 to 2026-09-26 found it, with the ask's
+ * own defects those runs showed fixed since (short answers, the latest
+ * turn's answer, the poll after a stop, a follow-up sent while [2.4]'s essay
+ * is still streaming): each reply in the shape the server gives today, a
+ * timeout in the ask core's words, the new chat's answer knowing the
+ * number from the account's memory, and the agent answering without
+ * browsing, although the trending repository is named with its stars, as
+ * the run of 2026-09-26 found it. The checks the known-failures list names
+ * fail, and every other check holds.
  */
 const TODAY: Replies = {
   [CALLS.connect]: ok("Comet already running with debug port: Chrome/152"),
-  [CALLS.session]: SHORT_ANSWER_TIMED_OUT,
-  [CALLS.capital]: SHORT_ANSWER_TIMED_OUT,
-  [CALLS.remember]: SHORT_ANSWER_TIMED_OUT,
-  [CALLS.recall]: answer("NOTED"),
+  [CALLS.session]: answer("VERIFIED"),
+  [CALLS.capital]: answer("Paris"),
+  [CALLS.remember]: answer("NOTED"),
+  [CALLS.recall]: answer("9473"),
   [CALLS.rememberAgain]: answer("Got it: 9473."),
-  [CALLS.recallInNewChat]: IDLE_TIMED_OUT,
+  [CALLS.recallInNewChat]: answer("You asked me to remember 9473."),
   [CALLS.essay]: timedOut("working", "Rome was founded, according to legend"),
-  [CALLS.context]: error(
-    "Error: The prompt was not sent: the submit was not taken, the input bar still holds the prompt after Enter and the page shows no Submit button",
-  ),
-  [CALLS.paragraphs]: answer("CHARLIE closes the three paragraphs."),
+  [CALLS.context]: answer("The project is Artemis."),
+  [CALLS.paragraphs]: answer("ALPHA one.\n\nBRAVO two.\n\nCHARLIE three."),
   [CALLS.heading]: answer("I can certainly help you with an overview."),
   [CALLS.tabs]: [NO_TABS, NO_TABS, NO_TABS],
   [CALLS.agentTab]: answer("The heading of example.org is Example Domain."),
-  [CALLS.trending]: EARLIER_ANSWER_RUN_ON,
-  [CALLS.poll]: [COMPLETED, answer("The featured article is about")],
+  [CALLS.trending]: answer(
+    "The top-ranked repository on GitHub Trending’s “Today” page is octo/widgets, with 12,345 stars in total.",
+  ),
+  [CALLS.poll]: [COMPLETED, ok("Status: STOPPED")],
   [CALLS.slowTask]: timedOut("working"),
   [CALLS.stop]: ok("Agent stopped"),
   [CALLS.screenshot]: IMAGE,
@@ -1237,18 +1434,10 @@ const AGENT_TABS = tabListing(AGENT_TAB);
 /** Comet once every fix lands: every check's condition holds. */
 const FIXED: Replies = {
   ...TODAY,
-  [CALLS.session]: answer("VERIFIED"),
-  [CALLS.capital]: answer("Paris"),
-  [CALLS.remember]: answer("NOTED"),
-  [CALLS.recall]: answer("9473"),
-  [CALLS.recallInNewChat]: answer("You have not asked me to remember one."),
   [CALLS.essay]: MAY_BE_INCOMPLETE,
-  [CALLS.context]: answer("The project is Artemis."),
-  [CALLS.paragraphs]: answer("ALPHA one.\n\nBRAVO two.\n\nCHARLIE three."),
   [CALLS.heading]: answer("Example Domain"),
   [CALLS.tabs]: [NO_TABS, AGENT_TABS, AGENT_TABS],
   [CALLS.trending]: answer("octo/widgets, with 12,345 stars"),
-  [CALLS.poll]: [COMPLETED, ok("Status: STOPPED")],
   [CALLS.switchTab]: ok("Switched to example.com (https://example.com/)"),
   [CALLS.learn]: ok("Switched to learn mode"),
 };
@@ -1296,11 +1485,11 @@ describe("runProBattery", () => {
   it("scores today's Comet as passed and known, and passes", async () => {
     const checks = await runProBattery(
       fakeServer(TODAY).callTool,
-      LISTENING,
+      listening(),
       undefined,
       noWait,
     );
-    expect(summaryLine(checks)).toBe("Results: 17 passed, 0 failed, 13 known");
+    expect(summaryLine(checks)).toBe("Results: 25 passed, 0 failed, 5 known");
     expect(batteryPassed(checks)).toBe(true);
     expect(
       checks
@@ -1312,7 +1501,7 @@ describe("runProBattery", () => {
   it("scores every known failure as an unexpected pass once its fix lands", async () => {
     const checks = await runProBattery(
       fakeServer(FIXED).callTool,
-      LISTENING,
+      listening(),
       undefined,
       noWait,
     );
@@ -1330,7 +1519,7 @@ describe("runProBattery", () => {
     const reported: string[] = [];
     await runProBattery(
       fakeServer(TODAY).callTool,
-      LISTENING,
+      listening(),
       (check) => reported.push(check.id),
       noWait,
     );
@@ -1339,7 +1528,7 @@ describe("runProBattery", () => {
 
   it("makes these tool calls, in this order", async () => {
     const server = fakeServer(TODAY);
-    await runProBattery(server.callTool, LISTENING, undefined, noWait);
+    await runProBattery(server.callTool, listening(), undefined, noWait);
     expect(server.calls).toEqual([
       CALLS.connect,
       CALLS.session,
@@ -1388,7 +1577,7 @@ describe("runProBattery", () => {
     const tools = declaredTools();
     for (const replies of [TODAY, FIXED]) {
       const server = fakeServer(replies);
-      await runProBattery(server.callTool, LISTENING, undefined, noWait);
+      await runProBattery(server.callTool, listening(), undefined, noWait);
       const violations = server.calls.flatMap((call) => {
         const space = call.indexOf(" ");
         return schemaViolations(
@@ -1409,6 +1598,7 @@ describe("runProBattery", () => {
       fakeServer({
         ...FIXED,
         [CALLS.session]: LOGIN_PAGE,
+        [CALLS.capital]: SHORT_ANSWER_TIMED_OUT,
         [CALLS.recall]: answer("NOTED\n\n9473"),
         [CALLS.recallInNewChat]: error("Error: Not connected to Comet"),
         [CALLS.poll]: [ok("Status: WORKING"), answer("The article")],
@@ -1418,17 +1608,18 @@ describe("runProBattery", () => {
         [CALLS.missingFile]: error("Error: Not connected to Comet"),
         [CALLS.emptyPrompt]: answer("How can I help you today?"),
       }).callTool,
-      LISTENING,
+      listening(),
       undefined,
       noWait,
     );
     expect(verdicts(checks)).toMatchObject({
-      "1.5": "KNOWN",
-      "2.2": "KNOWN",
-      "2.3": "KNOWN",
+      "1.5": "FAIL",
+      "2.1": "FAIL",
+      "2.2": "FAIL",
+      "2.3": "FAIL",
       "4.1": "FAIL",
       "4.3": "FAIL",
-      "4.3b": "KNOWN",
+      "4.3b": "FAIL",
       "6.4": "FAIL",
       "8.3": "FAIL",
       "8.4": "FAIL",
@@ -1448,42 +1639,91 @@ describe("runProBattery", () => {
           "Write three short paragraphs about the sea. Start the first with the word ALPHA, the second with the word BRAVO and the third with the word CHARLIE.",
         ),
       }).callTool,
-      LISTENING,
+      listening(),
       undefined,
       noWait,
     );
     expect(verdicts(checks)).toMatchObject({
-      "1.5": "KNOWN",
-      "2.5": "KNOWN",
-      "2.6-whole-answer": "KNOWN",
+      "1.5": "FAIL",
+      "2.5": "FAIL",
+      "2.6-whole-answer": "FAIL",
     });
   });
 
-  it("scores [2.3]'s short answer run to its timeout, and [3.4]'s earlier answer run on, as known", async () => {
+  it("fails [2.3]'s short answer run to its timeout and [3.4]'s earlier answer run on, neither excused", async () => {
     const checks = await runProBattery(
       fakeServer({
         ...FIXED,
         [CALLS.recallInNewChat]: IDLE_TIMED_OUT,
         [CALLS.trending]: EARLIER_ANSWER_RUN_ON,
       }).callTool,
-      LISTENING,
+      listening(),
+      undefined,
+      noWait,
+    );
+    expect(byId(checks, "2.3")).toMatchObject({ verdict: "FAIL" });
+    expect(byId(checks, "3.4")).toMatchObject({ verdict: "FAIL" });
+    expect(byId(checks, "3.4")).not.toHaveProperty("known");
+  });
+
+  it("fails [2.3] when the new chat's ask answers in the thread the first ask left open", async () => {
+    const checks = await runProBattery(
+      fakeServer(TODAY).callTool,
+      listening([[FIRST_THREAD_PAGE], [FIRST_THREAD_PAGE]]),
+      undefined,
+      noWait,
+    );
+    expect(byId(checks, "2.3")).toMatchObject({ verdict: "FAIL" });
+    expect(byId(checks, "2.3")?.note).toMatch(
+      /^a thread of its own: no \(1 thread open after the first ask, 1 after the new chat's\) \/ /,
+    );
+  });
+
+  it("reads the browser's pages once after each of [2.3]'s asks, and at no other time", async () => {
+    const server = fakeServer(TODAY);
+    const readAfter: string[] = [];
+    const port = listening();
+    const recording: ProDebugPort = {
+      ...port,
+      pageAddresses: () => {
+        readAfter.push(server.calls.at(-1) ?? "");
+        return port.pageAddresses();
+      },
+    };
+    const checks = await runProBattery(
+      server.callTool,
+      recording,
+      undefined,
+      noWait,
+    );
+    expect(readAfter).toEqual([CALLS.rememberAgain, CALLS.recallInNewChat]);
+    expect(byId(checks, "2.3")?.note).toMatch(
+      /^a thread of its own: yes \(1 thread open after the first ask, 1 after the new chat's\) \/ /,
+    );
+  });
+
+  it("fails [2.3] with the error when the browser's pages cannot be read", async () => {
+    const checks = await runProBattery(
+      fakeServer(TODAY).callTool,
+      {
+        ...listening(),
+        pageAddresses: async () => {
+          throw new Error("fetch failed");
+        },
+      },
       undefined,
       noWait,
     );
     expect(byId(checks, "2.3")).toMatchObject({
-      verdict: "KNOWN",
-      known: { owningPlan: "plan 3 (comet_ask reliability)" },
-    });
-    expect(byId(checks, "3.4")).toMatchObject({
-      verdict: "KNOWN",
-      known: { owningPlan: "plan 12 (Agentic browsing)" },
+      verdict: "FAIL",
+      note: "fetch failed",
     });
   });
 
   it("scores [7.2-learn] with the no-pro battery's predicate, as known", async () => {
     const checks = await runProBattery(
       fakeServer(TODAY).callTool,
-      LISTENING,
+      listening(),
       undefined,
       noWait,
     );
@@ -1496,7 +1736,7 @@ describe("runProBattery", () => {
   it("waits before stopping the slow task, and again before polling", async () => {
     const server = fakeServer(TODAY);
     const waits: Array<[number, string]> = [];
-    await runProBattery(server.callTool, LISTENING, undefined, async (ms) => {
+    await runProBattery(server.callTool, listening(), undefined, async (ms) => {
       waits.push([ms, server.calls.at(-1) ?? ""]);
     });
     expect(waits).toEqual([
@@ -1516,13 +1756,18 @@ describe("runProBattery", () => {
       if (key(name, args) === CALLS.slowTask) slowTaskEnded = true;
       return reply;
     };
-    const checks = await runProBattery(callTool, LISTENING, undefined, noWait);
+    const checks = await runProBattery(
+      callTool,
+      listening(),
+      undefined,
+      noWait,
+    );
     expect(byId(checks, "4.3")).toMatchObject({
       verdict: "FAIL",
       note: "TIMEOUT after 10000ms",
     });
     expect(byId(checks, "4.3b")).toMatchObject({
-      verdict: "KNOWN",
+      verdict: "FAIL",
       note: "TIMEOUT after 10000ms",
     });
     expect(slowTaskEnded).toBe(true);
@@ -1537,7 +1782,7 @@ describe("runProBattery", () => {
           `Error: Screenshot failed: ${"the page did not answer. ".repeat(8)}`,
         ),
       }).callTool,
-      LISTENING,
+      listening(),
       undefined,
       noWait,
     );
@@ -1551,7 +1796,7 @@ describe("runProBattery", () => {
         ...TODAY,
         [CALLS.screenshot]: new Error("MCP error -32000: Connection closed"),
       }).callTool,
-      LISTENING,
+      listening(),
       undefined,
       noWait,
     );
@@ -1568,7 +1813,7 @@ describe("runProBattery", () => {
       });
       const checks = await runProBattery(
         server.callTool,
-        LISTENING,
+        listening(),
         undefined,
         noWait,
       );

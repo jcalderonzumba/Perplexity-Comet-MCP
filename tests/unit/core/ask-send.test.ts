@@ -6,22 +6,27 @@ import {
   sendPrompt,
 } from "../../../src/core/ask-send.js";
 import { PageScriptFailed } from "../../../src/core/page-script-failed.js";
-import type { ProseState } from "../../../src/page-scripts.js";
+import type { ThreadState } from "../../../src/page-scripts.js";
 import { FakeInputBar, SUBMIT_BUTTON } from "../fakes/fake-input-bar.js";
 
 const PROMPT = "What is the capital of France?";
-const QUIET: ProseState = { count: 0, lastText: "" };
+/** Perplexity's home page: no turn, and no prose. */
+const QUIET: ThreadState = {
+  latestTurn: null,
+  proseCount: 0,
+  lastProseText: "",
+};
 
-/** The input bar, the page's prose and a clock, as the send step reads them. */
+/** The input bar, the page's thread and a clock, as the send step reads them. */
 class FakePromptPort extends FakeInputBar implements PromptPort {
-  public prose: ProseState = QUIET;
+  public thread: ThreadState = QUIET;
   public waitedMs = 0;
   /** The time of each logged call, by its place in `log`. */
   public readonly times: number[] = [];
 
-  async readProseState(): Promise<ProseState> {
-    this.log.push("readProseState");
-    return this.prose;
+  async readThreadState(): Promise<ThreadState> {
+    this.log.push("readThreadState");
+    return this.thread;
   }
 
   now(): number {
@@ -135,11 +140,60 @@ describe("sendPrompt: a prompt the page takes", () => {
     );
   });
 
-  it("takes an answer that started as the prompt submitted, though the field still reads it", async () => {
+  it("takes a new turn the page shows as the prompt submitted, though the field still reads it", async () => {
+    class NewTurnBar extends FakePromptPort {
+      override async pressEnter(): Promise<void> {
+        await super.pressEnter();
+        this.thread = { latestTurn: 0, proseCount: 0, lastProseText: "" };
+      }
+    }
+    const port = new NewTurnBar();
+    port.takesEnter = false;
+
+    await sendPrompt(port, PROMPT, QUIET);
+
+    expect(port.clicks).toEqual([]);
+  });
+
+  it("never takes the previous turn's answer, still streaming, as the prompt submitted", async () => {
+    const before: ThreadState = {
+      latestTurn: 3,
+      proseCount: 5,
+      lastProseText: "Rome was",
+    };
+    class StreamingBar extends FakePromptPort {
+      override async pressEnter(): Promise<void> {
+        await super.pressEnter();
+        this.thread = {
+          latestTurn: 3,
+          proseCount: 9,
+          lastProseText: "Rome was founded",
+        };
+      }
+    }
+    const port = new StreamingBar();
+    port.thread = before;
+    port.takesEnter = false;
+    port.hasSubmitButton = false;
+
+    const error = await sendPrompt(port, PROMPT, before).then(
+      () => new Error("expected the send to fail"),
+      (thrown: unknown) => thrown,
+    );
+
+    expect(error).toBeInstanceOf(PromptNotSent);
+    expect((error as PromptNotSent).step).toBe("submit");
+  });
+
+  it("takes a new prose block as the prompt submitted on a page that shows no turn", async () => {
     class AnsweringBar extends FakePromptPort {
       override async pressEnter(): Promise<void> {
         await super.pressEnter();
-        this.prose = { count: 1, lastText: "Paris" };
+        this.thread = {
+          latestTurn: null,
+          proseCount: 1,
+          lastProseText: "Paris",
+        };
       }
     }
     const port = new AnsweringBar();

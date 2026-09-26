@@ -5,70 +5,6 @@ import { describe, expect, it } from "vitest";
 import { CometAI } from "../../src/comet-ai.js";
 import { FakeCdpClient } from "./fakes/fake-cdp-client.js";
 
-// `isResponseStable` only tracks responses longer than 50 characters
-// (short responses never stabilize). Use long strings in assertions.
-const ANSWER_A = "A".repeat(60);
-const ANSWER_B = "B".repeat(60);
-
-describe("CometAI.isResponseStable", () => {
-  it("returns false on the first observation of any response", () => {
-    const ai = new CometAI(new FakeCdpClient());
-    expect(ai.isResponseStable(ANSWER_A)).toBe(false);
-  });
-
-  it("returns true on the third identical observation (threshold = 2)", () => {
-    const ai = new CometAI(new FakeCdpClient());
-    // Call 1: records the text, counter stays 0
-    // Call 2: same text, counter increments to 1 → still below threshold
-    // Call 3: same text, counter increments to 2 → meets threshold
-    expect(ai.isResponseStable(ANSWER_A)).toBe(false);
-    expect(ai.isResponseStable(ANSWER_A)).toBe(false);
-    expect(ai.isResponseStable(ANSWER_A)).toBe(true);
-  });
-
-  it("resets the stable counter when the response text changes", () => {
-    const ai = new CometAI(new FakeCdpClient());
-    ai.isResponseStable(ANSWER_A);
-    ai.isResponseStable(ANSWER_A);
-    expect(ai.isResponseStable(ANSWER_A)).toBe(true); // stable
-
-    // Different text resets the counter
-    expect(ai.isResponseStable(ANSWER_B)).toBe(false);
-    expect(ai.isResponseStable(ANSWER_B)).toBe(false);
-    expect(ai.isResponseStable(ANSWER_B)).toBe(true); // stable again
-  });
-
-  it("returns false for short responses (length <= 50) regardless of repetition", () => {
-    const ai = new CometAI(new FakeCdpClient());
-    expect(ai.isResponseStable("short")).toBe(false);
-    expect(ai.isResponseStable("short")).toBe(false);
-    expect(ai.isResponseStable("short")).toBe(false);
-  });
-
-  it("returns false for empty responses regardless of repetition", () => {
-    const ai = new CometAI(new FakeCdpClient());
-    expect(ai.isResponseStable("")).toBe(false);
-    expect(ai.isResponseStable("")).toBe(false);
-    expect(ai.isResponseStable("")).toBe(false);
-  });
-});
-
-describe("CometAI.resetStabilityTracking", () => {
-  it("zeros the stable counter after a stable response", () => {
-    const ai = new CometAI(new FakeCdpClient());
-    ai.isResponseStable(ANSWER_A);
-    ai.isResponseStable(ANSWER_A);
-    expect(ai.isResponseStable(ANSWER_A)).toBe(true);
-
-    ai.resetStabilityTracking();
-
-    // After reset, the same response needs the full sequence again
-    expect(ai.isResponseStable(ANSWER_A)).toBe(false);
-    expect(ai.isResponseStable(ANSWER_A)).toBe(false);
-    expect(ai.isResponseStable(ANSWER_A)).toBe(true);
-  });
-});
-
 describe("CometAI.getAgentStatus", () => {
   it("returns the parsed shape from a canned safeEvaluate result", async () => {
     const fake = new FakeCdpClient();
@@ -89,7 +25,25 @@ describe("CometAI.getAgentStatus", () => {
     expect(status.response).toBe("the agent's final answer");
     expect(status.hasStopButton).toBe(false);
     expect(status.agentBrowsingUrl).toBe("");
-    expect(typeof status.isStable).toBe("boolean");
+  });
+
+  it("reports the status the page script reads, however often the same text is read", async () => {
+    const fake = new FakeCdpClient();
+    fake.setEvaluateResult({
+      status: "working",
+      steps: [],
+      currentStep: "",
+      response: "A".repeat(60),
+      hasStopButton: false,
+    });
+    const ai = new CometAI(fake);
+
+    const statuses = [];
+    for (let read = 0; read < 4; read++) {
+      statuses.push((await ai.getAgentStatus()).status);
+    }
+
+    expect(statuses).toEqual(["working", "working", "working", "working"]);
   });
 
   it("includes the agent-browsing URL when listTabsCategorized returns one", async () => {
@@ -166,5 +120,16 @@ describe("src/ sends no input made in page script", () => {
     >;
     expect(ai.sendPrompt).toBeUndefined();
     expect(ai.submitPrompt).toBeUndefined();
+  });
+
+  it("gives the Comet module no way to stop an answer of its own: the ask core clicks the stop control", () => {
+    const ai = new CometAI(new FakeCdpClient()) as unknown as Record<
+      string,
+      unknown
+    >;
+    expect(ai.stopAgent).toBeUndefined();
+    expect(sources.find(([file]) => file === "comet-ai.ts")?.[1]).not.toMatch(
+      /\.evaluate\(/,
+    );
   });
 });

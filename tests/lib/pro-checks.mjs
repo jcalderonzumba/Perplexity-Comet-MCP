@@ -29,6 +29,12 @@ import {
 /** @typedef {import("./no-pro-checks.mjs").NoProCheck} Check */
 /** @typedef {import("./no-pro-checks.mjs").ToolReply} ToolReply */
 /** @typedef {import("./no-pro-checks.mjs").DebugPort} DebugPort */
+
+/**
+ * The debug port, which the Pro battery also asks for the addresses of the
+ * browser's pages, to tell one Perplexity thread from another.
+ * @typedef {DebugPort & { pageAddresses: () => Promise<string[]> }} ProDebugPort
+ */
 /** @typedef {import("./battery-score.mjs").ScoredCheck} ScoredCheck */
 
 /**
@@ -188,16 +194,57 @@ export function followUpAnswered({ first, followUp }) {
   );
 }
 
+/** Perplexity's origin, whose `/search/<id>` pages are its threads. */
+const PERPLEXITY_ORIGIN = "https://www.perplexity.ai";
+const THREAD_PATH = /^\/search\/([^/]+)/;
+
 /**
- * [2.3]: the number was given, and the new chat's answer does not know it.
- * @param {{ first: ToolReply, fresh: ToolReply }} replies
+ * The id of the Perplexity thread a page shows, or undefined for any other
+ * page: another site, Perplexity's home page, its sidecar.
+ * @param {string} address
  */
-export function contextReset({ first, fresh }) {
+function threadId(address) {
+  const url = URL.canParse(address) ? new URL(address) : undefined;
+  if (url?.origin !== PERPLEXITY_ORIGIN) return undefined;
+  return THREAD_PATH.exec(url.pathname)?.[1];
+}
+
+/**
+ * The ids of the Perplexity threads the pages show.
+ * @param {readonly string[]} addresses
+ * @returns {Set<string>}
+ */
+function threadIds(addresses) {
+  return new Set(addresses.map(threadId).filter((id) => id !== undefined));
+}
+
+/**
+ * The addresses of the browser's pages after the first ask and after the
+ * new chat's.
+ * @typedef {{ before: readonly string[], after: readonly string[] }} ThreadAddresses
+ */
+
+/**
+ * A thread was open after the first ask, and a thread open after the new
+ * chat's ask was not.
+ * @param {ThreadAddresses} threads
+ */
+function newThreadOpened({ before, after }) {
+  const earlier = threadIds(before);
   return (
-    succeeded(first) &&
-    answered(fresh) &&
-    !namesWord(replyText(fresh), REMEMBERED_NUMBER)
+    earlier.size > 0 && [...threadIds(after)].some((id) => !earlier.has(id))
   );
+}
+
+/**
+ * [2.3]: the number was given, and the new chat's ask answered in a thread
+ * of its own, one not open after the first ask. What the answer knows is not
+ * judged: Perplexity's memory, when the account has it on, carries what an
+ * earlier thread said into a new one.
+ * @param {{ first: ToolReply, fresh: ToolReply, threads: ThreadAddresses }} outcome
+ */
+export function contextReset({ first, fresh, threads }) {
+  return succeeded(first) && answered(fresh) && newThreadOpened(threads);
 }
 
 /**
@@ -661,26 +708,51 @@ const FOLLOW_UP = {
 };
 
 /**
- * [2.3]: a number given in one new chat is unknown in the next.
- * @type {Check}
+ * How many Perplexity threads the pages show, in words.
+ * @param {readonly string[]} addresses
  */
-const CONTEXT_RESET = {
-  id: "2.3",
-  probe: async (callTool) => {
-    const first = await ask(callTool, ANSWER, {
-      prompt: `Remember the number ${REMEMBERED_NUMBER}.`,
-      newChat: true,
-    });
-    const fresh = await ask(callTool, ANSWER, {
-      prompt: "What number did I ask you to remember?",
-      newChat: true,
-    });
-    return {
-      held: contextReset({ first, fresh }),
-      note: excerpt(fresh, ANSWER_NOTE_LENGTH),
-    };
-  },
-};
+function threadCount(addresses) {
+  const count = threadIds(addresses).size;
+  return `${count} thread${count === 1 ? "" : "s"}`;
+}
+
+/**
+ * What [2.3] saw, without the addresses of threads the user has open.
+ * @param {ThreadAddresses} threads
+ */
+function threadsNote(threads) {
+  const verdict = newThreadOpened(threads) ? "yes" : "no";
+  return `a thread of its own: ${verdict} (${threadCount(threads.before)} open after the first ask, ${threadIds(threads.after).size} after the new chat's)`;
+}
+
+/**
+ * [2.3]: a number given in one new chat, then asked for in another, which
+ * answers in a thread of its own. The browser's pages are read after each
+ * ask, through the debug port.
+ * @param {ProDebugPort} debugPort
+ * @returns {Check}
+ */
+function contextResetCheck(debugPort) {
+  return {
+    id: "2.3",
+    probe: async (callTool) => {
+      const first = await ask(callTool, ANSWER, {
+        prompt: `Remember the number ${REMEMBERED_NUMBER}.`,
+        newChat: true,
+      });
+      const before = await debugPort.pageAddresses();
+      const fresh = await ask(callTool, ANSWER, {
+        prompt: "What number did I ask you to remember?",
+        newChat: true,
+      });
+      const threads = { before, after: await debugPort.pageAddresses() };
+      return {
+        held: contextReset({ first, fresh, threads }),
+        note: `${threadsNote(threads)} / ${excerpt(fresh, ANSWER_NOTE_LENGTH)}`,
+      };
+    },
+  };
+}
 
 /**
  * [2.4]: an ask given 3 s for a long essay returns in time and says its
@@ -785,9 +857,10 @@ const SITE_TAB_SWITCHED = {
  * The checks after connect, in the order they run. The checks that judge
  * the same calls share them, so each battery run builds its own list.
  * @param {(ms: number) => Promise<void>} wait
+ * @param {ProDebugPort} debugPort
  * @returns {readonly Check[]}
  */
-function afterConnect(wait) {
+function afterConnect(wait, debugPort) {
   const browsed = shared(listTabsAroundAgentAsk);
   const stopped = shared((callTool) => stopSlowTask(callTool, wait));
   return [
@@ -801,7 +874,7 @@ function afterConnect(wait) {
       (reply) => answerNames(reply, "Paris"),
     ),
     FOLLOW_UP,
-    CONTEXT_RESET,
+    contextResetCheck(debugPort),
     TIMEOUT_STATED,
     askCheck(
       "2.5",
@@ -917,7 +990,7 @@ async function scored(check, callTool) {
  * run or scored: any other call could make the server launch Comet, or
  * kill and relaunch one listening on another port.
  * @param {CallTool} callTool
- * @param {DebugPort} debugPort
+ * @param {ProDebugPort} debugPort
  * @param {(check: ScoredCheck) => void} [report] called as each check is scored
  * @param {(ms: number) => Promise<void>} [wait] how the battery waits between calls
  * @returns {Promise<ScoredCheck[]>}
@@ -932,7 +1005,7 @@ export async function runProBattery(
   report(connect);
   const checks = [connect];
   if (connect.verdict !== "PASS") return checks;
-  for (const check of afterConnect(wait)) {
+  for (const check of afterConnect(wait, debugPort)) {
     const result = await scored(check, callTool);
     report(result);
     checks.push(result);

@@ -202,7 +202,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         // Prefer connecting to the MAIN Perplexity tab (not the sidecar).
         // Comet's right-panel chat helper lives at a sidecar URL that also
         // matches `perplexity.ai` substring — connecting to it routes
-        // sendPrompt / stopAgent to the wrong tab.
+        // the prompt and the stop to the wrong tab.
         const perplexityTab =
           freshTargets.find(
             (t) =>

@@ -11,10 +11,11 @@ import { sendPrompt } from "../../src/core/ask-send.js";
 import { ModeCore } from "../../src/core/mode.js";
 import type { BrowserTarget } from "../../src/core/perplexity-tab.js";
 import {
+  locateStopControl,
   locateSubmitButton,
   pageScriptExpression,
   readAskInput,
-  readProseState,
+  readThreadState,
   selectAskInput,
 } from "../../src/page-scripts.js";
 import {
@@ -76,39 +77,39 @@ describe("cdpAskPort: the connection and the tabs", () => {
 });
 
 describe("cdpAskPort: reading the page", () => {
-  it("reads the prose state with its page script", async () => {
+  it("reads the thread's state with its page script", async () => {
     const { client, port } = rig();
-    document.body.innerHTML = `<div class="prose">first</div><div class="prose">Paris</div>`;
+    document.body.innerHTML = `<div data-workflow-entry="2">q</div><div class="prose">Paris</div>`;
 
-    expect(await port.readProseState()).toEqual({
-      count: 2,
-      lastText: "Paris",
+    expect(await port.readThreadState()).toEqual({
+      latestTurn: 2,
+      proseCount: 1,
+      lastProseText: "Paris",
     });
-    expect(client.expressions).toEqual([pageScriptExpression(readProseState)]);
+    expect(client.expressions).toEqual([pageScriptExpression(readThreadState)]);
   });
 
   it("rejects with the page's error, kept apart from its own words, when a page script fails", async () => {
     const { client, port } = rig();
     client.pageFailure = "TypeError: document is gone";
 
-    const proseFailure = await port.readProseState().catch((error) => error);
+    const threadFailure = await port.readThreadState().catch((error) => error);
 
-    expect(proseFailure).toBeInstanceOf(PageScriptFailed);
-    expect(proseFailure).toMatchObject({
-      message: "readProseState failed in the page",
+    expect(threadFailure).toBeInstanceOf(PageScriptFailed);
+    expect(threadFailure).toMatchObject({
+      message: "readThreadState failed in the page",
       pageDetail: "TypeError: document is gone",
     });
   });
 });
 
 describe("cdpAskPort: the answer", () => {
-  it("reads the status and resets the stability tracking through the Comet module", async () => {
+  it("reads the status through the Comet module", async () => {
     const { comet, port } = rig();
 
     expect(await port.readStatus()).toEqual(WORKING_STATUS);
-    port.resetStabilityTracking();
 
-    expect(comet.calls).toEqual(["getAgentStatus", "resetStabilityTracking"]);
+    expect(comet.calls).toEqual(["getAgentStatus"]);
   });
 });
 
@@ -165,7 +166,11 @@ describe("cdpAskPort: the input bar", () => {
     document.body.innerHTML = ASK_INPUT_FIXTURE;
     const hostile = `Say "hi" \\ \`cmd\` \${alert(1)} </script><script>alert(2)</script>`;
 
-    await sendPrompt(port, hostile, { count: 0, lastText: "" });
+    await sendPrompt(port, hostile, {
+      latestTurn: null,
+      proseCount: 0,
+      lastProseText: "",
+    });
 
     expect(client.inserted).toEqual([hostile]);
     expect(client.submitted).toEqual([hostile]);
@@ -176,14 +181,28 @@ describe("cdpAskPort: the input bar", () => {
 });
 
 describe("cdpAskPort: stopping", () => {
-  it("stops the answer through the Comet module, and says whether it did", async () => {
-    const { comet, port } = rig();
+  it("finds the input bar's stop control with its page script, and clicks it as trusted input", async () => {
+    const { client, comet, port } = rig();
+    document.body.innerHTML = ASK_INPUT_FIXTURE;
+    const submit = document.querySelector('button[aria-label="Submit"]');
+    submit?.setAttribute("aria-label", "Stop response (Esc)");
 
-    expect(await port.stopAgent()).toBe(true);
-    comet.hasStopControl = false;
-    expect(await port.stopAgent()).toBe(false);
+    const control = await port.locateStopControl();
+    expect(control).toEqual({ x: expect.any(Number), y: expect.any(Number) });
+    if (control) await port.clickAt(control);
 
-    expect(comet.calls).toEqual(["stopAgent", "stopAgent"]);
+    expect(client.expressions).toEqual([
+      pageScriptExpression(locateStopControl),
+    ]);
+    expect(client.calls).toEqual([`clickAt ${control?.x},${control?.y}`]);
+    expect(comet.calls).toEqual([]);
+  });
+
+  it("finds no stop control when the input bar shows Submit", async () => {
+    const { port } = rig();
+    document.body.innerHTML = ASK_INPUT_FIXTURE;
+
+    expect(await port.locateStopControl()).toBeNull();
   });
 });
 

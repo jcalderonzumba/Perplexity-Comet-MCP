@@ -5,8 +5,8 @@
 // read only through the tested functions of `page-scripts.ts`, through the
 // client's evaluate that reconnects when the connection drops. The prompt
 // reaches the page only as the client's trusted text, which, like its keys,
-// its clicks and the focus emulation that lets them through, the client
-// sends only to a tab on Perplexity's origin. Tabs are read and opened by
+// its clicks (the stop control's among them) and the focus emulation that
+// lets them through, the client sends only to a tab on Perplexity's origin. Tabs are read and opened by
 // the shared tab choice, `createCdpPerplexityTab`, never through this port.
 
 import type { TrustedKey } from "./cdp-client.js";
@@ -19,13 +19,14 @@ import {
 import type { ModeTool } from "./core/mode-tool.js";
 import type { BrowserTarget, PerplexityTab } from "./core/perplexity-tab.js";
 import {
+  locateStopControl,
   locateSubmitButton,
   type PagePoint,
-  type ProseState,
   pageScriptExpression,
   readAskInput,
-  readProseState,
+  readThreadState,
   selectAskInput,
+  type ThreadState,
 } from "./page-scripts.js";
 import type { EvaluateResult } from "./types.js";
 
@@ -50,11 +51,9 @@ export interface AskPortClient {
   stopFocusEmulation(): Promise<void>;
 }
 
-/** The part of the Comet module the ask drives. */
+/** The part of the Comet module the ask reads. */
 export interface AskPortComet {
   getAgentStatus(): Promise<AskStatus>;
-  resetStabilityTracking(): void;
-  stopAgent(): Promise<boolean>;
 }
 
 class CdpAskPort implements AskPort {
@@ -87,16 +86,12 @@ class CdpAskPort implements AskPort {
     return this.client.navigate(url, waitForLoad);
   }
 
-  readProseState(): Promise<ProseState> {
-    return this.runPageScript(readProseState);
+  readThreadState(): Promise<ThreadState> {
+    return this.runPageScript(readThreadState);
   }
 
   readStatus(): Promise<AskStatus> {
     return this.comet.getAgentStatus();
-  }
-
-  resetStabilityTracking(): void {
-    this.comet.resetStabilityTracking();
   }
 
   selectAskInput(): Promise<boolean> {
@@ -109,6 +104,10 @@ class CdpAskPort implements AskPort {
 
   locateSubmitButton(): Promise<PagePoint | null> {
     return this.runPageScript(locateSubmitButton);
+  }
+
+  locateStopControl(): Promise<PagePoint | null> {
+    return this.runPageScript(locateStopControl);
   }
 
   insertText(text: string): Promise<void> {
@@ -129,10 +128,6 @@ class CdpAskPort implements AskPort {
 
   stopFocusEmulation(): Promise<void> {
     return this.client.stopFocusEmulation();
-  }
-
-  stopAgent(): Promise<boolean> {
-    return this.comet.stopAgent();
   }
 
   now(): number {
