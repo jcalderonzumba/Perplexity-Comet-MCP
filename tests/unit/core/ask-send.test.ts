@@ -148,6 +148,30 @@ describe("sendPrompt: a prompt the page takes", () => {
     expect(port.clicks).toEqual([]);
   });
 
+  it("takes an Enter the page took just after the wait as submitted, though the Submit button went with the prompt", async () => {
+    class LateEnterBar extends FakePromptPort {
+      private enterPending = false;
+      override async pressEnter(): Promise<void> {
+        this.log.push("pressEnter");
+        this.enterPending = true;
+      }
+      override async locateSubmitButton() {
+        if (this.enterPending) {
+          this.enterPending = false;
+          this.takesEnter = true;
+          await super.pressEnter();
+        }
+        return super.locateSubmitButton();
+      }
+    }
+    const port = new LateEnterBar();
+
+    await sendPrompt(port, PROMPT, QUIET);
+
+    expect(port.submitted).toEqual([PROMPT]);
+    expect(port.clicks).toEqual([]);
+  });
+
   it("keeps checking through a read that fails while the page moves on", async () => {
     class NavigatingBar extends FakePromptPort {
       private reads = 0;

@@ -131,6 +131,9 @@ async function submitPrompt(
     port.locateSubmitButton(),
   );
   if (!button) {
+    // The button shows only while the field holds text: an Enter taken just
+    // after the wait took the button with the prompt.
+    if (await showsSubmitted(port, proseBefore)) return;
     throw new PromptNotSent(
       "submit",
       `${notTaken}, the input bar still holds the prompt after Enter and the page shows no Submit button`,
