@@ -76,7 +76,7 @@ npx clones the repository at that commit and builds it on first use, then reuses
 npx -y github:jcalderonzumba/Perplexity-Comet-MCP#<commit-sha>
 ```
 
-The first start clones and builds, which can take longer than an MCP client waits for a server; run the command once by hand, and stop it with Ctrl-C, before adding it to your client. To move to a newer commit, run the new one once by hand, then change the SHA in your client's configuration.
+The first start clones and builds, which can take longer than an MCP client waits for a server; run the command once by hand, and stop it with Ctrl-C, before adding it to your client. To move a Claude Code setup to a newer commit, use `npm run bridge:update` from a clone (below); for another client, run the new commit once by hand, then change the SHA in its configuration.
 
 ### Install from Source
 
@@ -101,7 +101,16 @@ claude mcp add -s user comet-bridge -e COMET_PORT=9222 -- \
   node /path/to/Perplexity-Comet-MCP/dist/index.js
 ```
 
-`claude mcp get comet-bridge` shows what it runs. When nothing answers on that port, `comet_connect` starts Comet with remote debugging on it; if Comet is already running without it, `comet_connect` stops Comet and starts it again, on macOS and Windows (under WSL it only starts Comet).
+`claude mcp get comet-bridge` shows what it runs.
+
+To move a pinned `comet-bridge` to a newer commit, run this from a clone of this repository:
+
+```bash
+npm run bridge:update                 # the tip of main on GitHub
+npm run bridge:update -- <commit-sha> # a given commit, for example to go back
+```
+
+It builds that commit with npx and asks it for its tools first, and replaces the user-scope `comet-bridge` entry only when every tool answers; if adding the new entry fails, it puts the old one back. It keeps the entry's `COMET_PORT` unless `COMET_PORT` is set in the environment, and does nothing when the entry already runs that commit. Sessions already running keep the old server until you reconnect it with `/mcp`. It needs `git`, `npx` and `claude` on `PATH`, and runs on macOS and Linux. When nothing answers on that port, `comet_connect` starts Comet with remote debugging on it; if Comet is already running without it, `comet_connect` stops Comet and starts it again, on macOS and Windows (under WSL it only starts Comet).
 
 ### Other MCP clients
 
@@ -524,6 +533,7 @@ npm run check                         # before every commit
 | `npm run lint` · `npm run format` | Biome on its own; `format` rewrites files |
 | `npm run test:live` | the live no-pro battery |
 | `npm run test:live:pro` | the live Pro battery |
+| `npm run bridge:update [-- <sha>]` | points your user-scope Claude Code `comet-bridge` at this repository's build at a commit, by default the tip of `main` on GitHub |
 
 ### Live test batteries
 

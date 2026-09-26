@@ -85,7 +85,7 @@ TypeScript (strict, ES2022, NodeNext) compiled by `tsc` to `dist/`, one npm pack
 | `src/upload-validator.ts` | Allowlists for paths, tab ids, domains and selectors |
 | `tests/unit/`, `tests/gates/` | Unit tests; the gate scripts' tests |
 | `tests/run-*.mjs` | The live batteries |
-| `scripts/`, `biome.json`, `tsconfig.tools.json` | The gates `check.mjs` and `preflight.mjs` over their library in `scripts/lib/`, and `notebook-range.mjs`, the notebook's range in `/review-phase`'s brief; Biome's settings; the typecheck of the tests and scripts |
+| `scripts/`, `biome.json`, `tsconfig.tools.json` | The gates `check.mjs` and `preflight.mjs` over their library in `scripts/lib/`, `notebook-range.mjs`, the notebook's range in `/review-phase`'s brief, and `update-bridge.mjs`, which re-pins the owner's `comet-bridge`; Biome's settings; the typecheck of the tests and scripts |
 | `.githooks/`, `.claude/hooks/` | The git hooks and the Claude Code hooks |
 | `.claude/skills/`, `.claude/agents/` | `/review-plan`, `/run-phase`, `/review-phase`; `phase-builder`, `phase-reviewer` |
 
@@ -125,3 +125,4 @@ With the notebook `.work/` in the clone, also run `git -C .work config core.hook
 | `npm run typecheck` · `lint` · `format` | the check's parts on their own; `format` rewrites files |
 | `npm run test:live` | the live no-pro battery, `tests/run-no-pro.mjs`: needs Comet signed in and already running with its debug port on the server's port (`COMET_PORT`, default 9223), and fails at connect without calling a tool otherwise; spends no Pro queries. Prints PASS, FAIL, KNOWN or UNEXPECTED PASS per check and fails on any FAIL or UNEXPECTED PASS |
 | `npm run test:live:pro` | the live Pro battery, `tests/run-all.mjs`: needs Comet signed in to Perplexity Pro and already running with its debug port on the server's port (`COMET_PORT`, default 9223), and fails at connect without calling a tool otherwise; spends Pro queries, one Deep research query among them. Prints PASS, FAIL, KNOWN or UNEXPECTED PASS per check, scored against its own known-failures list (`PRO_KNOWN_FAILURES` in `tests/lib/battery-score.mjs`), and fails on any FAIL or UNEXPECTED PASS |
+| `npm run bridge:update` | points the owner's user-scope Claude Code `comet-bridge` at this repository's build at a commit (`scripts/update-bridge.mjs`): the tip of `main` on GitHub, or the full sha given after `--`. It runs `npx -y github:<owner>/<repo>#<sha>` once and asks the build for its tools, and replaces the entry with `claude mcp` only when every tool the stdio server declares answers, putting the old entry back if the add fails. Keeps the entry's `COMET_PORT` unless the environment sets one; does nothing when the entry already runs that commit. Running sessions reconnect with `/mcp` |
