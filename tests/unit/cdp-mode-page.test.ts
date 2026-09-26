@@ -243,7 +243,7 @@ describe("createCdpModeTool", () => {
     );
     const client = new FakePageClient();
     client.inputRefusal = new Error(
-      "refused to click: the tab is on https://perplexity.ai.example",
+      "refused to click: the tab is not on https://www.perplexity.ai",
     );
 
     const result = await createCdpModeTool(client, quote).core.switchMode(

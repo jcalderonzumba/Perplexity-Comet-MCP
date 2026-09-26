@@ -289,7 +289,9 @@ const KEY_CODES: Record<
  * top frame on Perplexity's origin. Every trusted input the server sends
  * passes here: the origin is read through CDP, never page script, and read
  * immediately before the input, so a tab that navigated since the last one
- * gets nothing. An origin that cannot be read refuses the input.
+ * gets nothing. An origin that cannot be read refuses the input. A refusal
+ * names only Perplexity's origin, never the tab's: the site's operator
+ * chooses that one, and the refusal reaches replies as the server's words.
  */
 async function inputOnPerplexity(
   domains: TrustedInputDomains,
@@ -305,7 +307,7 @@ async function inputOnPerplexity(
   }
   if (origin !== PERPLEXITY_ORIGIN) {
     throw new Error(
-      `refused to ${action}: the tab is on ${origin}, not ${PERPLEXITY_ORIGIN}`,
+      `refused to ${action}: the tab is not on ${PERPLEXITY_ORIGIN}`,
     );
   }
   return domains.Input;

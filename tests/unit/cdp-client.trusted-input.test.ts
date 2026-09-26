@@ -140,12 +140,15 @@ describe("trusted input, only on Perplexity", () => {
       ],
       ["about:blank", "null"],
     ])(
-      "is refused, and nothing sent, on a top frame at %s",
+      "is refused, and nothing sent, on a top frame at %s, whose origin the refusal does not repeat",
       async (url, securityOrigin) => {
         tab.topFrame = { url, securityOrigin };
 
-        await expect(send(client)).rejects.toThrow(
-          `refused to ${action}: the tab is on ${securityOrigin}, not https://www.perplexity.ai`,
+        // The site's operator chooses its origin, and the refusal reaches
+        // replies as the server's own words, so it names only Perplexity's.
+        await expect(send(client)).rejects.toHaveProperty(
+          "message",
+          `refused to ${action}: the tab is not on https://www.perplexity.ai`,
         );
         expect(tab.inputs).toEqual([]);
       },

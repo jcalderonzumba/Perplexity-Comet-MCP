@@ -269,14 +269,14 @@ describe("sendPrompt: a failure names its step", () => {
   it("names typing when the tab's origin refuses the text", async () => {
     const port = new FakePromptPort();
     port.inputRefusal = new Error(
-      "refused to insert text: the tab is on https://news.example, not https://www.perplexity.ai",
+      "refused to insert text: the tab is not on https://www.perplexity.ai",
     );
 
     const failure = await sendFailure(port);
 
     expect(failure.step).toBe("text");
     expect(failure.message).toBe(
-      "The prompt was not sent: the text was not taken: refused to insert text: the tab is on https://news.example, not https://www.perplexity.ai",
+      "The prompt was not sent: the text was not taken: refused to insert text: the tab is not on https://www.perplexity.ai",
     );
   });
 
@@ -316,7 +316,7 @@ describe("sendPrompt: a failure names its step", () => {
     class RefusingEnterBar extends FakePromptPort {
       override async pressEnter(): Promise<void> {
         throw new Error(
-          "refused to press Enter: the tab is on https://news.example, not https://www.perplexity.ai",
+          "refused to press Enter: the tab is not on https://www.perplexity.ai",
         );
       }
     }
@@ -325,7 +325,7 @@ describe("sendPrompt: a failure names its step", () => {
 
     expect(failure.step).toBe("submit");
     expect(failure.message).toBe(
-      "The prompt was not sent: the submit was not taken: refused to press Enter: the tab is on https://news.example, not https://www.perplexity.ai",
+      "The prompt was not sent: the submit was not taken: refused to press Enter: the tab is not on https://www.perplexity.ai",
     );
   });
 });
