@@ -1,8 +1,7 @@
 # Perplexity Comet MCP
 
-[![npm version](https://img.shields.io/npm/v/perplexity-comet-mcp.svg)](https://www.npmjs.com/package/perplexity-comet-mcp)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
-[![Node.js Version](https://img.shields.io/node/v/perplexity-comet-mcp.svg)](https://nodejs.org)
+[![Node.js](https://img.shields.io/badge/node-%3E%3D18-brightgreen.svg)](https://nodejs.org)
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.0-blue.svg)](https://www.typescriptlang.org/)
 [![MCP Compatible](https://img.shields.io/badge/MCP-Compatible-green.svg)](https://modelcontextprotocol.io/)
 [![Platform](https://img.shields.io/badge/Platform-Windows%20%7C%20macOS%20%7C%20WSL-lightgrey.svg)]()
@@ -102,7 +101,7 @@ claude mcp add -s user comet-bridge -e COMET_PORT=9222 -- \
   node /path/to/Perplexity-Comet-MCP/dist/index.js
 ```
 
-`claude mcp get comet-bridge` shows what it runs. When nothing answers on that port, `comet_connect` starts Comet with remote debugging on it; if Comet is already running without it, `comet_connect` quits Comet and starts it again.
+`claude mcp get comet-bridge` shows what it runs. When nothing answers on that port, `comet_connect` starts Comet with remote debugging on it; if Comet is already running without it, `comet_connect` stops Comet and starts it again, on macOS and Windows (under WSL it only starts Comet).
 
 ### Other MCP clients
 
