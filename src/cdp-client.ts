@@ -238,6 +238,90 @@ export async function readTopFrameOrigin(page: FrameTreeAPI): Promise<string> {
   return frameTree.frame.securityOrigin;
 }
 
+/** The one origin trusted input is ever sent to. */
+export const PERPLEXITY_ORIGIN = "https://www.perplexity.ai";
+
+/** A key the server presses. */
+export type TrustedKey = "Enter" | "Escape";
+
+/** The parameters of the CDP `Input.dispatchKeyEvent` calls `pressKeyOn` sends. */
+export interface KeyEventParams {
+  type: "keyDown" | "rawKeyDown" | "keyUp";
+  key: TrustedKey;
+  code: string;
+  windowsVirtualKeyCode: number;
+  text?: string;
+  unmodifiedText?: string;
+}
+
+/** The slice of the CDP Input domain trusted input uses. */
+export interface TrustedInputAPI extends MouseInputAPI {
+  dispatchKeyEvent(params: KeyEventParams): Promise<unknown>;
+  insertText(params: { text: string }): Promise<unknown>;
+}
+
+/** The CDP domains trusted input goes through. */
+export interface TrustedInputDomains {
+  Page: FrameTreeAPI;
+  Input: TrustedInputAPI;
+}
+
+/** What a real key press carries for each key, as a US keyboard sends it. */
+const KEY_CODES: Record<
+  TrustedKey,
+  { code: string; windowsVirtualKeyCode: number; text?: string }
+> = {
+  Enter: { code: "Enter", windowsVirtualKeyCode: 13, text: "\r" },
+  Escape: { code: "Escape", windowsVirtualKeyCode: 27 },
+};
+
+/**
+ * The Input domain, handed out only while the browser reports the tab's
+ * top frame on Perplexity's origin. Every trusted input the server sends
+ * passes here: the origin is read through CDP, never page script, and read
+ * immediately before the input, so a tab that navigated since the last one
+ * gets nothing. An origin that cannot be read refuses the input.
+ */
+async function inputOnPerplexity(
+  domains: TrustedInputDomains,
+  action: string,
+): Promise<TrustedInputAPI> {
+  let origin: string;
+  try {
+    origin = await readTopFrameOrigin(domains.Page);
+  } catch (error) {
+    throw new Error(
+      `refused to ${action}: the tab's origin could not be read (${messageOf(error)})`,
+    );
+  }
+  if (origin !== PERPLEXITY_ORIGIN) {
+    throw new Error(
+      `refused to ${action}: the tab is on ${origin}, not ${PERPLEXITY_ORIGIN}`,
+    );
+  }
+  return domains.Input;
+}
+
+/**
+ * Press and release `key` with the codes a real key press carries; a key
+ * that types text (Enter) sends it on the way down, as a keyboard does.
+ */
+async function pressKeyOn(
+  input: TrustedInputAPI,
+  key: TrustedKey,
+): Promise<void> {
+  const { text, ...codes } = KEY_CODES[key];
+  const down = text
+    ? ({ type: "keyDown", text, unmodifiedText: text } as const)
+    : ({ type: "rawKeyDown" } as const);
+  await input.dispatchKeyEvent({ ...down, key, ...codes });
+  await input.dispatchKeyEvent({ type: "keyUp", key, ...codes });
+}
+
+function messageOf(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
+}
+
 // Detect if running in WSL (must be before windowsFetch)
 function isWSL(): boolean {
   if (platform() !== "linux") return false;
@@ -1792,21 +1876,35 @@ export class CometCDPClient {
   }
 
   /**
-   * Press a key
+   * Insert `text` at the focused element, as an IME would, whether or not
+   * the window has focus. Only on Perplexity (see `inputOnPerplexity`).
+   *
+   * `Input.insertText` is marked experimental in the protocol: a Comet that
+   * changes it shows up when the caller reads the field back and finds the
+   * text not taken, never as a silent success.
    */
-  async pressKey(key: string): Promise<void> {
-    this.ensureConnected();
-    await this.client!.Input.dispatchKeyEvent({ type: "keyDown", key });
-    await this.client!.Input.dispatchKeyEvent({ type: "keyUp", key });
+  async insertText(text: string): Promise<void> {
+    const input = await this.perplexityInput("insert text");
+    await input.insertText({ text });
+  }
+
+  /** Press and release `key` as a real key press. Only on Perplexity. */
+  async pressKey(key: TrustedKey): Promise<void> {
+    await pressKeyOn(await this.perplexityInput(`press ${key}`), key);
   }
 
   /**
    * Click at a point in the page, in viewport CSS pixels, with real pointer
-   * events (see `clickAtPoint`)
+   * events (see `clickAtPoint`). Only on Perplexity.
    */
   async clickAt(point: PagePoint): Promise<void> {
+    await clickAtPoint(await this.perplexityInput("click"), point);
+  }
+
+  /** The Input domain, once the connected tab is known to be on Perplexity. */
+  private perplexityInput(action: string): Promise<TrustedInputAPI> {
     this.ensureConnected();
-    await clickAtPoint(this.client!.Input, point);
+    return inputOnPerplexity(this.client!, action);
   }
 
   /** The security origin of the connected tab's top frame, read now. */

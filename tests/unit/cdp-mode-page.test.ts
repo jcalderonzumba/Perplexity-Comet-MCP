@@ -60,35 +60,24 @@ describe("cdpModePage", () => {
     expect(client.clicks).toEqual([{ x: 612, y: 388.5 }]);
   });
 
-  it("reads the tab's origin before each click", async () => {
+  it("passes on a click the client refuses, clicking nothing", async () => {
     const client = new FakePageClient();
-    const page = cdpModePage(client);
+    client.inputRefusal = new Error("refused to click: the tab is elsewhere");
 
-    await page.clickAt({ x: 1, y: 2 });
-    await page.clickAt({ x: 3, y: 4 });
+    const click = cdpModePage(client).clickAt({ x: 612, y: 388.5 });
 
-    expect(client.originReads).toBe(2);
+    await expect(click).rejects.toThrow("refused to click");
+    expect(client.clicks).toEqual([]);
   });
 
-  it.each([
-    "https://example.com",
-    "https://www.perplexity.ai.example",
-    "http://www.perplexity.ai",
-    "null",
-  ])(
-    "refuses to click, and clicks nothing, when the tab's origin is %s",
-    async (origin) => {
-      const client = new FakePageClient();
-      client.origin = origin;
+  it("leaves the origin check to the client, reading no origin itself", async () => {
+    const client = new FakePageClient();
 
-      const click = cdpModePage(client).clickAt({ x: 612, y: 388.5 });
+    await cdpModePage(client).clickAt({ x: 1, y: 2 });
+    await cdpModePage(client).pressEscape();
 
-      await expect(click).rejects.toThrow(
-        `refused to click: the tab is on ${origin}, not https://www.perplexity.ai`,
-      );
-      expect(client.clicks).toEqual([]);
-    },
-  );
+    expect(client.originReads).toBe(0);
+  });
 
   it("presses Escape with the client's key press", async () => {
     const client = new FakePageClient();
@@ -96,6 +85,16 @@ describe("cdpModePage", () => {
     await cdpModePage(client).pressEscape();
 
     expect(client.keys).toEqual(["Escape"]);
+  });
+
+  it("passes on an Escape the client refuses", async () => {
+    const client = new FakePageClient();
+    client.inputRefusal = new Error("refused to press Escape");
+
+    await expect(cdpModePage(client).pressEscape()).rejects.toThrow(
+      "refused to press Escape",
+    );
+    expect(client.keys).toEqual([]);
   });
 
   it("waits for the time asked", async () => {
@@ -204,7 +203,7 @@ describe("createCdpModeTool", () => {
     ]);
   });
 
-  it("fails a switch without a click when the tab is not on Perplexity", async () => {
+  it("fails a switch without a click when the client refuses the click", async () => {
     document.body.innerHTML = readFileSync(
       join(
         dirname(fileURLToPath(import.meta.url)),
@@ -214,7 +213,9 @@ describe("createCdpModeTool", () => {
       "utf8",
     );
     const client = new FakePageClient();
-    client.origin = "https://perplexity.ai.example";
+    client.inputRefusal = new Error(
+      "refused to click: the tab is on https://perplexity.ai.example",
+    );
 
     const result = await createCdpModeTool(client, quote).core.switchMode(
       "research",

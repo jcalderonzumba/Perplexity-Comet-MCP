@@ -2,11 +2,12 @@
 // adapters build when they start, the navigation to Perplexity the
 // `comet_mode` tool makes before a switch, and the tool built from them.
 //
-// Clicks are trusted pointer events at points a page script returns, so
-// each one is sent only while the browser reports the tab's top frame on
-// Perplexity's own origin: a page elsewhere, imitating the mode button,
-// never steers them.
+// Clicks and Escape are trusted input, clicks at points a page script
+// returns. The client sends them only while the browser reports the tab's
+// top frame on Perplexity's own origin, so a page elsewhere, imitating the
+// mode button or an open menu, never steers them.
 
+import { PERPLEXITY_ORIGIN, type TrustedKey } from "./cdp-client.js";
 import { ModeCore, type ModePage } from "./core/mode.js";
 import type { ModeTool } from "./core/mode-tool.js";
 import {
@@ -16,8 +17,7 @@ import {
 } from "./page-scripts.js";
 import type { EvaluateResult } from "./types.js";
 
-const PERPLEXITY_HOME = "https://www.perplexity.ai/";
-const PERPLEXITY_ORIGIN = new URL(PERPLEXITY_HOME).origin;
+const PERPLEXITY_HOME = `${PERPLEXITY_ORIGIN}/`;
 
 /** The part of the CDP client that reads the tab's origin from the browser. */
 export interface OriginReader {
@@ -25,11 +25,14 @@ export interface OriginReader {
   pageOrigin(): Promise<string>;
 }
 
-/** The part of the CDP client the mode page drives. */
-export interface ModePageClient extends OriginReader {
+/**
+ * The part of the CDP client the mode page drives. Its clicks and key
+ * presses are refused off Perplexity's origin.
+ */
+export interface ModePageClient {
   evaluate(expression: string): Promise<EvaluateResult>;
   clickAt(point: PagePoint): Promise<void>;
-  pressKey(key: string): Promise<void>;
+  pressKey(key: TrustedKey): Promise<void>;
 }
 
 /** The part of the CDP client that knows and changes the tab's address. */
@@ -55,14 +58,8 @@ class CdpModePage implements ModePage {
     return response.result.value as R;
   }
 
-  async clickAt(point: PagePoint): Promise<void> {
-    const origin = await this.client.pageOrigin();
-    if (origin !== PERPLEXITY_ORIGIN) {
-      throw new Error(
-        `refused to click: the tab is on ${origin}, not ${PERPLEXITY_ORIGIN}`,
-      );
-    }
-    await this.client.clickAt(point);
+  clickAt(point: PagePoint): Promise<void> {
+    return this.client.clickAt(point);
   }
 
   pressEscape(): Promise<void> {
