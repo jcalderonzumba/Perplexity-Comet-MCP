@@ -41,6 +41,9 @@ const LONG_ANSWER =
 
 /** A mode page that logs its reads in the port's call log. */
 class LoggedModePage extends FakeModePage {
+  /** Runs before each read: what happens during the mode step. */
+  public onRun: (() => void) | undefined;
+
   constructor(private readonly log: string[]) {
     super();
   }
@@ -50,6 +53,7 @@ class LoggedModePage extends FakeModePage {
     ...args: A
   ): Promise<R> {
     this.log.push(`mode:${script.name}`);
+    this.onRun?.();
     return super.run(script, ...args);
   }
 }
@@ -1431,6 +1435,65 @@ describe("AskCore.ask: while Comet is still answering the previous question", ()
 
     expect(outcome.kind).toBe("failed");
     expect(port.inputBar.clicks).toEqual([]);
+  });
+
+  it("sends nothing once comet_stop ends its task while it waits for another answer", async () => {
+    const { port, core } = rig();
+    port.inputBar.answering = true;
+    let stop: Promise<unknown> | undefined;
+    port.onWait = async () => {
+      // Once the ask has seen the stop control, in its wait for the answer.
+      if (stop || !port.calls.includes("locateStopControl")) return;
+      stop = core.stop();
+      await stop;
+    };
+
+    const outcome = await core.ask({ prompt: "q", timeout: 60000 });
+
+    expect(await stop).toEqual({ kind: "stopped" });
+    expect(outcome).toEqual({
+      kind: "stopped-before-sending",
+      notice: { line: null },
+    });
+    expect(port.calls).not.toContain("insertText");
+    expect(port.sentPrompts).toEqual([]);
+    expect((await core.poll()).kind).toBe("stopped");
+  });
+
+  it("sends nothing once a newer ask replaces its task while it waits for another answer, and the newer ask sends alone", async () => {
+    const { port, core } = rig();
+    port.inputBar.answering = true;
+    port.answeringUntilMs = 4500;
+    port.after = [reading("Paris", { status: "completed", latestTurn: 0 })];
+    let newer: Promise<AskOutcome> | undefined;
+    port.onWait = () => {
+      newer ??= core.ask({ prompt: "newer", timeout: 60000 });
+    };
+
+    const older = await core.ask({ prompt: "older", timeout: 60000 });
+
+    expect(older.kind).toBe("stopped-before-sending");
+    expect(answerOf(await (newer as Promise<AskOutcome>))).toBe("Paris");
+    expect(port.sentPrompts).toEqual(["newer"]);
+    expect(port.inputBar.clicks).toEqual([]);
+  });
+
+  it("sends nothing once a newer ask replaces its task during the mode step", async () => {
+    const built = rig();
+    await built.modeCore.switchMode("research");
+    const { port, modePage, core } = built;
+    port.after = [reading("Paris", { status: "completed", latestTurn: 0 })];
+    let newerTask: string | null = null;
+    modePage.onRun = () => {
+      newerTask ??= core.task.start("a newer prompt");
+    };
+
+    const outcome = await core.ask({ prompt: "q", timeout: 60000 });
+
+    expect(outcome.kind).toBe("stopped-before-sending");
+    expect(port.calls).not.toContain("insertText");
+    expect(core.task.currentTaskId).toBe(newerTask);
+    expect(core.task.state).toBe("active");
   });
 
   it("stops nothing for a new chat, whose page shows no answer in progress", async () => {

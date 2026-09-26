@@ -5,7 +5,8 @@
 // adapter's UNTRUSTED wrapper. A timeout, and a poll of a task still
 // working, say the answer may be incomplete and name `comet_poll` to follow
 // it, so partial text is never mistaken for the answer; an ask whose task
-// was stopped says so too, and a poll of a stopped task says it stopped.
+// was stopped says so too, and whether its prompt was sent, and a poll of a
+// stopped task says it stopped.
 
 import type {
   AskOutcome,
@@ -62,8 +63,20 @@ export function describeAskOutcome(
         ),
         isError: false,
       };
+    case "stopped-before-sending":
+      return {
+        text: withModeNotice(outcome.notice, STOPPED_BEFORE_SENDING),
+        isError: false,
+      };
   }
 }
+
+const STOPPED_BEFORE_SENDING = [
+  "The prompt was not sent: this ask's task was stopped, by comet_stop or by a newer comet_ask, while it waited to send it.",
+  "Status: STOPPED",
+  "",
+  START_A_NEW_TASK,
+].join("\n");
 
 /** `Error: ` and the message, then the page's part quoted when there is one. */
 function failureLine(

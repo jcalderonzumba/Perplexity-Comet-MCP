@@ -18,8 +18,9 @@
 // it was before the prompt was sent, so it returns the answer only once it
 // is complete and new, and otherwise says the task is still working. Stop
 // clicks the input bar's stop control (`ask-stop.ts`) and ends the task: an
-// ask still waiting then returns saying it was stopped, and a poll reports
-// the task stopped, reading no page. A poll after an ask whose prompt was
+// ask still waiting then returns saying it was stopped, one still waiting to
+// send its prompt sends nothing, and a poll reports the task stopped,
+// reading no page. A poll after an ask whose prompt was
 // never sent says so, and reads no page either.
 
 import { errorMessage } from "../error-message.js";
@@ -113,6 +114,14 @@ export type AskOutcome =
   | {
       readonly kind: "stopped";
       readonly progress: AskProgress;
+      readonly notice: ModeNotice;
+    }
+  /**
+   * The task ended before its prompt was sent, while the ask waited for an
+   * answer it did not start or put back the mode: nothing was typed.
+   */
+  | {
+      readonly kind: "stopped-before-sending";
       readonly notice: ModeNotice;
     };
 
@@ -232,7 +241,8 @@ export class AskCore {
    * The ask once its task has started, any failure as an outcome. The input
    * bar is freed of an answer still in progress before the mode step, which
    * clicks in it, and the time spent waiting for it counts against the
-   * ask's timeout.
+   * ask's timeout. A task no longer followed once those steps are done,
+   * stopped or replaced by a newer ask, sends nothing.
    */
   private async connectSendAndWait(
     request: AskRequest,
@@ -240,6 +250,7 @@ export class AskCore {
     { taskId, ownAnswerInProgress }: AskStart,
   ): Promise<AskOutcome> {
     let notice = NO_NOTICE;
+    const isFollowed = () => this.task.isFollowing(taskId);
     try {
       if (!(await this.tab.connectOrRecover())) {
         return { kind: "failed", message: CONNECTION_FAILED, notice };
@@ -248,11 +259,14 @@ export class AskCore {
       const free = await freeInputBar(this.port, {
         own: ownAnswerInProgress,
         timeoutMs: request.timeoutMs,
+        isFollowed,
       });
+      if (free === null) return { kind: "stopped-before-sending", notice };
       notice = startingWith(
         free.line,
         await reapplyModeBeforeAsk(this.options.mode),
       );
+      if (!isFollowed()) return { kind: "stopped-before-sending", notice };
       return await this.sendAndWait(shapePrompt(prompt), {
         taskId,
         timeoutMs: request.timeoutMs - free.waitedMs,

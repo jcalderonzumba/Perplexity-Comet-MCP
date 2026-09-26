@@ -89,6 +89,11 @@ export class FakeAskPort extends FakeTabPort implements AskPort {
    * before the poll's reads return: what happens while the ask waits.
    */
   public onPoll: ((poll: number) => void | Promise<void>) | undefined;
+  /**
+   * Runs after every wait, once the clock has moved: what happens while the
+   * core waits, before its prompt is sent as after.
+   */
+  public onWait: (() => void | Promise<void>) | undefined;
 
   private sent = false;
   private poll = -1;
@@ -203,6 +208,11 @@ export class FakeAskPort extends FakeTabPort implements AskPort {
       this.answeringUntilMs = null;
     }
     return this.inputBar.locateStopControl();
+  }
+
+  override async wait(ms: number): Promise<void> {
+    await super.wait(ms);
+    await this.onWait?.();
   }
 
   now(): number {

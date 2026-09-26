@@ -5,7 +5,9 @@
 // anyway) it is stopped, and the ask's result says so. An answer the server
 // did not start, perhaps the user's own, is never stopped: the ask waits for
 // it within its own timeout, and when it outlasts that, fails without
-// sending, saying how to go on.
+// sending, saying how to go on. The wait ends too once the ask's task is no
+// longer followed, stopped by `comet_stop` or replaced by a newer ask, and
+// then nothing is sent.
 
 import { PromptNotSent } from "./ask-send.js";
 import { type StopPort, stopAnswer } from "./ask-stop.js";
@@ -25,6 +27,8 @@ export interface PreviousAnswer {
   readonly own: boolean;
   /** How long the ask may wait for an answer it did not start. */
   readonly timeoutMs: number;
+  /** Whether the ask's task is still the one followed. */
+  readonly isFollowed: () => boolean;
 }
 
 export interface InputBarFree {
@@ -37,17 +41,19 @@ export interface InputBarFree {
 /**
  * Leaves the input bar free for the prompt: at once when no answer is in
  * progress, after stopping the server's own, or after waiting for another's.
- * Throws `PromptNotSent` when it cannot, so nothing is typed.
+ * Null when the ask's task stopped being followed during that wait, so the
+ * ask sends nothing. Throws `PromptNotSent` when it cannot, so nothing is
+ * typed.
  */
 export async function freeInputBar(
   port: StopPort,
   previous: PreviousAnswer,
-): Promise<InputBarFree> {
+): Promise<InputBarFree | null> {
   if ((await port.locateStopControl()) === null) {
     return { line: null, waitedMs: 0 };
   }
   if (previous.own) return stopOwnAnswer(port);
-  return waitForOtherAnswer(port, previous.timeoutMs);
+  return waitForOtherAnswer(port, previous);
 }
 
 async function stopOwnAnswer(port: StopPort): Promise<InputBarFree> {
@@ -66,11 +72,12 @@ async function stopOwnAnswer(port: StopPort): Promise<InputBarFree> {
 
 async function waitForOtherAnswer(
   port: StopPort,
-  timeoutMs: number,
-): Promise<InputBarFree> {
+  { timeoutMs, isFollowed }: PreviousAnswer,
+): Promise<InputBarFree | null> {
   const startedAt = port.now();
   while (port.now() - startedAt < timeoutMs) {
     await port.wait(PREVIOUS_ANSWER_TIMING.pollMs);
+    if (!isFollowed()) return null;
     if ((await port.locateStopControl()) === null) {
       return { line: null, waitedMs: port.now() - startedAt };
     }

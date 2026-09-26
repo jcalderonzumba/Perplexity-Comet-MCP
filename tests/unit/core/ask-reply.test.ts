@@ -186,6 +186,36 @@ describe("describeAskOutcome: a task stopped while the ask waited", () => {
   });
 });
 
+describe("describeAskOutcome: a task stopped before its prompt was sent", () => {
+  it("says nothing was sent and the task was stopped, reading no page text", () => {
+    expect(
+      describeAskOutcome(
+        { kind: "stopped-before-sending", notice: NO_NOTICE },
+        quote,
+      ),
+    ).toEqual({
+      text: [
+        "The prompt was not sent: this ask's task was stopped, by comet_stop or by a newer comet_ask, while it waited to send it.",
+        "Status: STOPPED",
+        "",
+        "Use comet_ask to start a new task.",
+      ].join("\n"),
+      isError: false,
+    });
+  });
+
+  it("starts with the mode step's line when there is one", () => {
+    const { text } = describeAskOutcome(
+      { kind: "stopped-before-sending", notice: NOT_APPLIED },
+      quote,
+    );
+
+    expect(
+      text.startsWith(`${NOT_APPLIED.line}\n\nThe prompt was not sent`),
+    ).toBe(true);
+  });
+});
+
 describe("describeAskOutcome: errors", () => {
   it("words a refusal as an error", () => {
     expect(
