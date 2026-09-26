@@ -67,48 +67,60 @@ This is a significantly enhanced fork of [hanzili/comet-mcp](https://github.com/
 - [Perplexity Comet Browser](https://www.perplexity.ai/comet) installed
 - Claude Code or compatible MCP client
 
-### Install via npm
+This project is not published to npm. The npm package named `perplexity-comet-mcp` is the upstream project this one started from, not this server. Run it from GitHub pinned to a commit, or from a clone.
+
+### Run from GitHub, pinned to a commit
+
+npx clones the repository at that commit and builds it on first use, then reuses the build while the commit stays the same. Pick a commit on `main` and use its full SHA:
 
 ```bash
-npm install -g perplexity-comet-mcp
+npx -y github:jcalderonzumba/Perplexity-Comet-MCP#<commit-sha>
 ```
+
+The first start clones and builds, which can take longer than an MCP client waits for a server; run the command once by hand, and stop it with Ctrl-C, before adding it to your client. To move to a newer commit, run the new one once by hand, then change the SHA in your client's configuration.
 
 ### Install from Source
 
 ```bash
-git clone https://github.com/RapierCraft/perplexity-comet-mcp.git
-cd perplexity-comet-mcp
-npm install
+git clone https://github.com/jcalderonzumba/Perplexity-Comet-MCP.git
+cd Perplexity-Comet-MCP
+npm ci
 npm run build
 ```
 
 ### Configure Claude Code
 
-Add to your Claude Code MCP settings (`~/.claude/settings.json` or VS Code settings):
+Add the server with `claude mcp add`. `-s user` makes it available in every project; set `COMET_PORT` to the port Comet's remote debugging listens on, since the server's default is 9223:
+
+```bash
+# Pinned to a commit on GitHub
+claude mcp add -s user comet-bridge -e COMET_PORT=9222 -- \
+  npx -y github:jcalderonzumba/Perplexity-Comet-MCP#<commit-sha>
+
+# From a clone
+claude mcp add -s user comet-bridge -e COMET_PORT=9222 -- \
+  node /path/to/Perplexity-Comet-MCP/dist/index.js
+```
+
+`claude mcp get comet-bridge` shows what it runs. When nothing answers on that port, `comet_connect` starts Comet with remote debugging on it; if Comet is already running without it, `comet_connect` quits Comet and starts it again.
+
+### Other MCP clients
+
+Clients configured with an `mcpServers` JSON file take the same command, arguments and environment:
 
 ```json
 {
   "mcpServers": {
     "comet-bridge": {
       "command": "node",
-      "args": ["/path/to/perplexity-comet-mcp/dist/index.js"]
+      "args": ["/path/to/Perplexity-Comet-MCP/dist/index.js"],
+      "env": { "COMET_PORT": "9222" }
     }
   }
 }
 ```
 
-**Windows Users:** Use the full Windows path:
-
-```json
-{
-  "mcpServers": {
-    "comet-bridge": {
-      "command": "node",
-      "args": ["C:\\Users\\YourName\\perplexity-comet-mcp\\dist\\index.js"]
-    }
-  }
-}
-```
+**Windows Users:** Use the full Windows path, for example `"args": ["C:\\Users\\YourName\\Perplexity-Comet-MCP\\dist\\index.js"]`.
 
 ---
 
