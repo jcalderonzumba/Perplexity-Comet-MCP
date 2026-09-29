@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
-  ownTurnFrom,
+  ownTurnAmong,
+  questionProbe,
   showsNewTurn,
   showsOwnTurn,
 } from "../../../src/core/thread-turn.js";
@@ -26,32 +27,45 @@ describe("showsNewTurn", () => {
   });
 });
 
-describe("ownTurnFrom", () => {
-  it("is the turn the page showed once the submit was confirmed, when it is above the one before", () => {
-    expect(ownTurnFrom(thread(1), thread(4))).toBe(4);
+describe("ownTurnAmong", () => {
+  it("is the highest turn holding the question above the one before", () => {
+    expect(ownTurnAmong([4], thread(3))).toBe(4);
+    expect(ownTurnAmong([2, 5, 6], thread(3))).toBe(6);
   });
 
-  it("is the turn after the one before when the confirmed page shows no newer turn yet", () => {
-    expect(ownTurnFrom(thread(3), thread(3))).toBe(4);
-    expect(ownTurnFrom(thread(3), thread(null))).toBe(4);
-    expect(ownTurnFrom(thread(3), thread(2))).toBe(4);
+  it("is none while no turn above the one before holds the question", () => {
+    expect(ownTurnAmong([], thread(3))).toBeNull();
+    expect(ownTurnAmong([3], thread(3))).toBeNull();
+    expect(ownTurnAmong([1, 3], thread(3))).toBeNull();
   });
 
-  it("is the first turn after a page that showed none, and the turn shown once it shows one", () => {
-    expect(ownTurnFrom(thread(null), thread(null))).toBe(0);
-    expect(ownTurnFrom(thread(null), thread(0))).toBe(0);
-    expect(ownTurnFrom(thread(null), thread(5))).toBe(5);
+  it("is any turn holding the question after a page that showed none", () => {
+    expect(ownTurnAmong([0], thread(null))).toBe(0);
+    expect(ownTurnAmong([], thread(null))).toBeNull();
   });
 });
 
 describe("showsOwnTurn", () => {
   it("is undefined on a page that shows no turn", () => {
     expect(showsOwnTurn(4, thread(null))).toBeUndefined();
+    expect(showsOwnTurn(null, thread(null))).toBeUndefined();
   });
 
   it("is true from the ask's own turn on, false below it", () => {
     expect(showsOwnTurn(4, thread(3))).toBe(false);
     expect(showsOwnTurn(4, thread(4))).toBe(true);
     expect(showsOwnTurn(4, thread(5))).toBe(true);
+  });
+
+  it("is false for every turn while the own turn is not known", () => {
+    expect(showsOwnTurn(null, thread(0))).toBe(false);
+    expect(showsOwnTurn(null, thread(9))).toBe(false);
+  });
+});
+
+describe("questionProbe", () => {
+  it("is the start of the prompt, bounded", () => {
+    expect(questionProbe("short")).toBe("short");
+    expect(questionProbe("x".repeat(2000))).toHaveLength(500);
   });
 });

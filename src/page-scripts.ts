@@ -69,6 +69,32 @@ export function readThreadState(): ThreadState {
 }
 
 /**
+ * The turns whose question block holds `question`, lowest first: the page's
+ * own proof of which turn a submitted prompt started, since a block that
+ * shows a turn does not say whose question it holds. The match ignores case,
+ * markup and punctuation (a question renders as markdown), comparing the
+ * letters and digits of the block's rendered question (the block, when it
+ * has none, date and all) with those of the question's first 80. A question without any is never
+ * found.
+ */
+export function readQuestionTurns(question: string): number[] {
+  const lettersAndDigits = (text: string): string =>
+    text.replace(/[^\p{L}\p{N}]/gu, "").toLowerCase();
+  const key = lettersAndDigits(question).slice(0, 80);
+  if (key === "") return [];
+  return [...document.querySelectorAll("[data-workflow-entry]")]
+    .filter((entry) => {
+      const text = (entry.querySelector("[data-renderer]") ?? entry)
+        .textContent;
+      return lettersAndDigits(text ?? "").includes(key);
+    })
+    .map((entry) => entry.getAttribute("data-workflow-entry") ?? "")
+    .filter((index) => /^\d+$/.test(index))
+    .map(Number)
+    .sort((a, b) => a - b);
+}
+
+/**
  * What the port has read of the page before the status script runs: the
  * input bar's stop control (`locateStopControl` by its label and by its
  * icon) and whether the latest turn has an answer (`readLatestAnswer`).

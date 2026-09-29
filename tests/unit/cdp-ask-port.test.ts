@@ -18,6 +18,7 @@ import {
   readAnswerStatus,
   readAskInput,
   readLatestAnswer,
+  readQuestionTurns,
   readThreadState,
   selectAskInput,
 } from "../../src/page-scripts.js";
@@ -113,6 +114,16 @@ describe("cdpAskPort: reading the page", () => {
       lastProseText: "Paris",
     });
     expect(client.expressions).toEqual([pageScriptExpression(readThreadState)]);
+  });
+
+  it("reads the turns whose question block holds a question, sending it as data", async () => {
+    const { client, port } = rig();
+    document.body.innerHTML = `<div data-workflow-entry="2"><p>Why is the sky blue?</p></div>`;
+
+    expect(await port.readQuestionTurns("why is the sky blue?")).toEqual([2]);
+    expect(client.expressions).toEqual([
+      pageScriptExpression(readQuestionTurns, "why is the sky blue?"),
+    ]);
   });
 
   it("rejects with the page's error, kept apart from its own words, when a page script fails", async () => {

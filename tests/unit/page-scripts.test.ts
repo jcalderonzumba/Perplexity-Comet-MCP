@@ -17,6 +17,7 @@ import {
   readAskInput,
   readLatestAnswer,
   readModeMenuItems,
+  readQuestionTurns,
   readThreadState,
   selectAskInput,
 } from "../../src/page-scripts.js";
@@ -868,6 +869,80 @@ describe("readThreadState on a thread", () => {
     document.body.innerHTML = `<div data-workflow-entry="">q</div><div data-workflow-entry="x">q</div>`;
 
     expect(runInPage(readThreadState).latestTurn).toBeNull();
+  });
+});
+
+// Which turns' question blocks hold the question the ask sent: the page's own
+// proof of its submit, since a block that shows a turn does not say whose
+// question it holds.
+describe("readQuestionTurns on a thread", () => {
+  it("reads the turn whose question block holds the question", () => {
+    document.body.innerHTML = SEVERAL_TURNS_THREAD;
+
+    expect(runInPage(readQuestionTurns, "Invented question 3?")).toEqual([3]);
+    expect(runInPage(readQuestionTurns, "Invented question 4?")).toEqual([4]);
+  });
+
+  it("reads every turn that holds it, lowest first, when the question was asked before", () => {
+    document.body.innerHTML = SEVERAL_TURNS_THREAD;
+    const repeated = document.querySelector("[data-workflow-entry='4'] p");
+    if (repeated) repeated.textContent = "Invented question 3?";
+
+    expect(runInPage(readQuestionTurns, "Invented question 3?")).toEqual([
+      3, 4,
+    ]);
+  });
+
+  it("reads no turn while the new question's block is not on the page", () => {
+    document.body.innerHTML = SEVERAL_TURNS_THREAD;
+
+    expect(runInPage(readQuestionTurns, "A question not asked yet")).toEqual(
+      [],
+    );
+  });
+
+  it("finds the question through the markup, case and punctuation the page renders it with", () => {
+    document.body.innerHTML = `<div data-workflow-entry="6"><span>Sep 1, 9:00 AM</span><div data-renderer="lm"><p>What is <strong>the capital</strong> of <code>France</code>?</p></div></div>`;
+
+    expect(
+      runInPage(readQuestionTurns, "what is *the capital* of `France`"),
+    ).toEqual([6]);
+  });
+
+  it("does not read the date the block shows for the question", () => {
+    document.body.innerHTML = `<div data-workflow-entry="6"><span>Sep 1, 9:00 AM</span><div data-renderer="lm"><p>Why is the sky blue?</p></div></div>`;
+
+    expect(runInPage(readQuestionTurns, "Sep 9")).toEqual([]);
+    expect(runInPage(readQuestionTurns, "9")).toEqual([]);
+  });
+
+  it("finds a long question by its start", () => {
+    const question = `Summarise ${"the history of Rome and its empire ".repeat(40)}`;
+    document.body.innerHTML = `<div data-workflow-entry="2"><p>${question}</p></div>`;
+
+    expect(runInPage(readQuestionTurns, question.slice(0, 500))).toEqual([2]);
+  });
+
+  it("ignores a block whose index is not a number, and reads none on a page without turns", () => {
+    document.body.innerHTML = `<div data-workflow-entry="x">the question</div>`;
+    expect(runInPage(readQuestionTurns, "the question")).toEqual([]);
+
+    loadAskInputFixture();
+    expect(runInPage(readQuestionTurns, "the question")).toEqual([]);
+  });
+
+  it("locates nothing with a question that holds no letter or digit", () => {
+    document.body.innerHTML = `<div data-workflow-entry="1">?!</div>`;
+
+    expect(runInPage(readQuestionTurns, "?!")).toEqual([]);
+  });
+
+  it("receives the question as data: quotes and script text in it are inert", () => {
+    document.body.innerHTML = `<div data-workflow-entry="1">it's "fine"</div>`;
+    const hostile = `"); document.body.innerHTML = "x"; ("`;
+
+    expect(runInPage(readQuestionTurns, hostile)).toEqual([]);
+    expect(document.body.innerHTML).toContain("fine");
   });
 });
 

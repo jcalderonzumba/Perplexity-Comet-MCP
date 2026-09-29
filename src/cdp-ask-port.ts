@@ -29,6 +29,7 @@ import {
   readAnswerStatus,
   readAskInput,
   readLatestAnswer,
+  readQuestionTurns,
   readThreadState,
   selectAskInput,
   type ThreadState,
@@ -97,10 +98,18 @@ class CdpAskPort implements AskPort {
     return this.runPageScript(readThreadState);
   }
 
+  readQuestionTurns(question: string): Promise<number[]> {
+    return this.runPageScript(readQuestionTurns, question);
+  }
+
   /**
    * The answer's status, in four page reads. The stop control is read first
-   * and the status last: an answer read after the stop control shows none
-   * cannot be a partial one under a status that reads complete.
+   * and the answer and status after it, so an answer that ends is not read
+   * as complete while it is still partial. The order does not close the
+   * window at an answer's onset: the stop control can appear after it was
+   * read, and the answer and status read then can still take a partial
+   * answer for a complete one. The old single script read all at one
+   * instant; the window is a few round trips wide.
    */
   async readStatus(): Promise<AskStatus> {
     const agentBrowsingUrl = await this.comet.agentBrowsingUrl();

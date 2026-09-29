@@ -7,10 +7,10 @@
 // read of the thread state is one poll: it moves to the next of `after`, and
 // the last one stays. An `Error` in `after` makes that poll's reads throw,
 // as a CDP call does when the page goes away; an `Error` as `before` makes
-// the reads before sending throw. The first thread read after the submit is
-// the ask's read at its confirmed submit: it is no poll, and shows `atSubmit`
-// (by default, the page as it was before sending, whose new question block
-// has not rendered yet). Time only passes through
+// the reads before sending throw. The turns whose question block holds the
+// ask's prompt are those of the poll's reading (`questionTurns`, by default
+// its latest turn: the page's newest block is the ask's question, unless a
+// test says it is not rendered yet). Time only passes through
 // `wait`. Every call is logged by name in `calls`, where a test can log
 // other steps too, so it can check their order. `typedIn` records the
 // address of the connected tab each time text is inserted, so a test can
@@ -25,6 +25,8 @@ import { FakeTabPort } from "./fake-tab-port.js";
 export interface PageReading {
   readonly thread: ThreadState;
   readonly status: AskStatus;
+  /** The turns whose question block holds the ask's prompt; default: the latest. */
+  readonly questionTurns?: readonly number[];
 }
 
 /**
@@ -36,10 +38,12 @@ export function reading(
   options: Partial<AskStatus> & {
     latestTurn?: number | null;
     proseCount?: number;
+    questionTurns?: readonly number[];
   } = {},
 ): PageReading {
-  const { latestTurn = 0, proseCount = 1, ...status } = options;
+  const { latestTurn = 0, proseCount = 1, questionTurns, ...status } = options;
   return {
+    questionTurns,
     thread: {
       latestTurn,
       proseCount,
@@ -73,8 +77,8 @@ export class FakeAskPort extends FakeTabPort implements AskPort {
 
   public before: PageReading | Error = QUIET_PAGE;
   public after: Array<PageReading | Error> = [];
-  /** The thread the ask reads once its submit is confirmed; default: `before`'s. */
-  public atSubmit: ThreadState | Error | undefined;
+  /** The questions the ask looked for in the page's question blocks. */
+  public readonly questionsRead: string[] = [];
 
   /** The input bar the prompt is typed into; its knobs fail each step. */
   public readonly inputBar = new FakeInputBar();
@@ -101,7 +105,6 @@ export class FakeAskPort extends FakeTabPort implements AskPort {
   public onWait: (() => void | Promise<void>) | undefined;
 
   private sent = false;
-  private submitRead = false;
   private poll = -1;
 
   constructor() {
@@ -146,23 +149,25 @@ export class FakeAskPort extends FakeTabPort implements AskPort {
     this.before = before;
     this.after = after;
     this.sent = false;
-    this.submitRead = false;
-    this.atSubmit = undefined;
     this.poll = -1;
   }
 
   async readThreadState(): Promise<ThreadState> {
     this.calls.push("readThreadState");
-    if (this.sent && !this.submitRead) {
-      this.submitRead = true;
-      if (this.atSubmit instanceof Error) throw this.atSubmit;
-      return this.atSubmit ?? this.beforeReading().thread;
-    }
     if (this.sent) {
       this.poll++;
       await this.onPoll?.(this.poll);
     }
     return this.current().thread;
+  }
+
+  async readQuestionTurns(question: string): Promise<number[]> {
+    this.calls.push("readQuestionTurns");
+    this.questionsRead.push(question);
+    const shown = this.current();
+    if (shown.questionTurns) return [...shown.questionTurns];
+    const { latestTurn } = shown.thread;
+    return latestTurn === null ? [] : [latestTurn];
   }
 
   async readStatus(): Promise<AskStatus> {
@@ -235,11 +240,6 @@ export class FakeAskPort extends FakeTabPort implements AskPort {
   /** How many polls read the page after the prompt was sent. */
   get polls(): number {
     return this.poll + 1;
-  }
-
-  private beforeReading(): PageReading {
-    if (this.before instanceof Error) throw this.before;
-    return this.before;
   }
 
   private current(): PageReading {

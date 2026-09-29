@@ -3,8 +3,9 @@
 // checked after each step, so a failure names the step that failed.
 //
 // The page scripts select the input bar and read it back; the prompt itself
-// reaches the page only through CDP's text insertion, never as script text
-// or a script's argument. The field is not cleared on its own: the inserted
+// reaches the page in this step only through CDP's text insertion, never as
+// script text or a script's argument (the ask later hands the start of it to
+// the script that finds its question block, as data). The field is not cleared on its own: the inserted
 // text replaces the selection, so the read-back finds exactly the prompt or
 // the text was not taken. The submit is a trusted Enter, and when the page
 // has not taken it within a bounded wait, a trusted click on the input
