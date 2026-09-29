@@ -21,11 +21,11 @@
         "noUnusedVariables": "error"
       },
       "style": {
-        "noNonNullAssertion": "off",
+        "noNonNullAssertion": "error",
         "useNodejsImportProtocol": "error",
         "useTemplate": "error"
       },
-      "suspicious": { "noExplicitAny": "off" }
+      "suspicious": { "noExplicitAny": "error" }
     }
   }
 }

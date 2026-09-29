@@ -34,4 +34,13 @@ describe("errorMessage", () => {
 
     expect(defining).toEqual(["error-message.ts"]);
   });
+
+  it("is the only place in src/ that writes the idiom inline", () => {
+    const inline = /instanceof Error \?/;
+    const writing = sourceFiles()
+      .filter((file) => inline.test(readFileSync(file, "utf8")))
+      .map((file) => file.slice(SRC.length + 1));
+
+    expect(writing).toEqual(["error-message.ts"]);
+  });
 });
