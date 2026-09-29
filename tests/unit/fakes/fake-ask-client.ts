@@ -36,11 +36,6 @@ export class FakeAskClient implements AskPortClient, TabClient {
     if (this.preCheckFails) throw new Error("WebSocket is not open");
   }
 
-  async startComet(port: number): Promise<string> {
-    this.calls.push(`startComet ${port}`);
-    return "Comet started";
-  }
-
   async listTargets(): Promise<BrowserTarget[]> {
     this.calls.push("listTargets");
     return [...this.targets];

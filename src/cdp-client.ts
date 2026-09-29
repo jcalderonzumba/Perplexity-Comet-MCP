@@ -1,16 +1,23 @@
 // CDP Client wrapper for Comet browser control
 // Modified for Windows/WSL support
 
-import { type ChildProcess, execSync, spawn } from "child_process";
 import CDP from "chrome-remote-interface";
-import { existsSync } from "fs";
-import { platform } from "os";
+import { systemCometLaunch } from "./comet-launch.js";
+import {
+  type CometLaunch,
+  CometRunsWithoutPort,
+  ensureCometOnPort,
+} from "./core/comet-launch.js";
 import { errorMessage } from "./error-message.js";
+import { IS_WINDOWS, IS_WSL, windowsFetch } from "./host-platform.js";
 import type { PagePoint } from "./page-scripts.js";
-import { isPerplexityMainPage, PERPLEXITY_ORIGIN } from "./perplexity-pages.js";
+import {
+  isPerplexityAddress,
+  isPerplexityMainPage,
+  PERPLEXITY_ORIGIN,
+} from "./perplexity-pages.js";
 import type {
   CDPTarget,
-  CDPVersion,
   CometState,
   EvaluateResult,
   NavigateResult,
@@ -324,19 +331,6 @@ async function pressKeyOn(
   await input.dispatchKeyEvent({ type: "keyUp", key, ...codes });
 }
 
-// Detect if running in WSL (must be before windowsFetch)
-function isWSL(): boolean {
-  if (platform() !== "linux") return false;
-  try {
-    const release = execSync("uname -r", { encoding: "utf8" }).toLowerCase();
-    return release.includes("microsoft") || release.includes("wsl");
-  } catch {
-    return false;
-  }
-}
-
-const IS_WSL = isWSL();
-
 // Check if WSL can directly connect to Windows localhost (mirrored networking)
 async function canConnectToWindowsLocalhost(port: number): Promise<boolean> {
   if (!IS_WSL) return true;
@@ -380,119 +374,6 @@ async function getWSLConnectPort(targetPort: number): Promise<number> {
   );
 }
 
-// Escape a string for safe interpolation inside a PowerShell single-quoted
-// literal: only `'` is special — double it to `''`. Also reject embedded
-// NUL or newline characters, which would terminate the command line.
-function psSingleQuote(value: string): string {
-  if (value.includes("\0") || /[\r\n]/.test(value)) {
-    throw new Error("Refusing to pass control characters to PowerShell");
-  }
-  return value.replace(/'/g, "''");
-}
-
-// Windows/WSL-compatible fetch using PowerShell
-// On WSL, native fetch connects to WSL's localhost, not Windows where Comet runs
-async function windowsFetch(
-  url: string,
-  method: string = "GET",
-): Promise<{ ok: boolean; status: number; json: () => Promise<any> }> {
-  // Use native fetch only on non-Windows AND non-WSL
-  if (platform() !== "win32" && !IS_WSL) {
-    const response = await fetch(url, { method });
-    return response;
-  }
-
-  // Validate URL before passing through PowerShell: must be loopback http(s).
-  // This is the trust boundary — caller-supplied tabIds and ports flow here.
-  try {
-    const parsed = new URL(url);
-    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
-      throw new Error(`Unsupported protocol: ${parsed.protocol}`);
-    }
-    if (parsed.hostname !== "127.0.0.1" && parsed.hostname !== "localhost") {
-      throw new Error(`Refusing non-loopback host: ${parsed.hostname}`);
-    }
-  } catch (e: any) {
-    return {
-      ok: false,
-      status: 0,
-      json: async () => {
-        throw e;
-      },
-    };
-  }
-
-  // On Windows or WSL, use PowerShell to reach Windows localhost
-  try {
-    const safeUrl = psSingleQuote(url);
-    const psCommand =
-      method === "PUT"
-        ? `Invoke-WebRequest -Uri '${safeUrl}' -Method PUT -UseBasicParsing | Select-Object -ExpandProperty Content`
-        : `Invoke-WebRequest -Uri '${safeUrl}' -UseBasicParsing | Select-Object -ExpandProperty Content`;
-
-    const result = execSync(
-      `powershell.exe -NoProfile -Command "${psCommand}"`,
-      {
-        encoding: "utf8",
-        timeout: 10000,
-        windowsHide: true,
-      },
-    );
-
-    return {
-      ok: true,
-      status: 200,
-      json: async () => JSON.parse(result.trim()),
-    };
-  } catch (error: any) {
-    return {
-      ok: false,
-      status: 0,
-      json: async () => {
-        throw error;
-      },
-    };
-  }
-}
-
-// Detect platform and set appropriate Comet path
-function getCometPath(): string {
-  const os = platform();
-
-  // Check for custom path via environment variable
-  if (process.env.COMET_PATH) {
-    return process.env.COMET_PATH;
-  }
-
-  if (os === "darwin") {
-    return "/Applications/Comet.app/Contents/MacOS/Comet";
-  } else if (os === "win32" || IS_WSL) {
-    // Common Windows installation paths for Comet (Perplexity)
-    // For WSL, these paths won't be directly usable but we track them for reference
-    const possiblePaths = [
-      `${process.env.LOCALAPPDATA}\\Perplexity\\Comet\\Application\\comet.exe`,
-      `${process.env.APPDATA}\\Perplexity\\Comet\\Application\\comet.exe`,
-      "C:\\Program Files\\Perplexity\\Comet\\Application\\comet.exe",
-      "C:\\Program Files (x86)\\Perplexity\\Comet\\Application\\comet.exe",
-    ];
-
-    for (const p of possiblePaths) {
-      if (existsSync(p)) {
-        return p;
-      }
-    }
-
-    // Default to LOCALAPPDATA path
-    return `${process.env.LOCALAPPDATA}\\Perplexity\\Comet\\Application\\comet.exe`;
-  }
-
-  // Fallback for other platforms
-  return "/Applications/Comet.app/Contents/MacOS/Comet";
-}
-
-const COMET_PATH = getCometPath();
-const IS_WINDOWS = platform() === "win32" || IS_WSL;
-
 // Honour the documented `COMET_PORT` env var (see README "Environment Variables").
 // Previously the constant was hardcoded to 9223 and call sites passed the literal
 // straight to `startComet(9223)`, so the env var was silently ignored.
@@ -508,20 +389,20 @@ function readPortFromEnv(): number {
 }
 export const DEFAULT_PORT = readPortFromEnv();
 
-/**
- * Build the args list passed to the Comet binary. Always includes
- * `--remote-allow-origins=http://127.0.0.1` so other processes on the
- * host (which can resolve `localhost.<attacker>.com` -> 127.0.0.1 via
- * DNS rebinding from a browser they control) cannot attach to Comet's
- * unauthenticated CDP endpoint and steal cookies / read tabs.
- *
- * See https://crbug.com/1247276 for the underlying mitigation.
- */
-function cometLaunchArgs(port: number): string[] {
-  return [
-    `--remote-debugging-port=${port}`,
-    `--remote-allow-origins=http://127.0.0.1`,
-  ];
+export interface CometClientOptions {
+  /** The debug port Comet answers on; defaults to the configured one. */
+  readonly port?: number;
+  /** How Comet is found and launched; defaults to this machine's. */
+  readonly launch?: CometLaunch;
+}
+
+/** The tab a reconnect goes to among `targets`, by the one rule for the main page. */
+function reconnectTarget(targets: readonly CDPTarget[]): CDPTarget | undefined {
+  const pages = targets.filter((t) => t.type === "page");
+  return (
+    pages.find((t) => isPerplexityMainPage(t.url)) ??
+    pages.find((t) => t.url !== "about:blank" && !isPerplexityAddress(t.url))
+  );
 }
 
 export class CometCDPClient {
@@ -531,7 +412,7 @@ export class CometCDPClient {
    * switch per CDP session, so it ends only when its last holder stops.
    */
   private readonly focusHolders = new WeakMap<CDP.Client, number>();
-  private cometProcess: ChildProcess | null = null;
+  private readonly launch: CometLaunch;
   private state: CometState = {
     connected: false,
     port: DEFAULT_PORT,
@@ -563,6 +444,11 @@ export class CometCDPClient {
   private frameLifecycle: FrameLifecycleMap = new Map();
   private lifecycleListener: ((params: any) => void) | null = null;
   private lifecycleUnsubscribe: (() => unknown) | null = null;
+
+  constructor(options: CometClientOptions = {}) {
+    this.launch = options.launch ?? systemCometLaunch;
+    this.state.port = options.port ?? DEFAULT_PORT;
+  }
 
   get isConnected(): boolean {
     return this.state.connected && this.client !== null;
@@ -741,23 +627,9 @@ export class CometCDPClient {
           // If reconnect fails, try fresh start
           if (this.reconnectAttempts < this.maxReconnectAttempts) {
             try {
-              await this.startComet(this.state.port);
+              await this.ensureCometRunning();
               await new Promise((r) => setTimeout(r, 1500));
-              const targets = await this.listTargets();
-              // Pick main Perplexity tab, NOT the sidecar.
-              const page =
-                targets.find(
-                  (t) =>
-                    t.type === "page" &&
-                    t.url.includes("perplexity") &&
-                    !t.url.includes("sidecar"),
-                ) ||
-                targets.find(
-                  (t) => t.type === "page" && t.url.includes("perplexity"),
-                );
-              const anyPage = page || targets.find((t) => t.type === "page");
-              if (anyPage) {
-                await this.connect(anyPage.id);
+              if ((await this.connectToReconnectTarget()) !== null) {
                 return await operation();
               }
             } catch {
@@ -769,6 +641,30 @@ export class CometCDPClient {
       }
 
       throw error;
+    }
+  }
+
+  /**
+   * Comet answering on the configured port: found there, or launched when no
+   * Comet runs. A Comet running without the port is reported, never
+   * restarted (principle 6): it holds the user's windows.
+   */
+  private async ensureCometRunning(): Promise<void> {
+    const port = this.state.port;
+    let comet: Awaited<ReturnType<typeof ensureCometOnPort>>;
+    try {
+      comet = await ensureCometOnPort(this.launch, port);
+    } catch (failure) {
+      throw new Error(
+        `Cannot connect to Comet on the debug port ${port}: ${errorMessage(failure)}\n` +
+          `Start it with:\n${this.launch.startCommand(port)}`,
+      );
+    }
+    if (comet.kind === "running-without-port") {
+      throw new CometRunsWithoutPort(port, comet.command);
+    }
+    if (comet.kind === "launched") {
+      await new Promise((resolve) => setTimeout(resolve, 2000));
     }
   }
 
@@ -786,19 +682,7 @@ export class CometCDPClient {
     this.state.connected = false;
     this.client = null;
 
-    // Verify Comet is running
-    try {
-      await this.getVersion();
-    } catch {
-      try {
-        await this.startComet(this.state.port);
-        await new Promise((resolve) => setTimeout(resolve, 2000));
-      } catch {
-        throw new Error(
-          "Cannot connect to Comet. Ensure Comet is running with --remote-debugging-port=9222",
-        );
-      }
-    }
+    await this.ensureCometRunning();
 
     // Try to reconnect to last target
     if (this.lastTargetId) {
@@ -812,28 +696,22 @@ export class CometCDPClient {
       }
     }
 
-    // Find best target. Prefer the MAIN Perplexity tab — explicitly
-    // exclude `sidecar` URLs, which Comet uses for its right-panel
-    // chat helper. Connecting to the sidecar by mistake silently
-    // routes the prompt and the stop to the wrong tab.
-    const targets = await this.listTargets();
-    const target =
-      targets.find(
-        (t) =>
-          t.type === "page" &&
-          t.url.includes("perplexity.ai") &&
-          !t.url.includes("sidecar"),
-      ) ||
-      targets.find(
-        (t) => t.type === "page" && t.url.includes("perplexity.ai"),
-      ) ||
-      targets.find((t) => t.type === "page" && t.url !== "about:blank");
-
-    if (target) {
-      return await this.connect(target.id);
-    }
+    const connected = await this.connectToReconnectTarget();
+    if (connected !== null) return connected;
 
     throw new Error("No suitable tab found for reconnection");
+  }
+
+  /**
+   * Connects to the best tab there is: Perplexity's main page when one is
+   * open, else a page that is not Perplexity's at all (the tab choice moves
+   * the connection off it before anything is typed). Never the sidecar, the
+   * side panel's chat, which routes a prompt and a stop to the wrong tab.
+   * Null when there is no such tab.
+   */
+  private async connectToReconnectTarget(): Promise<string | null> {
+    const target = reconnectTarget(await this.listTargets());
+    return target ? await this.connect(target.id) : null;
   }
 
   /**
@@ -1130,325 +1008,6 @@ export class CometCDPClient {
     }
 
     return lines.join("\n");
-  }
-
-  /**
-   * Check if Comet process is running
-   */
-  private async isCometProcessRunning(): Promise<boolean> {
-    return new Promise((resolve) => {
-      if (IS_WINDOWS) {
-        // Windows: use tasklist to check for comet.exe
-        const check = spawn("tasklist", [
-          "/FI",
-          "IMAGENAME eq comet.exe",
-          "/NH",
-        ]);
-        let output = "";
-        check.stdout?.on("data", (data) => {
-          output += data.toString();
-        });
-        check.on("close", () => {
-          // If comet.exe is running, output will contain "comet.exe"
-          resolve(output.toLowerCase().includes("comet.exe"));
-        });
-        check.on("error", () => resolve(false));
-      } else {
-        // macOS/Linux: use pgrep
-        const check = spawn("pgrep", ["-f", "Comet.app"]);
-        check.on("close", (code) => resolve(code === 0));
-        check.on("error", () => resolve(false));
-      }
-    });
-  }
-
-  /**
-   * Kill any running Comet process
-   */
-  private async killComet(): Promise<void> {
-    return new Promise((resolve) => {
-      if (IS_WINDOWS) {
-        // Windows: use taskkill to kill comet.exe
-        const kill = spawn("taskkill", ["/F", "/IM", "comet.exe"]);
-        kill.on("close", () => setTimeout(resolve, 1000));
-        kill.on("error", () => setTimeout(resolve, 1000));
-      } else {
-        // macOS/Linux: use pkill
-        const kill = spawn("pkill", ["-f", "Comet.app"]);
-        kill.on("close", () => setTimeout(resolve, 1000));
-        kill.on("error", () => setTimeout(resolve, 1000));
-      }
-    });
-  }
-
-  /**
-   * Start Comet browser with remote debugging enabled
-   */
-  async startComet(port: number = DEFAULT_PORT): Promise<string> {
-    this.state.port = port;
-
-    // On WSL, use HTTP via PowerShell (WebSocket doesn't work across WSL/Windows boundary)
-    if (IS_WSL) {
-      // Check if Comet is already running with debug port via HTTP
-      try {
-        const response = await windowsFetch(
-          `http://127.0.0.1:${port}/json/version`,
-        );
-        if (response.ok) {
-          const version = (await response.json()) as CDPVersion;
-          return `Comet already running on Windows host, port: ${port} (${version.Browser})`;
-        }
-      } catch {
-        // Comet not accessible, need to launch
-      }
-
-      // Try to launch Comet via PowerShell on Windows
-      console.error(
-        "Comet not accessible, attempting to launch via PowerShell...",
-      );
-
-      // Get Windows user's LOCALAPPDATA path
-      let cometPath = "";
-      try {
-        const localAppData = execSync("cmd.exe /c echo %LOCALAPPDATA%", {
-          encoding: "utf8",
-        })
-          .trim()
-          .replace(/\r?\n/g, "");
-        cometPath = `${localAppData}\\Perplexity\\Comet\\Application\\Comet.exe`;
-      } catch {
-        cometPath =
-          "C:\\Users\\" +
-          (process.env.USER || "user") +
-          "\\AppData\\Local\\Perplexity\\Comet\\Application\\Comet.exe";
-      }
-
-      // Validate port + path before interpolating into PowerShell.
-      // %LOCALAPPDATA% on Windows can legally contain `'` (rare but possible),
-      // and `port` is a typed number in TypeScript but the runtime cannot
-      // enforce that — explicit checks guard against shell injection.
-      if (!Number.isInteger(port) || port < 1 || port > 65535) {
-        throw new Error(`Invalid port for Comet launch: ${port}`);
-      }
-      const safeCometPath = psSingleQuote(cometPath);
-
-      try {
-        // Launch Comet via PowerShell.
-        // Use Set-Location to avoid UNC path issues when running from WSL.
-        // ArgumentList is comma-separated entries inside the single-quoted
-        // string, then PowerShell turns that into separate argv elements
-        // for Comet itself. Match the args produced by cometLaunchArgs().
-        const launchArgs = cometLaunchArgs(port)
-          .map((a) => `'${a.replace(/'/g, "''")}'`)
-          .join(",");
-        const psCommand = `Set-Location C:\\; Start-Process -FilePath '${safeCometPath}' -ArgumentList ${launchArgs}`;
-        spawn("powershell.exe", ["-NoProfile", "-Command", psCommand], {
-          detached: true,
-          stdio: "ignore",
-        }).unref();
-
-        // Wait for Comet to start - use HTTP check via PowerShell
-        return new Promise((resolve, reject) => {
-          const maxAttempts = 40;
-          let attempts = 0;
-
-          const checkReady = async () => {
-            attempts++;
-            try {
-              const response = await windowsFetch(
-                `http://127.0.0.1:${port}/json/version`,
-              );
-              if (response.ok) {
-                resolve(`Comet started via WSL->PowerShell on port ${port}`);
-                return;
-              }
-            } catch {
-              /* keep trying */
-            }
-
-            if (attempts < maxAttempts) {
-              setTimeout(checkReady, 500);
-            } else {
-              reject(
-                new Error(
-                  `Timeout waiting for Comet. Tried to launch: ${cometPath}\n` +
-                    `Try manually: powershell.exe -Command "Start-Process '${cometPath}' -ArgumentList '--remote-debugging-port=${port}'"`,
-                ),
-              );
-            }
-          };
-
-          setTimeout(checkReady, 2000);
-        });
-      } catch (launchError) {
-        throw new Error(
-          `Cannot connect to or launch Comet browser.\n` +
-            `Tried path: ${cometPath}\n` +
-            `Error: ${launchError instanceof Error ? launchError.message : String(launchError)}`,
-        );
-      }
-    }
-
-    // On Windows (native), try direct WebSocket connection first (bypasses HTTP issues)
-    if (IS_WINDOWS) {
-      try {
-        // Try to connect directly via CDP WebSocket
-        const testClient = await CDP({ port, host: "127.0.0.1" });
-        await testClient.close();
-        return `Comet already running with debug port: ${port}`;
-      } catch {
-        // Comet not running or not accessible, check if process exists
-        const isRunning = await this.isCometProcessRunning();
-        if (!isRunning) {
-          // Start Comet
-          this.cometProcess = spawn(COMET_PATH, cometLaunchArgs(port), {
-            detached: true,
-            stdio: "ignore",
-          });
-          this.cometProcess.unref();
-
-          // Wait for Comet to start and try WebSocket connection
-          return new Promise((resolve, reject) => {
-            const maxAttempts = 40;
-            let attempts = 0;
-
-            const checkReady = async () => {
-              attempts++;
-              try {
-                const testClient = await CDP({ port, host: "127.0.0.1" });
-                await testClient.close();
-                resolve(`Comet started with debug port ${port}`);
-                return;
-              } catch {
-                /* keep trying */
-              }
-
-              if (attempts < maxAttempts) {
-                setTimeout(checkReady, 500);
-              } else {
-                reject(
-                  new Error(
-                    `Timeout waiting for Comet. Try running: "${COMET_PATH}" --remote-debugging-port=${port}`,
-                  ),
-                );
-              }
-            };
-
-            setTimeout(checkReady, 1500);
-          });
-        } else {
-          // Process running but CDP not accessible - need restart with debug port
-          await this.killComet();
-          await new Promise((r) => setTimeout(r, 1000));
-
-          this.cometProcess = spawn(COMET_PATH, cometLaunchArgs(port), {
-            detached: true,
-            stdio: "ignore",
-          });
-          this.cometProcess.unref();
-
-          return new Promise((resolve, reject) => {
-            const maxAttempts = 40;
-            let attempts = 0;
-
-            const checkReady = async () => {
-              attempts++;
-              try {
-                const testClient = await CDP({ port, host: "127.0.0.1" });
-                await testClient.close();
-                resolve(`Comet restarted with debug port ${port}`);
-                return;
-              } catch {
-                /* keep trying */
-              }
-
-              if (attempts < maxAttempts) {
-                setTimeout(checkReady, 500);
-              } else {
-                reject(
-                  new Error(
-                    `Timeout waiting for Comet. Try running: "${COMET_PATH}" --remote-debugging-port=${port}`,
-                  ),
-                );
-              }
-            };
-
-            setTimeout(checkReady, 1500);
-          });
-        }
-      }
-    }
-
-    // Non-Windows: use original HTTP-based approach
-    try {
-      const response = await windowsFetch(
-        `http://127.0.0.1:${port}/json/version`,
-      );
-
-      if (response.ok) {
-        const version = (await response.json()) as CDPVersion;
-        return `Comet already running with debug port: ${version.Browser}`;
-      }
-    } catch {
-      const isRunning = await this.isCometProcessRunning();
-      if (isRunning) {
-        await this.killComet();
-      }
-    }
-
-    // Start Comet
-    return new Promise((resolve, reject) => {
-      this.cometProcess = spawn(COMET_PATH, cometLaunchArgs(port), {
-        detached: true,
-        stdio: "ignore",
-      });
-      this.cometProcess.unref();
-
-      const maxAttempts = 40;
-      let attempts = 0;
-
-      const checkReady = async () => {
-        attempts++;
-        try {
-          const response = await windowsFetch(
-            `http://127.0.0.1:${port}/json/version`,
-          );
-
-          if (response.ok) {
-            const version = (await response.json()) as CDPVersion;
-            resolve(
-              `Comet started with debug port ${port}: ${version.Browser}`,
-            );
-            return;
-          }
-        } catch {
-          /* keep trying */
-        }
-
-        if (attempts < maxAttempts) {
-          setTimeout(checkReady, 500);
-        } else {
-          const hint = IS_WINDOWS
-            ? `Try running: "${COMET_PATH}" --remote-debugging-port=${port}`
-            : `Try: ${COMET_PATH} --remote-debugging-port=${port}`;
-          reject(new Error(`Timeout waiting for Comet. ${hint}`));
-        }
-      };
-
-      setTimeout(checkReady, 1500);
-    });
-  }
-
-  /**
-   * Get CDP version info
-   */
-  async getVersion(): Promise<CDPVersion> {
-    const response = await windowsFetch(
-      `http://127.0.0.1:${this.state.port}/json/version`,
-    );
-    if (!response.ok)
-      throw new Error(`Failed to get version: ${response.status}`);
-    return response.json() as Promise<CDPVersion>;
   }
 
   /**

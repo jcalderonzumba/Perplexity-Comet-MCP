@@ -9,15 +9,6 @@ export interface CDPTarget {
   devtoolsFrontendUrl?: string;
 }
 
-export interface CDPVersion {
-  Browser: string;
-  "Protocol-Version": string;
-  "User-Agent": string;
-  "V8-Version": string;
-  "WebKit-Version": string;
-  webSocketDebuggerUrl: string;
-}
-
 export interface NavigateResult {
   frameId: string;
   loaderId?: string;

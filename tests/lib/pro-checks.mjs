@@ -987,8 +987,7 @@ async function scored(check, callTool) {
 
 /**
  * Runs the battery against a server. When [1.2] fails, no other check is
- * run or scored: any other call could make the server launch Comet, or
- * kill and relaunch one listening on another port.
+ * run or scored: any other call could make the server launch Comet.
  * @param {CallTool} callTool
  * @param {ProDebugPort} debugPort
  * @param {(check: ScoredCheck) => void} [report] called as each check is scored

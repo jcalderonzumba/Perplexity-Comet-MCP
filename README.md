@@ -101,7 +101,7 @@ claude mcp add -s user comet-bridge -e COMET_PORT=9222 -- \
   node /path/to/Perplexity-Comet-MCP/dist/index.js
 ```
 
-`claude mcp get comet-bridge` shows what it runs. When nothing answers on that port, `comet_connect` starts Comet with remote debugging on it; if Comet is already running without it, `comet_connect` stops Comet and starts it again, on macOS and Windows (under WSL it only starts Comet).
+`claude mcp get comet-bridge` shows what it runs. When nothing answers on that port and no Comet runs, `comet_connect` starts Comet with remote debugging on it. If Comet is already running without the port, `comet_connect` leaves it alone and fails, naming the port and the command that starts Comet with it: quit Comet, run that command, and connect again.
 
 To move a pinned `comet-bridge` to a newer commit, run this from a clone of this repository:
 
@@ -136,7 +136,7 @@ Clients configured with an `mcpServers` JSON file take the same command, argumen
 
 ### comet_connect
 
-Establish connection to Comet browser. Auto-launches if not running.
+Connect to Comet on the configured debug port (`COMET_PORT`). Launches Comet with the port when none is running; it never restarts a Comet that is, since that would close your windows. When Comet runs without the port, the reply is an error that names the port and the command that starts Comet with it. Once Comet answers, it puts the connection on Perplexity's main page by the same rule as `comet_ask` (see below): it stays on the main page it is on, moves to one already open, or opens Perplexity's home page in a new tab and remembers it opened it. It never navigates a page of yours and never connects to the sidecar.
 
 ```
 Parameters: None
@@ -146,8 +146,15 @@ Returns: Connection status message
 **Example:**
 ```
 > comet_connect
-Comet started with debug port 9223
-Connected to Perplexity (cleaned 2 old tabs)
+Comet is running with the debug port 9222 (Comet/141.0.7390.55).
+Connected to Perplexity's main page: moved the connection to the tab already open on it.
+```
+
+**Comet running without the debug port:**
+```
+> comet_connect
+Comet is running, but not with the debug port 9222, and this server never restarts it: that would close your windows. Quit Comet, then start it with the port:
+"/Applications/Comet.app/Contents/MacOS/Comet" --remote-debugging-port=9222 --remote-allow-origins=http://127.0.0.1
 ```
 
 ---
@@ -401,7 +408,8 @@ File uploaded successfully: /home/user/doc.pdf
 | `http-bridge.ts`, `bridge-server.ts` | The HTTP bridge: the token, CORS and routes over the same table (`GET /tools` lists each tool's description and input schema; `GET /health` reports the package's version) |
 | `cdp-tools.ts` | Builds the tool table over the CDP client: what each tool does when it is called |
 | `cdp-client.ts` | Chrome DevTools Protocol client with reconnection logic |
-| `core/` | The tool core both servers share: the tool table (`core/tools.ts`) and the one reply type (`core/tool-reply.ts`), `comet_screenshot`, `comet_ask`, `comet_poll` and `comet_stop`, with typing and submitting the prompt in `core/ask-send.ts`, when an answer is complete and the ask's own in `core/answer-watch.ts`, stopping it in `core/ask-stop.ts`, and the tab they use in `core/ask-tab.ts` and `core/perplexity-tab.ts`, and `comet_mode` |
+| `comet-launch.ts`, `host-platform.ts` | Finding and launching Comet on its debug port on macOS, Linux, Windows and WSL, and what the host is (WSL detection, the fetch that reaches Windows from WSL). Nothing in the server can stop or restart Comet |
+| `core/` | The tool core both servers share: the tool table (`core/tools.ts`) and the one reply type (`core/tool-reply.ts`), `comet_connect` (`core/connect.ts` over the launch port in `core/comet-launch.ts`), `comet_screenshot`, `comet_ask`, `comet_poll` and `comet_stop`, with typing and submitting the prompt in `core/ask-send.ts`, when an answer is complete and the ask's own in `core/answer-watch.ts`, stopping it in `core/ask-stop.ts`, and the tab they use in `core/ask-tab.ts` and `core/perplexity-tab.ts`, and `comet_mode` |
 | `perplexity-pages.ts` | Perplexity's origin and home page, and the one rule that says which tab is Perplexity's main page |
 | `comet-ai.ts` | Reading the answer and its status from the page |
 | `types.ts` | TypeScript interfaces for tabs, state, and CDP types |
@@ -437,8 +445,8 @@ export COMET_PATH=/custom/path/to/Comet.app/Contents/MacOS/Comet
 
 **Solutions:**
 1. Ensure Comet browser is installed
-2. Close any existing Comet instances
-3. Run `comet_connect` to auto-start with correct flags
+2. If Comet is already running, quit it and start it with the debug port on the port the server uses (`COMET_PORT`, 9223 unless set): the error `comet_connect` returns gives the command. The server never restarts a running Comet itself
+3. Otherwise run `comet_connect`, which starts Comet with the port when none is running
 
 ---
 

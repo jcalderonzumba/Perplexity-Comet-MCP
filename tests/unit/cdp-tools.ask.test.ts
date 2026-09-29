@@ -12,6 +12,7 @@ import {
 } from "../../src/cdp-tools.js";
 import type { BrowserTarget } from "../../src/core/perplexity-tab.js";
 import { FakeAskClient, FakeAskComet } from "./fakes/fake-ask-client.js";
+import { FakeCometLaunch } from "./fakes/fake-comet-launch.js";
 
 const CONFIGURED_PORT = 9444;
 const MAIN: BrowserTarget = {
@@ -35,26 +36,28 @@ function rig() {
         ? (fake as unknown as Record<string, unknown>)[name]
         : () => Promise.reject(new Error(`unexpected call: ${name}`)),
   }) as unknown as CdpToolsClient;
+  const launch = new FakeCometLaunch();
   const table = createCdpToolTable({
     client: asClient,
     comet: new FakeAskComet(),
+    launch,
     quotePage: (text) => `<<${text}>>`,
     port: CONFIGURED_PORT,
   });
-  return { client, table };
+  return { client, launch, table };
 }
 
 describe("comet_ask", () => {
   it("recovers a lost connection by starting Comet on the configured port", async () => {
     vi.useFakeTimers();
-    const { client, table } = rig();
+    const { client, launch, table } = rig();
     client.preCheckFails = true;
 
     const asking = table.call("comet_ask", { prompt: "What is 2 + 2?" });
     await vi.runAllTimersAsync();
     await asking;
 
-    expect(client.calls).toContain(`startComet ${CONFIGURED_PORT}`);
+    expect(launch.launches).toEqual([CONFIGURED_PORT]);
   });
 
   it("quotes what the page said with the wrapper the table was given", async () => {

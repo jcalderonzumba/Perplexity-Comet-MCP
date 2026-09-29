@@ -100,7 +100,7 @@ Run Phase 3 only when Phases 0 to 2 produced no Must Fix; skills spent on code t
 | `src/http-bridge.ts`, `src/bridge-server.ts` | `api-security-best-practices`, `api-patterns`, `auth-implementation-patterns` |
 | `src/page-scripts.ts`, JavaScript run in the page | `frontend-security-coder`, `javascript-pro` |
 | Tool definitions, `inputSchema`, result shapes | `api-patterns`; Context7 for `@modelcontextprotocol/sdk` |
-| Launch, connect, reconnect, tabs in `src/cdp-client.ts` | Context7 for `chrome-remote-interface` and the DevTools Protocol |
+| Launch in `src/comet-launch.ts`; connect, reconnect, tabs in `src/cdp-client.ts` | Context7 for `chrome-remote-interface` and the DevTools Protocol |
 | Prompt text sent to Comet | `prompt-engineering` |
 | Tokens, env vars, secrets | `secrets-management` |
 | Logging, network calls, new runtime dependencies | `privacy-by-design` |

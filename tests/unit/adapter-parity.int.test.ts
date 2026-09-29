@@ -14,6 +14,7 @@ import {
 } from "../../src/cdp-tools.js";
 import { TOOL_DEFINITIONS, type ToolTable } from "../../src/core/tools.js";
 import { createStdioServer } from "../../src/stdio-server.js";
+import { FakeCometLaunch } from "./fakes/fake-comet-launch.js";
 import { scriptedTable } from "./fakes/scripted-tool-table.js";
 
 const TOKEN = "parity-token";
@@ -195,6 +196,7 @@ describe("the real composition through both adapters, on a client that answers n
     return createCdpToolTable({
       client,
       comet: { getAgentStatus: vi.fn() },
+      launch: new FakeCometLaunch(),
       quotePage: (text) => text,
       port: 9222,
     });
