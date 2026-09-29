@@ -274,8 +274,20 @@ describe("no way to kill Comet", () => {
     });
   }
 
+  const killers =
+    /\b(pkill|killall|taskkill)\b|["']kill["']|\bkillComet\b|\.kill\(/;
+
+  it.each([
+    "process.kill(pid)",
+    "child.kill()",
+    "child.kill('SIGKILL')",
+    'exec("pkill Comet")',
+    "await killComet()",
+  ])("recognises %s as a way to kill", (line) => {
+    expect(killers.test(line)).toBe(true);
+  });
+
   it("has no pkill, taskkill or kill command anywhere in src/", () => {
-    const killers = /\b(pkill|killall|taskkill)\b|["']kill["']|\bkillComet\b/;
     const offenders = sourceFiles(SRC).filter((file) =>
       killers.test(readFileSync(file, "utf8")),
     );

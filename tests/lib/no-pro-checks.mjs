@@ -194,9 +194,8 @@ function modeSwitch(mode) {
 
 /**
  * [1.2]: Comet already answers on the server's debug port, and connect
- * succeeds. Without the port, no tool is called: connect would launch Comet,
- * or kill and relaunch one running on another port. Both batteries start
- * with it.
+ * succeeds. Without the port, no tool is called: connect would launch Comet.
+ * Both batteries start with it.
  * @param {DebugPort} debugPort
  * @returns {NoProCheck}
  */

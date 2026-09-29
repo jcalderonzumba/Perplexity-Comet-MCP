@@ -3,6 +3,7 @@
 // a Comet running without the port is reported with the command that starts
 // it right, never restarted (principle 6, D29). The reply names the port.
 
+import { errorMessage } from "../error-message.js";
 import {
   type CometLaunch,
   describeRunningWithoutPort,
@@ -70,7 +71,7 @@ function launchFailed(
   launch: CometLaunch,
   failure: unknown,
 ): string {
-  const reason = failure instanceof Error ? failure.message : String(failure);
+  const reason = errorMessage(failure);
   return (
     `Could not start Comet on the debug port ${port}: ${reason}\n` +
     `Start it yourself with:\n${launch.startCommand(port)}`
