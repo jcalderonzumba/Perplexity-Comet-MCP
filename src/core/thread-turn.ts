@@ -9,10 +9,12 @@
 // prompt: the ask's own turn is the highest turn above the floor whose
 // question block holds it (`ownTurnAmong`), and until the page shows such a
 // block no answer is the ask's own. An answer is the ask's own only from
-// that turn on (`showsOwnTurn`). One case the page cannot settle: a prompt
-// identical to one asked earlier in the same thread, in a turn above a floor
-// that under-reports and not rendered before sending, is taken for the ask's
-// own once the page renders that earlier turn before the new block.
+// that turn on (`showsOwnTurn`). One case the page cannot settle: an
+// earlier question in the same thread that holds the start of the prompt (an
+// identical one, or a longer one such as "What is X and Y?" for the prompt
+// "What is X?"), in a turn above a floor that under-reports and not rendered
+// before sending, is taken for the ask's own once the page renders that
+// earlier turn before the new block.
 
 import type { ThreadState } from "../page-scripts.js";
 
@@ -23,7 +25,7 @@ const QUESTION_PROBE_LENGTH = 500;
  * Whether `now` shows a turn after the latest one `before` showed; undefined
  * on a page that shows no turn, where the caller falls back to its prose.
  * The send step's test that a prompt was submitted; not proof of the ask's
- * own turn (see `ownTurnFrom`).
+ * own turn (see `ownTurnAmong`).
  */
 export function showsNewTurn(
   before: ThreadState,

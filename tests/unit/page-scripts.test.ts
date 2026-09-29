@@ -893,6 +893,14 @@ describe("readQuestionTurns on a thread", () => {
     ]);
   });
 
+  it("reads an earlier question that holds the start of the question too: the limit of the match", () => {
+    document.body.innerHTML = `<div data-workflow-entry="3"><div data-renderer="lm"><p>What is X and Y?</p></div></div><div data-workflow-entry="4"><div data-renderer="lm"><p>Something else</p></div></div>`;
+
+    expect(runInPage(readQuestionTurns, "What is X?")).toEqual([3]);
+    expect(runInPage(readQuestionTurns, "What is")).toEqual([3]);
+    expect(runInPage(readQuestionTurns, "What is X and Z?")).toEqual([]);
+  });
+
   it("reads no turn while the new question's block is not on the page", () => {
     document.body.innerHTML = SEVERAL_TURNS_THREAD;
 
