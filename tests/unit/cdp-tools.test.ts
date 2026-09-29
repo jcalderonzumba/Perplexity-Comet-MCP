@@ -1,10 +1,10 @@
 // The composition: the tool table over the CDP client, the Comet module and
 // the UNTRUSTED wrapper. The cores' own rules are pinned in `core/`; this
 // pins what the composition itself holds: that connect is bound to the
-// configured port and the shared tab choice, and the tabs and upload
-// handlers (the stdio server's behaviour, which the bridge now shares).
-// That the client, the wrapper and the configured port reach the cores is
-// pinned in `cdp-tools.ask.test.ts` and `cdp-tools.tab.test.ts`.
+// configured port and the shared tab choice, and that the upload core's
+// port is bound to the client. That the client, the wrapper and the
+// configured port reach the other cores is pinned in
+// `cdp-tools.ask.test.ts` and `cdp-tools.tab.test.ts`.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
@@ -13,11 +13,9 @@ import {
   createCdpToolTable,
 } from "../../src/cdp-tools.js";
 import { TOOL_DEFINITIONS } from "../../src/core/tools.js";
-import type { TabContext } from "../../src/types.js";
 import { FakeCometLaunch } from "./fakes/fake-comet-launch.js";
 
 const CONFIGURED_PORT = 9444;
-const TAB_ID = "0a1b2c3d-1111-4222-8333-444455556666";
 
 afterEach(() => {
   vi.useRealTimers();
@@ -26,18 +24,6 @@ afterEach(() => {
 
 function target(id: string, url: string, type = "page") {
   return { id, type, title: id, url };
-}
-
-function tabContext(overrides: Partial<TabContext>): TabContext {
-  return {
-    id: TAB_ID,
-    url: "https://example.com/",
-    title: "Example",
-    purpose: "reference",
-    domain: "example.com",
-    lastActivity: 0,
-    ...overrides,
-  };
 }
 
 /** A client whose methods all fail unless a test says what they answer. */
@@ -225,145 +211,118 @@ describe("comet_connect", () => {
 });
 
 describe("comet_tabs", () => {
-  it("lists the tabs by default", async () => {
-    const table = tableOver({ getTabSummary: async () => "2 tabs" });
+  const USER_ID = "0a1b2c3d-aaaa-4222-8333-444455556666";
+  const FRESH_ID = "0a1b2c3d-bbbb-4222-8333-444455556666";
 
-    expect(await table.call("comet_tabs", {})).toEqual({
-      kind: "text",
-      text: "2 tabs",
-      isError: false,
+  /** Comet with a user's page open and no Perplexity tab, connected to it. */
+  function cometWithOnlyAUsersPage() {
+    const targets = [target(USER_ID, "https://example.com/")];
+    let connected: string | null = USER_ID;
+    const closeTab = vi.fn(async (id: string) => {
+      targets.splice(
+        targets.findIndex((t) => t.id === id),
+        1,
+      );
+      return true;
     });
-  });
+    const table = tableOver({
+      listTargets: async () => [...targets],
+      connect: async (id: string) => {
+        connected = id;
+      },
+      connectedTabId: () => connected,
+      pageAddress: async () =>
+        targets.find((t) => t.id === connected)?.url ?? "",
+      newTab: async (url: string) => {
+        const opened = target(FRESH_ID, url);
+        targets.push(opened);
+        return opened;
+      },
+      closeTab,
+    });
+    return { table, closeTab, switchTo: (id: string) => (connected = id) };
+  }
 
-  it("names an unknown action", async () => {
-    const reply = await tableOver({}).call("comet_tabs", { action: "open" });
+  /** The table, after `comet_connect` opened Perplexity in a tab of its own. */
+  async function afterConnectOpenedATab() {
+    vi.useFakeTimers();
+    const comet = cometWithOnlyAUsersPage();
+    const connecting = comet.table.call("comet_connect", {});
+    await vi.advanceTimersByTimeAsync(2000);
+    await connecting;
+    return comet;
+  }
+
+  it("lists the tabs through the core, wrapped with the composition's wrapper", async () => {
+    const { table } = cometWithOnlyAUsersPage();
+
+    const reply = await table.call("comet_tabs", {});
 
     expect(reply).toEqual({
       kind: "text",
-      text: "Unknown action: open. Use: list, switch, close",
-      isError: true,
+      isError: false,
+      text: `1 tab(s) open:\n<<  • AGENT-BROWSING: example.com [ACTIVE]\n    URL: https://example.com/>>`,
     });
   });
 
-  it("switches by tab id after validating it", async () => {
-    const connect = vi.fn().mockResolvedValue("ok");
+  it("lists as opened by the server the tab comet_connect opened, the record connect and comet_tabs share", async () => {
+    const { table } = await afterConnectOpenedATab();
 
-    const reply = await tableOver({ connect }).call("comet_tabs", {
+    const reply = await table.call("comet_tabs", {});
+
+    expect(textOf(reply as never)).toContain(
+      "  • MAIN: www.perplexity.ai [ACTIVE] [OPENED BY SERVER]",
+    );
+  });
+
+  it("closes the tab comet_connect opened, once the connection is elsewhere", async () => {
+    const { table, closeTab, switchTo } = await afterConnectOpenedATab();
+    switchTo(USER_ID);
+
+    const reply = await table.call("comet_tabs", {
+      action: "close",
+      tabId: FRESH_ID,
+    });
+
+    expect(closeTab).toHaveBeenCalledWith(FRESH_ID);
+    expect(textOf(reply as never)).toMatch(/^Closed tab: /);
+  });
+
+  it("refuses a tab the user opened, and closes nothing", async () => {
+    const { table, closeTab } = await afterConnectOpenedATab();
+
+    const reply = await table.call("comet_tabs", {
+      action: "close",
+      tabId: USER_ID,
+    });
+
+    expect(closeTab).not.toHaveBeenCalled();
+    expect(reply).toMatchObject({ kind: "text", isError: true });
+    expect(textOf(reply as never)).toContain("the server did not open it");
+  });
+
+  it("switches by tab id through the client", async () => {
+    const { table } = cometWithOnlyAUsersPage();
+
+    const reply = await table.call("comet_tabs", {
       action: "switch",
-      tabId: TAB_ID,
+      tabId: USER_ID,
     });
 
-    expect(connect).toHaveBeenCalledWith(TAB_ID);
-    expect(textOf(reply as never)).toBe(`Switched to tab: ${TAB_ID}`);
+    expect(textOf(reply as never)).toBe(
+      `Switched to tab: ${USER_ID}\n<<example.com (https://example.com/)>>`,
+    );
   });
 
-  it("refuses a tab id that is not a UUID, before the client is called", async () => {
-    const connect = vi.fn();
-
-    const reply = await tableOver({ connect }).call("comet_tabs", {
+  it("refuses an invalid tab id in the core's words, before the client is called", async () => {
+    const reply = await tableOver({}).call("comet_tabs", {
       action: "switch",
       tabId: "1; drop",
     });
 
-    expect(connect).not.toHaveBeenCalled();
     expect(reply).toEqual({
       kind: "text",
       text: "Error: Invalid tabId format: 1; drop",
-      isError: true,
-    });
-  });
-
-  it("switches by domain, and says when no tab has it", async () => {
-    const connect = vi.fn().mockResolvedValue("ok");
-    const found = tabContext({ id: "t1", domain: "github.com" });
-    const table = tableOver({
-      connect,
-      findTabByDomain: async (domain: string) =>
-        domain === "github.com" ? found : null,
-    });
-
-    const hit = await table.call("comet_tabs", {
-      action: "switch",
-      domain: "github.com",
-    });
-    const miss = await table.call("comet_tabs", {
-      action: "switch",
-      domain: "nowhere.org",
-    });
-
-    expect(textOf(hit as never)).toBe(
-      "Switched to github.com (https://example.com/)",
-    );
-    expect(miss).toMatchObject({
-      text: "No tab found for the specified domain",
-      isError: true,
-    });
-  });
-
-  it("asks for a domain or a tab id to switch to", async () => {
-    const reply = await tableOver({}).call("comet_tabs", { action: "switch" });
-
-    expect(reply).toMatchObject({
-      text: "Specify domain or tabId to switch",
-      isError: true,
-    });
-  });
-
-  it("will not close the only browsing tab", async () => {
-    const closeTab = vi.fn();
-    const table = tableOver({
-      getTabContexts: async () => [tabContext({})],
-      closeTab,
-    });
-
-    const reply = await table.call("comet_tabs", {
-      action: "close",
-      tabId: TAB_ID,
-    });
-
-    expect(closeTab).not.toHaveBeenCalled();
-    expect(reply).toMatchObject({
-      text: "Cannot close - this is the only browsing tab. Comet needs at least one external tab open.",
-      isError: true,
-    });
-  });
-
-  it("closes a tab by id, and reports a close that failed", async () => {
-    const closeTab = vi
-      .fn()
-      .mockResolvedValueOnce(true)
-      .mockResolvedValueOnce(false);
-    const table = tableOver({
-      getTabContexts: async () => [tabContext({}), tabContext({ id: "b" })],
-      closeTab,
-    });
-    const close = { action: "close", tabId: TAB_ID };
-
-    expect(textOf((await table.call("comet_tabs", close)) as never)).toBe(
-      `Closed tab: ${TAB_ID}`,
-    );
-    expect(textOf((await table.call("comet_tabs", close)) as never)).toBe(
-      "Failed to close tab",
-    );
-  });
-
-  it("will not close the main Perplexity tab by domain", async () => {
-    const closeTab = vi.fn();
-    const table = tableOver({
-      getTabContexts: async () => [tabContext({}), tabContext({ id: "b" })],
-      findTabByDomain: async () =>
-        tabContext({ purpose: "main", domain: "perplexity.ai" }),
-      closeTab,
-    });
-
-    const reply = await table.call("comet_tabs", {
-      action: "close",
-      domain: "perplexity.ai",
-    });
-
-    expect(closeTab).not.toHaveBeenCalled();
-    expect(reply).toMatchObject({
-      text: "Cannot close main Perplexity tab",
       isError: true,
     });
   });
@@ -373,7 +332,15 @@ describe("comet_upload", () => {
   beforeEach(() => {
     // The validator warns, once per call, when no upload root is set.
     vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.stubEnv("COMET_UPLOAD_ROOT", "");
   });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  const inputsOnPage = (selectors: Array<string | null>) =>
+    vi.fn().mockResolvedValue({ result: { type: "object", value: selectors } });
 
   it("needs a filePath", async () => {
     const reply = await tableOver({}).call("comet_upload", {});
@@ -386,83 +353,87 @@ describe("comet_upload", () => {
   });
 
   it("refuses a path the validator refuses, before the page is touched", async () => {
-    const hasFileInput = vi.fn();
+    const safeEvaluate = vi.fn();
+    const attachFile = vi.fn();
 
-    const reply = await tableOver({ hasFileInput }).call("comet_upload", {
-      filePath: "relative/path.png",
-      checkOnly: true,
-    });
+    const reply = await tableOver({ safeEvaluate, attachFile }).call(
+      "comet_upload",
+      { filePath: "relative/path.png", checkOnly: true },
+    );
 
-    expect(hasFileInput).not.toHaveBeenCalled();
+    expect(safeEvaluate).not.toHaveBeenCalled();
+    expect(attachFile).not.toHaveBeenCalled();
     expect(reply).toMatchObject({ isError: true });
     expect(textOf(reply as never)).toMatch(/^Error: /);
   });
 
-  it("lists the page's file inputs on checkOnly", async () => {
+  it("lists the page's file inputs on checkOnly, wrapped as page content", async () => {
     const reply = await tableOver({
-      hasFileInput: async () => ({
-        found: true,
-        count: 1,
-        selectors: ["input#file"],
-      }),
+      safeEvaluate: inputsOnPage(["#file"]),
     }).call("comet_upload", {
       filePath: import.meta.filename,
       checkOnly: true,
     });
 
     expect(textOf(reply as never)).toBe(
-      "Found 1 file input(s) on the page:\n  1. input#file\n\nUse comet_upload with filePath to upload to one of these inputs.",
+      "Found 1 file input(s) on the page:\n<<  1. #file>>\n\nUse comet_upload with filePath to upload to one of these inputs.",
     );
   });
 
   it("refuses a selector the validator refuses, before the page is touched", async () => {
-    const uploadFile = vi.fn();
+    const attachFile = vi.fn();
 
-    const reply = await tableOver({ uploadFile }).call("comet_upload", {
+    const reply = await tableOver({ attachFile }).call("comet_upload", {
       filePath: import.meta.filename,
       selector: "input<script>",
     });
 
-    expect(uploadFile).not.toHaveBeenCalled();
+    expect(attachFile).not.toHaveBeenCalled();
     expect(reply).toMatchObject({ isError: true });
   });
 
-  it("uploads to the resolved path and reports the client's message", async () => {
-    const uploadFile = vi.fn().mockResolvedValue({
-      success: true,
-      message: "Uploaded",
-      inputFound: true,
-    });
+  it("attaches the resolved path to the input the selector names", async () => {
+    const attachFile = vi.fn().mockResolvedValue(true);
 
-    const reply = await tableOver({ uploadFile }).call("comet_upload", {
+    const reply = await tableOver({ attachFile }).call("comet_upload", {
       filePath: import.meta.filename,
-      selector: "input#file",
+      selector: "#file",
     });
 
-    expect(uploadFile).toHaveBeenCalledWith(
+    expect(attachFile).toHaveBeenCalledWith(
       expect.stringContaining("cdp-tools.test.ts"),
-      "input#file",
+      "#file",
     );
-    expect(reply).toEqual({ kind: "text", text: "Uploaded", isError: false });
+    expect(textOf(reply as never)).toMatch(/^File uploaded successfully: /);
   });
 
-  it("lists the available inputs when the upload found none", async () => {
+  it("lists the available inputs when the selector matched nothing", async () => {
     const reply = await tableOver({
-      uploadFile: async () => ({
-        success: false,
-        message: "No file input found",
-        inputFound: false,
-      }),
-      hasFileInput: async () => ({
-        found: true,
-        count: 1,
-        selectors: ["input#a"],
-      }),
-    }).call("comet_upload", { filePath: import.meta.filename });
+      attachFile: async () => false,
+      safeEvaluate: inputsOnPage(["#a"]),
+    }).call("comet_upload", {
+      filePath: import.meta.filename,
+      selector: "#missing",
+    });
 
     expect(reply).toMatchObject({ isError: true });
     expect(textOf(reply as never)).toBe(
-      "No file input found\n\nAvailable file inputs:\n  1. input#a\n\nTry specifying a selector parameter.",
+      "No element found matching selector: #missing\n\nAvailable file inputs:\n<<  1. #a>>\n\nTry specifying a selector parameter.",
     );
+  });
+
+  it("words a failure of the connection as an error reply", async () => {
+    const reply = await tableOver({
+      attachFile: () => Promise.reject(new Error("Not connected to Comet")),
+    }).call("comet_upload", {
+      filePath: import.meta.filename,
+      selector: "#file",
+    });
+
+    expect(reply).toEqual({
+      kind: "text",
+      text: "Error: Not connected to Comet",
+      isError: true,
+    });
   });
 });

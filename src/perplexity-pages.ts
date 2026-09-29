@@ -17,6 +17,7 @@ export const PERPLEXITY_ORIGIN = "https://www.perplexity.ai";
 export const PERPLEXITY_HOME = `${PERPLEXITY_ORIGIN}/`;
 
 const SIDECAR_PATH = "/sidecar";
+const PERPLEXITY_SITE = "perplexity.ai";
 
 /**
  * Whether `address` is Perplexity's main page: on Perplexity's origin and
@@ -37,6 +38,20 @@ export function isPerplexityMainPage(address: string): boolean {
  */
 export function isPerplexityAddress(address: string): boolean {
   return parsed(address)?.origin === PERPLEXITY_ORIGIN;
+}
+
+/**
+ * Whether `address` is a page of Perplexity's site, whatever the scheme,
+ * port or subdomain (`perplexity.ai` and `*.perplexity.ai`): what the tab
+ * list takes for Comet's own interface rather than a page browsed. Judged
+ * on the parsed host, never on a substring of the address.
+ */
+export function isPerplexitySite(address: string): boolean {
+  const host = parsed(address)?.hostname;
+  return (
+    host !== undefined &&
+    (host === PERPLEXITY_SITE || host.endsWith(`.${PERPLEXITY_SITE}`))
+  );
 }
 
 function isSidecarPath(path: string): boolean {

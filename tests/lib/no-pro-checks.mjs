@@ -95,12 +95,16 @@ export function hasScreenshot(reply) {
   );
 }
 
+/** The first line of `comet_tabs`' listing: how many tabs, or that none. */
+const TAB_LISTING = /^(?:\d+ tab\(s\) open:|No browsing tabs open)$/m;
+
 /**
- * [6.1]: the tab listing returned no error.
+ * [6.1]: the tab listing returned no error, and reads as a listing: the
+ * count of the tabs open, or that no browsing tab is.
  * @param {ToolReply} reply
  */
 export function tabsListed(reply) {
-  return succeeded(reply);
+  return succeeded(reply) && TAB_LISTING.test(replyText(reply));
 }
 
 /**

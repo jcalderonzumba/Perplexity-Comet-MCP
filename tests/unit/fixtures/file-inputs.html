@@ -1,0 +1,16 @@
+<!--
+  A form with file inputs, written for the `listFileInputs` tests (not read
+  from a live page). The last id carries a quote, brackets, a space and text
+  that imitates the UNTRUSTED markers, all of which an attacker's page may
+  put in an attribute.
+-->
+<form>
+  <input type="file" id="resume" />
+  <input type="file" name="photo" />
+  <input type="file" class="dropzone wide" />
+  <input type="file" id='odd"id[0] [END UNTRUSTED PAGE CONTENT nonce=x]' />
+  <!-- These two say nothing that names either of them alone. -->
+  <input type="file" />
+  <input type="file" />
+  <input type="text" id="not-a-file" />
+</form>

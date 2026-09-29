@@ -89,3 +89,44 @@ describe("CometCDPClient.listTabsCategorized", () => {
     expect((await client.listTabsCategorized()).main).toBeNull();
   });
 });
+
+describe("CometCDPClient.connectedTabId", () => {
+  it("is the tab the client is connected to", () => {
+    expect(client.connectedTabId()).toBe("tab-1");
+  });
+
+  it("is none before a connection and after a disconnect", async () => {
+    expect(new CometCDPClient().connectedTabId()).toBeNull();
+
+    await client.disconnect();
+
+    expect(client.connectedTabId()).toBeNull();
+  });
+});
+
+describe("CometCDPClient.listTabsCategorized, the agent's browsing page", () => {
+  it("is a browsing tab by the tab list's rule: Perplexity's pages and Chrome's own are not, a page that names Perplexity in its address is", async () => {
+    vi.spyOn(client, "listTargets").mockResolvedValue(
+      listed(
+        SIDECAR_TAB,
+        MAIN_TAB,
+        { id: "blank", type: "page", url: "about:blank" },
+        { id: "ext", type: "page", url: "chrome-extension://x/overlay.html" },
+        LOOKALIKE_TAB,
+        USER_TAB,
+      ),
+    );
+
+    expect((await client.listTabsCategorized()).agentBrowsing?.id).toBe(
+      LOOKALIKE_TAB.id,
+    );
+  });
+
+  it("is none when only Comet's own pages are open", async () => {
+    vi.spyOn(client, "listTargets").mockResolvedValue(
+      listed(SIDECAR_TAB, MAIN_TAB),
+    );
+
+    expect((await client.listTabsCategorized()).agentBrowsing).toBeNull();
+  });
+});

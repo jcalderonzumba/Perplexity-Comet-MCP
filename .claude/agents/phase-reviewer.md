@@ -80,9 +80,9 @@ With `uncle-bob-craft` preloaded:
 - **The Dependency Rule** against the three boundaries of spec §4.2:
   1. **One core, two adapters.** New tool logic lands in a core under `src/core/`, reached through the tool table (`src/core/tools.ts`) that `src/cdp-tools.ts` composes. The adapters (`src/index.ts`, `src/stdio-server.ts`, `src/http-bridge.ts`, `src/bridge-server.ts`) list the table's definitions and dispatch through it; a tool's logic the diff adds or changes outside a core (in an adapter, or in a handler of the composition that a core should hold), or a handler one adapter keeps while the other has its own copy, is a crossing.
   2. **Validation at the edge.** No path the diff adds from a tool's input to `src/cdp-client.ts` skips the validators of `src/upload-validator.ts` or their successors.
-  3. **Page code is tested functions with arguments.** The diff adds no script built as a template string with tool input interpolated and passed to `cometClient.evaluate`; page JavaScript lives in `src/page-scripts.ts` and takes its input as serialised arguments.
+  3. **Page code is tested functions with arguments.** The diff adds no script built as a template string with tool input interpolated and passed to `cometClient.evaluate`; page JavaScript lives in `src/page-scripts.ts` and takes its input as serialised arguments. `tests/unit/evaluate-boundary.test.ts` holds this for the whole of `src/`.
 
-  A crossing the diff adds is Must Fix. A crossing in code the diff does not touch is Consider at most, tagged *pre-existing*; plan 2 closes those.
+  Any crossing found is treated as the diff's, whether the diff wrote it or not: the source tests hold boundaries 1 and 3, so none is left to tag as pre-existing. A crossing is Must Fix.
 
 - **Single responsibility and intent-revealing names.** Small functions and types; a comment is not carrying the meaning a name should.
 - **No speculative abstraction.** A pattern, interface or layer without the duplication or variation that justifies it is a finding, exactly like duplication is.

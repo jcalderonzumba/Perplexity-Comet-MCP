@@ -62,6 +62,12 @@ import {
   type Replies,
 } from "./support/battery-replies.js";
 import { declaredTools, schemaViolations } from "./support/declared-tools.js";
+import { closeReply, switchReply, tabListing } from "./support/tabs-replies.js";
+import {
+  fileNotFoundReply,
+  selectorNotFoundReply,
+  uploadedReply,
+} from "./support/upload-replies.js";
 
 // The Pro checks' conditions. Each holds on the reply the check expects and
 // fails on the replies that used to pass it: a login page, an error, a
@@ -532,110 +538,128 @@ describe("wholeAnswer [2.6-whole-answer]", () => {
   });
 });
 
-/** `comet_tabs`' listing of the given tabs, as `getTabSummary` writes it. */
-const tabListing = (...tabs: Array<[purpose: string, url: string]>) =>
-  tabs.length === 0
-    ? ok("No browsing tabs open")
-    : ok(
-        [
-          `${tabs.length} browsing tab(s) open:`,
-          ...tabs.flatMap(([purpose, url]) => [
-            `  • ${purpose}: ${new URL(url).hostname}`,
-            `    URL: ${url}`,
-          ]),
-        ].join("\n"),
-      );
-
-const USER_TAB: [string, string] = ["AGENT-BROWSING", "https://news.example/a"];
-const AGENT_TAB: [string, string] = ["AGENT-BROWSING", "https://example.org/"];
+const USER_TAB = "https://news.example/a";
+const AGENT_TAB = "https://example.org/";
 
 describe("agentOpenedTab [3.2-agent-tab]", () => {
-  it("holds when a tab on the site appears after the ask", () => {
+  it("holds when a tab on the site appears after the ask", async () => {
     expect(
       agentOpenedTab({
-        before: tabListing(USER_TAB),
-        after: tabListing(USER_TAB, AGENT_TAB),
+        before: await tabListing(USER_TAB),
+        after: await tabListing(USER_TAB, AGENT_TAB),
       }),
     ).toBe(true);
   });
 
-  it("holds on a subdomain of the site", () => {
+  it("holds on a subdomain of the site", async () => {
     expect(
       agentOpenedTab({
-        before: tabListing(),
-        after: tabListing(["AGENT-BROWSING", "https://www.example.org/"]),
+        before: await tabListing(),
+        after: await tabListing("https://www.example.org/"),
       }),
     ).toBe(true);
   });
 
-  it("fails when no tab was opened", () => {
-    expect(agentOpenedTab({ before: tabListing(), after: tabListing() })).toBe(
-      false,
-    );
-  });
-
-  it("fails when the site's tab was already open before the ask", () => {
+  it("fails when no tab was opened", async () => {
     expect(
       agentOpenedTab({
-        before: tabListing(AGENT_TAB),
-        after: tabListing(AGENT_TAB),
+        before: await tabListing(),
+        after: await tabListing(),
       }),
     ).toBe(false);
   });
 
-  it("fails on a site whose name only ends like the one asked for", () => {
+  it("fails when the site's tab was already open before the ask", async () => {
     expect(
       agentOpenedTab({
-        before: tabListing(),
-        after: tabListing(["AGENT-BROWSING", "https://notexample.org/"]),
+        before: await tabListing(AGENT_TAB),
+        after: await tabListing(AGENT_TAB),
       }),
     ).toBe(false);
   });
 
-  it("fails when a listing is an error", () => {
+  it("fails on a site whose name only ends like the one asked for", async () => {
     expect(
       agentOpenedTab({
-        before: tabListing(),
-        after: error(tabListing(AGENT_TAB).content?.[0]?.text ?? ""),
+        before: await tabListing(),
+        after: await tabListing("https://notexample.org/"),
+      }),
+    ).toBe(false);
+  });
+
+  it("fails when a listing is an error", async () => {
+    expect(
+      agentOpenedTab({
+        before: await tabListing(),
+        after: error(replyText(await tabListing(AGENT_TAB))),
       }),
     ).toBe(false);
   });
 });
 
 describe("tabsKept [3.3-tabs-kept]", () => {
-  it("holds when the agent opened its tab and every tab open before is still open", () => {
+  it("holds when the agent opened its tab and every tab open before is still open", async () => {
     expect(
       tabsKept({
-        before: tabListing(USER_TAB),
-        after: tabListing(USER_TAB, AGENT_TAB),
+        before: await tabListing(USER_TAB),
+        after: await tabListing(USER_TAB, AGENT_TAB),
       }),
     ).toBe(true);
   });
 
-  it("fails when a tab open before the ask is gone", () => {
+  it("fails when a tab open before the ask is gone", async () => {
     expect(
       tabsKept({
-        before: tabListing(USER_TAB, ["AGENT-BROWSING", "https://b.example/"]),
-        after: tabListing(USER_TAB, AGENT_TAB),
+        before: await tabListing(USER_TAB, "https://b.example/"),
+        after: await tabListing(USER_TAB, AGENT_TAB),
       }),
     ).toBe(false);
   });
 
-  it("fails when a tab open before the ask was taken to another page", () => {
+  it("fails when a tab open before the ask was taken to another page", async () => {
     expect(
       tabsKept({
-        before: tabListing(USER_TAB),
-        after: tabListing(AGENT_TAB, [
-          "AGENT-BROWSING",
-          "https://news.example/b",
-        ]),
+        before: await tabListing(USER_TAB),
+        after: await tabListing(AGENT_TAB, "https://news.example/b"),
       }),
     ).toBe(false);
   });
 
-  it("fails when the agent opened no tab, since nothing was tested", () => {
+  it("fails when the agent opened no tab, since nothing was tested", async () => {
     expect(
-      tabsKept({ before: tabListing(USER_TAB), after: tabListing(USER_TAB) }),
+      tabsKept({
+        before: await tabListing(USER_TAB),
+        after: await tabListing(USER_TAB),
+      }),
+    ).toBe(false);
+  });
+
+  it("holds when the tab the server opened moved to another thread, as it does with every ask", async () => {
+    const server = (url: string) => ({ url, openedByServer: true });
+
+    expect(
+      tabsKept({
+        before: await tabListing(
+          USER_TAB,
+          server("https://www.perplexity.ai/"),
+        ),
+        after: await tabListing(
+          USER_TAB,
+          AGENT_TAB,
+          server("https://www.perplexity.ai/search/thread-x1"),
+        ),
+      }),
+    ).toBe(true);
+  });
+
+  it("fails when a user's tab is gone although the server's own tab is still listed", async () => {
+    const server = { url: "https://www.perplexity.ai/", openedByServer: true };
+
+    expect(
+      tabsKept({
+        before: await tabListing(USER_TAB, server),
+        after: await tabListing(AGENT_TAB, server),
+      }),
     ).toBe(false);
   });
 });
@@ -891,16 +915,16 @@ describe("pollAfterStop [4.3b]", () => {
 });
 
 describe("switchedToSite [6.3]", () => {
-  it("holds when the switch names the site's tab", () => {
+  it("holds when the switch names the site's tab", async () => {
     expect(
       switchedToSite(
-        ok("Switched to example.com (https://example.com/)"),
+        await switchReply("example.com", "https://example.com/"),
         "example.com",
       ),
     ).toBe(true);
     expect(
       switchedToSite(
-        ok("Switched to www.example.com (https://www.example.com/)"),
+        await switchReply("example.com", "https://www.example.com/x"),
         "example.com",
       ),
     ).toBe(true);
@@ -915,10 +939,21 @@ describe("switchedToSite [6.3]", () => {
     ).toBe(false);
   });
 
-  it("fails when it switched to another site", () => {
+  it("fails when it switched to another site", async () => {
     expect(
       switchedToSite(
-        ok("Switched to notexample.com (https://notexample.com/)"),
+        await switchReply("notexample.com", "https://notexample.com/"),
+        "example.com",
+      ),
+    ).toBe(false);
+  });
+
+  it("fails on a switch reply that is an error result", async () => {
+    expect(
+      switchedToSite(
+        error(
+          replyText(await switchReply("example.com", "https://example.com/")),
+        ),
         "example.com",
       ),
     ).toBe(false);
@@ -926,19 +961,25 @@ describe("switchedToSite [6.3]", () => {
 });
 
 describe("siteTabClosed [6.4]", () => {
-  it("holds when the site's tab was closed", () => {
-    expect(siteTabClosed(ok("Closed example.com"), "example.com")).toBe(true);
-  });
-
-  it("holds on the refusal to close the only browsing tab", () => {
+  it("holds when the site's tab, one the server opened, was closed", async () => {
     expect(
       siteTabClosed(
-        error(
-          "Cannot close - this is the only browsing tab. Comet needs at least one external tab open.",
-        ),
+        await closeReply("example.com", {
+          url: "https://example.com/",
+          openedByServer: true,
+        }),
         "example.com",
       ),
     ).toBe(true);
+  });
+
+  it("holds on the refusal to close the agent's tab, which the server did not open", async () => {
+    const refusal = await closeReply("example.com", {
+      url: "https://example.com/",
+    });
+
+    expect(refusal.isError).toBe(true);
+    expect(siteTabClosed(refusal, "example.com")).toBe(true);
   });
 
   it("fails when no tab is found for the site", () => {
@@ -951,42 +992,57 @@ describe("siteTabClosed [6.4]", () => {
   });
 
   it("fails when the close failed", () => {
-    expect(siteTabClosed(ok("Failed to close tab"), "example.com")).toBe(false);
+    expect(siteTabClosed(error("Failed to close tab"), "example.com")).toBe(
+      false,
+    );
   });
 
-  it("fails on the refusal text when it is not an error result", () => {
+  it("fails when the tab closed was on another site", async () => {
     expect(
       siteTabClosed(
-        ok("Cannot close - this is the only browsing tab."),
+        await closeReply("notexample.com", {
+          url: "https://notexample.com/",
+          openedByServer: true,
+        }),
         "example.com",
       ),
     ).toBe(false);
+  });
+
+  it("fails on the refusal text when it is not an error result", async () => {
+    const refusal = await closeReply("example.com", {
+      url: "https://example.com/",
+    });
+
+    expect(siteTabClosed(ok(replyText(refusal)), "example.com")).toBe(false);
   });
 });
 
 describe("selectorNotFound [8.3]", () => {
   const SELECTOR = "#does-not-exist-xyzabc";
 
-  it("holds on the error naming the selector", () => {
+  it("holds on the core's error naming the selector", async () => {
     expect(
-      selectorNotFound(
-        error(
-          `No element found matching selector: ${SELECTOR}\n\nAvailable file inputs:\n  1. input[type=file]`,
-        ),
-        SELECTOR,
-      ),
+      selectorNotFound(await selectorNotFoundReply(SELECTOR), SELECTOR),
     ).toBe(true);
   });
 
-  it("fails when the upload is reported as done", () => {
-    expect(selectorNotFound(ok("File uploaded successfully"), SELECTOR)).toBe(
-      false,
-    );
+  it("fails when the upload is reported as done", async () => {
+    expect(selectorNotFound(await uploadedReply(), SELECTOR)).toBe(false);
   });
 
-  it("fails on another error", () => {
+  it("fails on the core's error for another selector", async () => {
     expect(
-      selectorNotFound(error("Error: File not found: /tmp/x"), SELECTOR),
+      selectorNotFound(await selectorNotFoundReply("#another"), SELECTOR),
+    ).toBe(false);
+  });
+
+  it("fails on the core's error for a missing file", async () => {
+    expect(
+      selectorNotFound(
+        await fileNotFoundReply("/tmp/file-that-does-not-exist-xyzabc.txt"),
+        SELECTOR,
+      ),
     ).toBe(false);
   });
 });
@@ -994,14 +1050,12 @@ describe("selectorNotFound [8.3]", () => {
 describe("fileNotFound [8.4]", () => {
   const PATH = "/tmp/file-that-does-not-exist-xyzabc.txt";
 
-  it("holds on the error naming the missing file", () => {
-    expect(fileNotFound(error(`Error: File not found: ${PATH}`), PATH)).toBe(
-      true,
-    );
+  it("holds on the core's error naming the missing file", async () => {
+    expect(fileNotFound(await fileNotFoundReply(PATH), PATH)).toBe(true);
   });
 
-  it("fails when the upload is reported as done", () => {
-    expect(fileNotFound(ok("File uploaded successfully"), PATH)).toBe(false);
+  it("fails when the upload is reported as done", async () => {
+    expect(fileNotFound(await uploadedReply(), PATH)).toBe(false);
   });
 
   it("fails on another error", () => {
@@ -1330,7 +1384,7 @@ const CALLS = {
 const IMAGE: ToolReply = {
   content: [{ type: "image", data: "iVBORw0KGgo", mimeType: "image/png" }],
 };
-const NO_TABS = ok("No browsing tabs open");
+const NO_TABS = await tabListing();
 const COMPLETED = ok(
   `Status: COMPLETED (0s ago)\n\n${wrapUntrustedPageContent("octo/widgets")}`,
 );
@@ -1401,9 +1455,9 @@ const TODAY: Replies = {
   [CALLS.screenshot]: IMAGE,
   [CALLS.visit]: [answer("Done."), answer("Done.")],
   [CALLS.switchTab]: error("No tab found for the specified domain"),
-  [CALLS.closeTab]: error(
-    "Cannot close - this is the only browsing tab. Comet needs at least one external tab open.",
-  ),
+  [CALLS.closeTab]: await closeReply("example.com", {
+    url: "https://example.com/",
+  }),
   [CALLS.readMode]: [
     ok(modeReport("search")),
     ok(modeReport("research")),
@@ -1419,17 +1473,15 @@ const TODAY: Replies = {
     ok("Switched to search mode"),
   ],
   [CALLS.researchAsk]: ok(ANSWER),
-  [CALLS.wrongSelector]: error(
-    `No element found matching selector: ${MISSING_SELECTOR}`,
-  ),
-  [CALLS.missingFile]: error(`Error: File not found: ${MISSING_FILE}`),
+  [CALLS.wrongSelector]: await selectorNotFoundReply(MISSING_SELECTOR),
+  [CALLS.missingFile]: await fileNotFoundReply(MISSING_FILE),
   [CALLS.emptyPrompt]: ok("Error: prompt cannot be empty"),
   [CALLS.invalidMode]: error(
     "Invalid mode: invalid_mode_xyz. Use: search, research, labs, learn",
   ),
 };
 
-const AGENT_TABS = tabListing(AGENT_TAB);
+const AGENT_TABS = await tabListing(AGENT_TAB);
 
 /** Comet once every fix lands: every check's condition holds. */
 const FIXED: Replies = {
@@ -1438,7 +1490,7 @@ const FIXED: Replies = {
   [CALLS.heading]: answer("Example Domain"),
   [CALLS.tabs]: [NO_TABS, AGENT_TABS, AGENT_TABS],
   [CALLS.trending]: answer("octo/widgets, with 12,345 stars"),
-  [CALLS.switchTab]: ok("Switched to example.com (https://example.com/)"),
+  [CALLS.switchTab]: await switchReply("example.com", "https://example.com/"),
   [CALLS.learn]: ok("Switched to learn mode"),
 };
 
@@ -1604,7 +1656,7 @@ describe("runProBattery", () => {
         [CALLS.poll]: [ok("Status: WORKING"), answer("The article")],
         [CALLS.stop]: ok("No active agent to stop"),
         [CALLS.closeTab]: error("No tab found for the specified domain"),
-        [CALLS.wrongSelector]: ok("File uploaded successfully"),
+        [CALLS.wrongSelector]: await uploadedReply(),
         [CALLS.missingFile]: error("Error: Not connected to Comet"),
         [CALLS.emptyPrompt]: answer("How can I help you today?"),
       }).callTool,

@@ -8,19 +8,10 @@ import type { CDPTarget, EvaluateResult } from "../../../src/types.js";
 
 interface CategorizedTabs {
   main: CDPTarget | null;
-  sidecar: CDPTarget | null;
   agentBrowsing: CDPTarget | null;
-  overlay: CDPTarget | null;
-  others: CDPTarget[];
 }
 
-const EMPTY_TABS: CategorizedTabs = {
-  main: null,
-  sidecar: null,
-  agentBrowsing: null,
-  overlay: null,
-  others: [],
-};
+const EMPTY_TABS: CategorizedTabs = { main: null, agentBrowsing: null };
 
 export class FakeCdpClient implements CometAIClient {
   /** Records every JS expression passed to `safeEvaluate`. */
