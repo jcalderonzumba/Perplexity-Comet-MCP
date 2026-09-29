@@ -2,8 +2,8 @@
 // the Windows-aware fetch and PowerShell quoting. Shared by the client and the
 // launch, so neither carries the other's copy.
 
-import { execSync } from "child_process";
-import { platform } from "os";
+import { execSync } from "node:child_process";
+import { platform } from "node:os";
 
 // Detect if running in WSL (must be before windowsFetch)
 function isWSL(): boolean {

@@ -16,14 +16,14 @@
     "rules": {
       "preset": "recommended",
       "correctness": {
-        "noUnusedFunctionParameters": "off",
-        "noUnusedImports": "off",
-        "noUnusedVariables": "off"
+        "noUnusedFunctionParameters": "error",
+        "noUnusedImports": "error",
+        "noUnusedVariables": "error"
       },
       "style": {
         "noNonNullAssertion": "off",
-        "useNodejsImportProtocol": "off",
-        "useTemplate": "off"
+        "useNodejsImportProtocol": "error",
+        "useTemplate": "error"
       },
       "suspicious": { "noExplicitAny": "off" }
     }

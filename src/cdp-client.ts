@@ -338,7 +338,7 @@ async function pressKeyOn(
 async function canConnectToWindowsLocalhost(port: number): Promise<boolean> {
   if (!IS_WSL) return true;
 
-  const net = await import("net");
+  const net = await import("node:net");
   return new Promise((resolve) => {
     const client = net.createConnection({ port, host: "127.0.0.1" }, () => {
       client.destroy();

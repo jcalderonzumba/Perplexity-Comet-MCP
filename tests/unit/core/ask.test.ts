@@ -9,7 +9,6 @@ import {
   PageScriptFailed,
 } from "../../../src/core/ask.js";
 import { ASK_DEFAULT_TIMEOUT_MS } from "../../../src/core/ask-input.js";
-import { SEND_TIMING } from "../../../src/core/ask-send.js";
 import { TASK_STALE_AFTER_MS } from "../../../src/core/ask-task.js";
 import { ModeCore } from "../../../src/core/mode.js";
 import { PerplexityTab } from "../../../src/core/perplexity-tab.js";
