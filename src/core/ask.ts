@@ -5,18 +5,21 @@
 // shapes the prompt, brings the connection to Perplexity's main page (by
 // `ask-tab.ts`, never the sidecar or a user's page), puts back
 // the mode `comet_mode` last set, sends the prompt (typed and submitted
-// with trusted input by `ask-send.ts`), and waits for its answer: the one
-// the page reads as completed, of any length, in a turn after the one the
-// page showed before the prompt was sent (`thread-turn.ts`), so an earlier
-// turn's answer never stands in for it, even one with the same text. When
-// its time runs out it says so and keeps the task active, so the answer is
-// never presented as complete before it is. The outcome is data;
-// `describeAskOutcome` words it, and the adapter wraps the page text in it.
+// with trusted input by `ask-send.ts`), and waits for its answer: the one the
+// page reads as completed, of any length, in the turn whose question block
+// holds the prompt or a later one (`thread-turn.ts`), so an earlier turn's
+// answer never stands in for it, even one with the same text, and even when
+// the read before sending missed the latest turn. Until the page shows that
+// block, no answer counts, and the ask runs to its timeout if it never does. When its time runs out it says so and keeps the task
+// active, so the answer is never presented as complete before it is. The
+// outcome is data; `describeAskOutcome` words it, and the adapter wraps the
+// page text in it.
 //
 // `comet_poll` and `comet_stop` follow the same task. A poll of a task the
-// ask left running applies the ask's completion rules, against the page as
-// it was before the prompt was sent, so it returns the answer only once it
-// is complete and new, and otherwise says the task is still working. Stop
+// ask left running applies the ask's completion rules, against the same turn
+// mark and the page as it was before the prompt was sent, so it returns the
+// answer only once it is complete and new, and otherwise says the task is
+// still working. Stop
 // clicks the input bar's stop control (`ask-stop.ts`) and ends the task: an
 // ask still waiting then returns saying it was stopped, one still waiting to
 // send its prompt sends nothing, and a poll reports the task stopped,
@@ -63,6 +66,11 @@ export interface AskStatus {
  */
 export interface AskPort extends PromptPort, StopPort, AskTabPort {
   readStatus(): Promise<AskStatus>;
+  /**
+   * The turns of the thread whose question block holds `question`, the
+   * start of the prompt sent, lowest first.
+   */
+  readQuestionTurns(question: string): Promise<number[]>;
 }
 
 /** The ask's waits, in milliseconds. */
@@ -252,8 +260,10 @@ export class AskCore {
     let notice = NO_NOTICE;
     const isFollowed = () => this.task.isFollowing(taskId);
     try {
-      if (!(await this.tab.connectOrRecover())) {
-        return { kind: "failed", message: CONNECTION_FAILED, notice };
+      const connection = await this.tab.connectOrRecover();
+      if (!connection.connected) {
+        const message = `${CONNECTION_FAILED}: ${connection.cause}`;
+        return { kind: "failed", message, notice };
       }
       await this.tab.bringToAskPage(request.newChat);
       const free = await freeInputBar(this.port, {
@@ -338,9 +348,7 @@ export class AskCore {
 
   /** One read of the page, judged by the ask's completion rules. */
   private async follow(watch: AnswerWatch): Promise<PollOutcome> {
-    const thread = await this.port.readThreadState();
-    const status = await this.port.readStatus();
-    watch.observe(thread, status);
+    const status = await this.readPageFor(watch);
     this.task.recordSteps(watch.steps);
     if (watch.isComplete(status)) {
       this.task.complete(watch.taskId, status.response);
@@ -376,8 +384,24 @@ export class AskCore {
   ): Promise<AskOutcome> {
     const before = await this.readPageBefore();
     await sendPrompt(this.port, prompt, before.thread);
-    this.watch = new AnswerWatch(wait.taskId, before);
+    this.watch = new AnswerWatch(wait.taskId, before, prompt);
     return this.waitForAnswer(this.watch, wait);
+  }
+
+  /**
+   * One read of the page for `watch`: the thread and the status, and, until
+   * the watch has the turn of the ask's own question, the turns whose
+   * question block holds it. The thread is read first, so a block that
+   * renders between the reads shows as the ask's own only at the next.
+   */
+  private async readPageFor(watch: AnswerWatch): Promise<AskStatus> {
+    const thread = await this.port.readThreadState();
+    const status = await this.port.readStatus();
+    if (watch.awaitsOwnTurn(thread)) {
+      watch.markOwnTurn(await this.port.readQuestionTurns(watch.question));
+    }
+    watch.observe(thread, status);
+    return status;
   }
 
   private async readPageBefore(): Promise<PageBefore> {
@@ -408,10 +432,8 @@ export class AskCore {
           errors++;
           continue;
         }
-        const thread = await this.port.readThreadState();
-        const status = await this.port.readStatus();
+        const status = await this.readPageFor(watch);
         errors = 0;
-        watch.observe(thread, status);
         if (!this.task.isFollowing(taskId)) return this.stopped(watch, notice);
         this.task.recordSteps(watch.steps);
         if (watch.isComplete(status)) {

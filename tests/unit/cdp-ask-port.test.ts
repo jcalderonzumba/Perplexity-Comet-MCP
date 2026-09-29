@@ -8,21 +8,21 @@ import { cdpAskPort, createCdpAskCore } from "../../src/cdp-ask-port.js";
 import { createCdpPerplexityTab } from "../../src/cdp-perplexity-tab.js";
 import { PageScriptFailed } from "../../src/core/ask.js";
 import { sendPrompt } from "../../src/core/ask-send.js";
+import { describeRunningWithoutPort } from "../../src/core/comet-launch.js";
 import { ModeCore } from "../../src/core/mode.js";
 import type { BrowserTarget } from "../../src/core/perplexity-tab.js";
 import {
   locateStopControl,
   locateSubmitButton,
   pageScriptExpression,
+  readAnswerStatus,
   readAskInput,
+  readLatestAnswer,
+  readQuestionTurns,
   readThreadState,
   selectAskInput,
 } from "../../src/page-scripts.js";
-import {
-  FakeAskClient,
-  FakeAskComet,
-  WORKING_STATUS,
-} from "./fakes/fake-ask-client.js";
+import { FakeAskClient, FakeAskComet } from "./fakes/fake-ask-client.js";
 import { FakeCometLaunch } from "./fakes/fake-comet-launch.js";
 import { FakeModePage } from "./fakes/fake-mode-page.js";
 
@@ -116,6 +116,16 @@ describe("cdpAskPort: reading the page", () => {
     expect(client.expressions).toEqual([pageScriptExpression(readThreadState)]);
   });
 
+  it("reads the turns whose question block holds a question, sending it as data", async () => {
+    const { client, port } = rig();
+    document.body.innerHTML = `<div data-workflow-entry="2"><p>Why is the sky blue?</p></div>`;
+
+    expect(await port.readQuestionTurns("why is the sky blue?")).toEqual([2]);
+    expect(client.expressions).toEqual([
+      pageScriptExpression(readQuestionTurns, "why is the sky blue?"),
+    ]);
+  });
+
   it("rejects with the page's error, kept apart from its own words, when a page script fails", async () => {
     const { client, port } = rig();
     client.pageFailure = "TypeError: document is gone";
@@ -130,20 +140,172 @@ describe("cdpAskPort: reading the page", () => {
   });
 });
 
+function readFixture(name: string): string {
+  return readFileSync(
+    join(dirname(fileURLToPath(import.meta.url)), "fixtures", name),
+    "utf8",
+  );
+}
+
+const ASK_INPUT_FIXTURE = readFixture("ask-input.html");
+const ONE_WORD_THREAD = readFixture("thread-one-word.html");
+const SEVERAL_TURNS_THREAD = readFixture("thread-several-turns.html");
+
+const STOP_ICON = `<svg role="img" aria-hidden="true"><use xlink:href="#pplx-icon-player-stop-filled"></use></svg>`;
+
+function iconButton(label: string): string {
+  return `<button aria-label="${label}" type="button"><div><div>${STOP_ICON}</div></div></button>`;
+}
+
+function submitButton(): HTMLElement {
+  return document.querySelector('button[aria-label="Submit"]') as HTMLElement;
+}
+
+/** The last answer block's prose element. */
+function latestAnswerRoot(): HTMLElement {
+  return [...document.querySelectorAll("[data-workflow-final-text]")]
+    .at(-1)
+    ?.querySelector(".prose") as HTMLElement;
+}
+
+// The status is read in four page reads, composed by the port: the stop
+// control by its label, the stop icon, the latest answer, and the status
+// from those. The stop control comes first, so an answer read after it
+// cannot be a partial one under a status that reads complete.
 describe("cdpAskPort: the answer", () => {
-  it("reads the status through the Comet module", async () => {
+  it("reads a one-word answer as a completed answer, with the four page reads in order", async () => {
+    const { client, port } = rig();
+    document.body.innerHTML = ONE_WORD_THREAD;
+
+    expect(await port.readStatus()).toMatchObject({
+      status: "completed",
+      response: "Paris",
+      hasStopButton: false,
+      agentBrowsingUrl: "",
+    });
+    expect(client.expressions).toEqual([
+      pageScriptExpression(locateStopControl, "label"),
+      pageScriptExpression(locateStopControl, "icon"),
+      pageScriptExpression(readLatestAnswer),
+      pageScriptExpression(readAnswerStatus, {
+        stopControlShown: false,
+        stopIconShown: false,
+        hasAnswer: true,
+      }),
+    ]);
+  });
+
+  it("returns the latest turn's whole answer in a thread of several turns", async () => {
+    const { port } = rig();
+    document.body.innerHTML = SEVERAL_TURNS_THREAD;
+
+    const status = await port.readStatus();
+
+    expect(status.status).toBe("completed");
+    expect(status.response).toContain("Answer 4 part 1.");
+    expect(status.response).toContain("Answer 4 part 37.");
+    expect(status.response).not.toContain("Answer 3");
+  });
+
+  it("never returns an earlier turn's answer while the latest turn has none yet", async () => {
+    const { port } = rig();
+    document.body.innerHTML = SEVERAL_TURNS_THREAD;
+    [...document.querySelectorAll("[data-workflow-final-text]")]
+      .at(-1)
+      ?.remove();
+
+    const status = await port.readStatus();
+
+    expect(status.status).not.toBe("completed");
+    expect(status.response).toBe("");
+  });
+
+  it("reads the stop control as an answer in progress, with no response", async () => {
+    const { port } = rig();
+    document.body.innerHTML = ONE_WORD_THREAD;
+    submitButton().outerHTML = iconButton("Stop response (Esc)");
+
+    expect(await port.readStatus()).toMatchObject({
+      status: "working",
+      response: "",
+      hasStopButton: true,
+    });
+  });
+
+  it("reads the stop icon under a translated label as working, never complete", async () => {
+    const { port } = rig();
+    document.body.innerHTML = ONE_WORD_THREAD;
+    latestAnswerRoot().innerHTML = "<p>Столица Франции —</p>";
+    submitButton().outerHTML = iconButton("Остановить ответ (Esc)");
+
+    expect(await port.readStatus()).toMatchObject({
+      status: "working",
+      response: "",
+      hasStopButton: false,
+    });
+  });
+
+  it("still reads a complete answer while the input bar shows Stop dictation", async () => {
+    const { port } = rig();
+    document.body.innerHTML = ONE_WORD_THREAD;
+    (
+      document.querySelector('button[aria-label="Dictation"]') as HTMLElement
+    ).outerHTML = iconButton("Stop dictation");
+
+    expect(await port.readStatus()).toMatchObject({
+      status: "completed",
+      response: "Paris",
+    });
+  });
+
+  it("still reads a complete answer beside the read-aloud player's stop icon", async () => {
+    const { port } = rig();
+    document.body.innerHTML = ONE_WORD_THREAD;
+    document
+      .querySelectorAll("[data-workflow-final-text]")
+      .item(0)
+      .insertAdjacentHTML("beforeend", iconButton("Остановить"));
+
+    expect(await port.readStatus()).toMatchObject({
+      status: "completed",
+      response: "Paris",
+    });
+  });
+
+  it("reads the last answer block of a page without turn blocks as complete", async () => {
+    const { port } = rig();
+    document.body.innerHTML = `
+      <nav><div class="prose">A navigation entry long enough to pass for text</div></nav>
+      <main><div class="prose">Rome.</div></main>
+      <div>Ask a follow-up</div>`;
+
+    expect(await port.readStatus()).toMatchObject({
+      status: "completed",
+      response: "Rome.",
+    });
+  });
+
+  it("adds the address of the tab the agent is browsing, from the Comet module", async () => {
     const { comet, port } = rig();
+    comet.url = "https://example.com/store";
+    document.body.innerHTML = ONE_WORD_THREAD;
 
-    expect(await port.readStatus()).toEqual(WORKING_STATUS);
+    expect((await port.readStatus()).agentBrowsingUrl).toBe(
+      "https://example.com/store",
+    );
+    expect(comet.calls).toEqual(["agentBrowsingUrl"]);
+  });
 
-    expect(comet.calls).toEqual(["getAgentStatus"]);
+  it("rejects with the script that failed in the page", async () => {
+    const { client, port } = rig();
+    client.pageFailure = "TypeError: document is gone";
+
+    await expect(port.readStatus()).rejects.toMatchObject({
+      message: "locateStopControl failed in the page",
+      pageDetail: "TypeError: document is gone",
+    });
   });
 });
-
-const ASK_INPUT_FIXTURE = readFileSync(
-  join(dirname(fileURLToPath(import.meta.url)), "fixtures", "ask-input.html"),
-  "utf8",
-);
 
 describe("cdpAskPort: the input bar", () => {
   it("selects the input bar, reads it and finds its Submit button with their page scripts", async () => {
@@ -219,7 +381,7 @@ describe("cdpAskPort: stopping", () => {
     if (control) await port.clickAt(control);
 
     expect(client.expressions).toEqual([
-      pageScriptExpression(locateStopControl),
+      pageScriptExpression(locateStopControl, "label"),
     ]);
     expect(client.calls).toEqual([`clickAt ${control?.x},${control?.y}`]);
     expect(comet.calls).toEqual([]);
@@ -312,7 +474,10 @@ describe("createCdpAskCore", () => {
     await vi.runAllTimersAsync();
     const outcome = await asking;
 
-    expect(outcome).toMatchObject({ kind: "failed" });
+    expect(outcome).toMatchObject({
+      kind: "failed",
+      message: `Failed to establish connection to Comet browser: ${describeRunningWithoutPort(9555, launch.startCommand(9555))}`,
+    });
     expect(launch.launches).toEqual([]);
     expect(client.calls).toEqual(["preOperationCheck"]);
   });

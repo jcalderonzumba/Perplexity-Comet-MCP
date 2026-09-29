@@ -195,7 +195,7 @@ describe("the real composition through both adapters, on a client that answers n
     ) as CdpToolsClient;
     return createCdpToolTable({
       client,
-      comet: { getAgentStatus: vi.fn() },
+      comet: { agentBrowsingUrl: vi.fn() },
       launch: new FakeCometLaunch(),
       quotePage: (text) => text,
       port: 9222,

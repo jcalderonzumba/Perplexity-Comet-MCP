@@ -1,4 +1,4 @@
-// Minimal fake of the CDP-client surface that `CometAI.getAgentStatus` uses.
+// Minimal fake of the CDP-client surface that `CometAI` uses.
 // Implements just `safeEvaluate` and `listTabsCategorized` — enough to
 // satisfy the `CometAIClient` type — and records every call so tests can
 // assert on the JS payload sent to `evaluate`.

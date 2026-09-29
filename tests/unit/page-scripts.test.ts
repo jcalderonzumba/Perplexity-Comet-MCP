@@ -5,7 +5,7 @@ import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { beforeEach, describe, expect, it } from "vitest";
 import {
-  extractAgentStatus,
+  type AnswerSignals,
   listFileInputs,
   locateModeButton,
   locateModeMenuItem,
@@ -13,8 +13,11 @@ import {
   locateSubmitButton,
   type PageArgument,
   pageScriptExpression,
+  readAnswerStatus,
   readAskInput,
+  readLatestAnswer,
   readModeMenuItems,
+  readQuestionTurns,
   readThreadState,
   selectAskInput,
 } from "../../src/page-scripts.js";
@@ -26,7 +29,7 @@ beforeEach(() => {
 
 /**
  * jsdom does not compute layout, so `offsetParent` is always `null`. The
- * stop-button check `extractAgentStatus` had before the stop control counted
+ * stop-button check the status read had before the stop control counted
  * only buttons whose `offsetParent` was set; the tests that show a button is
  * not the stop control mark it visible, so that check would have taken it.
  */
@@ -69,59 +72,78 @@ describe("readThreadState on a page that shows no turn", () => {
   });
 });
 
-describe("extractAgentStatus", () => {
-  it("returns 'completed' when 'Reviewed N sources' is present, prose has content, no stop button", () => {
+/** The signals the port reads before the status script: none shown. */
+const NO_SIGNALS: AnswerSignals = {
+  stopControlShown: false,
+  stopIconShown: false,
+  hasAnswer: false,
+};
+
+describe("readAnswerStatus", () => {
+  it("returns 'completed' when 'Reviewed N sources' is present and no stop control shows", () => {
     document.body.innerHTML = `
       <main>
         <div>Reviewed 12 sources</div>
-        <div class="prose">This is the agent's final answer with enough length to clear the threshold for prose detection in the extractor.</div>
         <button aria-label="New chat">New</button>
       </main>
     `;
 
-    const result = extractAgentStatus();
-    expect(result.status).toBe("completed");
-    expect(result.hasStopButton).toBe(false);
-    expect(result.response.length).toBeGreaterThan(0);
+    expect(runInPage(readAnswerStatus, NO_SIGNALS).status).toBe("completed");
   });
 
   it("returns 'completed' for Russian singular 'Выполнен 1 шаг'", () => {
-    const main = document.createElement("main");
-    const m = document.createElement("div");
-    m.textContent = "Выполнен 1 шаг";
-    const p = document.createElement("div");
-    p.className = "prose";
-    p.textContent = "Готовый ответ агента, длина превышает 15 символов.";
-    main.append(m, p);
-    document.body.append(main);
+    document.body.innerHTML = "<main><div>Выполнен 1 шаг</div></main>";
 
-    const result = extractAgentStatus();
-    expect(result.status).toBe("completed");
+    expect(runInPage(readAnswerStatus, NO_SIGNALS).status).toBe("completed");
   });
 
   it("returns 'completed' for Russian plural 'Выполнено 5 шагов'", () => {
-    const main = document.createElement("main");
-    const m = document.createElement("div");
-    m.textContent = "Выполнено 5 шагов";
-    const p = document.createElement("div");
-    p.className = "prose";
-    p.textContent = "Готовый ответ агента, длина превышает 15 символов.";
-    main.append(m, p);
-    document.body.append(main);
+    document.body.innerHTML = "<main><div>Выполнено 5 шагов</div></main>";
 
-    const result = extractAgentStatus();
-    expect(result.status).toBe("completed");
+    expect(runInPage(readAnswerStatus, NO_SIGNALS).status).toBe("completed");
   });
 
   it("does NOT treat 'Finished reading sources' as a completion marker", () => {
-    loadAskInputFixture();
-    showStopControl();
-    const step = document.createElement("div");
-    step.textContent = "Finished reading sources";
-    document.body.prepend(step);
+    document.body.innerHTML = "<div>Finished reading sources</div>";
 
-    // The stop control shows -> still working, regardless of "Finished reading".
-    expect(runInPage(extractAgentStatus).status).toBe("working");
+    expect(
+      runInPage(readAnswerStatus, { ...NO_SIGNALS, stopControlShown: true })
+        .status,
+    ).toBe("working");
+  });
+
+  it("reads a 'Finished' marker as complete only while no stop control shows", () => {
+    document.body.innerHTML = "<div>Finished</div>";
+
+    expect(runInPage(readAnswerStatus, NO_SIGNALS).status).toBe("completed");
+    expect(
+      runInPage(readAnswerStatus, { ...NO_SIGNALS, stopControlShown: true })
+        .status,
+    ).toBe("working");
+  });
+
+  it("reads the stop control's icon under a translated label as working, never complete", () => {
+    document.body.innerHTML = "<div>Reviewed 3 sources</div>";
+
+    expect(
+      runInPage(readAnswerStatus, { ...NO_SIGNALS, stopIconShown: true })
+        .status,
+    ).toBe("working");
+  });
+
+  it("reads a follow-up prompt with an answer as complete, and without one as idle", () => {
+    document.body.innerHTML = "<div>Ask a follow-up</div>";
+
+    expect(
+      runInPage(readAnswerStatus, { ...NO_SIGNALS, hasAnswer: true }).status,
+    ).toBe("completed");
+    expect(runInPage(readAnswerStatus, NO_SIGNALS).status).toBe("idle");
+  });
+
+  it("reads a page with working text and no completion signal as working", () => {
+    document.body.innerHTML = "<div>Navigating to checkout</div>";
+
+    expect(runInPage(readAnswerStatus, NO_SIGNALS).status).toBe("working");
   });
 
   it("extracts and dedupes step descriptions matching the working patterns", () => {
@@ -134,7 +156,7 @@ describe("extractAgentStatus", () => {
       <div>Navigating to checkout</div>
     `;
 
-    const result = extractAgentStatus();
+    const result = runInPage(readAnswerStatus, NO_SIGNALS);
     // After Set-dedupe, three unique steps remain.
     expect(result.steps.length).toBe(3);
     expect(result.steps).toEqual(
@@ -270,6 +292,14 @@ describe("locateModeButton", () => {
   it("returns the current mode's text with whitespace collapsed", () => {
     const label = modeButton().querySelector("span + span")?.firstChild;
     if (label) label.textContent = "\n   Deep \n  research  ";
+    expect(runInPage(locateModeButton)).toMatchObject({
+      text: "Deep research",
+    });
+  });
+
+  it("reads a label split by non-breaking and other Unicode spaces as the mode it names", () => {
+    const label = modeButton().querySelector("span + span")?.firstChild;
+    if (label) label.textContent = "\u00a0Deep\u00a0\u2009research\u202f";
     expect(runInPage(locateModeButton)).toMatchObject({
       text: "Deep research",
     });
@@ -582,29 +612,51 @@ describe("locateStopControl", () => {
   });
 });
 
-describe("extractAgentStatus and the stop control", () => {
+describe("locateStopControl by the stop icon", () => {
   beforeEach(loadAskInputFixture);
 
-  it("reads the stop control as an answer in progress", () => {
+  // A page in another language translates the stop control's label; the
+  // icon it shares only with `Stop dictation` is what shows an answer in
+  // progress.
+  it("finds the input bar's stop icon under a translated label", () => {
+    replaceSubmitButtonWith(iconButton("Остановить ответ (Esc)"));
+
+    expect(runInPage(locateStopControl, "icon")).toEqual(anyPoint);
+  });
+
+  it("finds the stop control under its own label too", () => {
     showStopControl();
 
-    expect(runInPage(extractAgentStatus)).toMatchObject({
-      status: "working",
-      hasStopButton: true,
-    });
+    expect(runInPage(locateStopControl, "icon")).toEqual(anyPoint);
+  });
+
+  it("finds nothing when the input bar shows Submit", () => {
+    expect(runInPage(locateStopControl, "icon")).toBeNull();
   });
 
   it.each([
     ["an Expand pane-style button with an SVG rect", RECT_ICON_BUTTON],
     ["the Stop dictation button", iconButton("Stop dictation")],
-    ["the read-aloud player's Stop button", iconButton("Stop")],
-  ])("never reads %s as the stop control", (_case, markup) => {
+  ])("never takes %s for the stop icon", (_case, markup) => {
     replaceSubmitButtonWith(markup);
     for (const button of document.querySelectorAll("button")) {
       markVisible(button);
     }
 
-    expect(runInPage(extractAgentStatus).hasStopButton).toBe(false);
+    expect(runInPage(locateStopControl, "icon")).toBeNull();
+  });
+
+  it("never takes a stop icon far from the input bar", () => {
+    document.body.innerHTML = `<main><div>${iconButton("Остановить")}</div></main>`;
+
+    expect(runInPage(locateStopControl, "icon")).toBeNull();
+  });
+
+  it("is not the label search: a translated label is not the stop control", () => {
+    replaceSubmitButtonWith(iconButton("Остановить ответ (Esc)"));
+
+    expect(runInPage(locateStopControl, "label")).toBeNull();
+    expect(runInPage(locateStopControl)).toBeNull();
   });
 });
 
@@ -676,22 +728,18 @@ function removeTurn4(): void {
   answerBlocks().at(-1)?.remove();
 }
 
-describe("extractAgentStatus reads the latest turn's answer", () => {
+describe("readLatestAnswer", () => {
   it("reads a one-word answer as a completed answer", () => {
     document.body.innerHTML = ONE_WORD_THREAD;
 
-    expect(runInPage(extractAgentStatus)).toMatchObject({
-      status: "completed",
-      response: "Paris",
-      hasStopButton: false,
-    });
+    expect(runInPage(readLatestAnswer)).toBe("Paris");
   });
 
   it("keeps an answer that starts with a UI label's word", () => {
     document.body.innerHTML = ONE_WORD_THREAD;
     latestAnswerRoot().innerHTML = "<p>Search results show three vendors.</p>";
 
-    expect(runInPage(extractAgentStatus).response).toBe(
+    expect(runInPage(readLatestAnswer)).toBe(
       "Search results show three vendors.",
     );
   });
@@ -699,16 +747,13 @@ describe("extractAgentStatus reads the latest turn's answer", () => {
   it("returns every paragraph of a long answer, headings included, citation chips left out", () => {
     document.body.innerHTML = SEVERAL_TURNS_THREAD;
 
-    expect(runInPage(extractAgentStatus)).toMatchObject({
-      status: "completed",
-      response: TURN_4_ANSWER,
-    });
+    expect(runInPage(readLatestAnswer)).toBe(TURN_4_ANSWER);
   });
 
   it("returns only the latest turn's answer in a thread of several turns", () => {
     document.body.innerHTML = SEVERAL_TURNS_THREAD;
 
-    const { response } = runInPage(extractAgentStatus);
+    const response = runInPage(readLatestAnswer);
 
     expect(response).toContain(parts(4, 1));
     expect(response).not.toContain("Answer 3");
@@ -719,17 +764,14 @@ describe("extractAgentStatus reads the latest turn's answer", () => {
     document.body.innerHTML = SEVERAL_TURNS_THREAD;
     removeTurn4();
 
-    expect(runInPage(extractAgentStatus).response).toBe(TURN_3_ANSWER);
+    expect(runInPage(readLatestAnswer)).toBe(TURN_3_ANSWER);
   });
 
   it("never returns an earlier turn's answer while the latest turn has none yet", () => {
     document.body.innerHTML = SEVERAL_TURNS_THREAD;
     answerBlocks().at(-1)?.remove();
 
-    const result = runInPage(extractAgentStatus);
-
-    expect(result.status).not.toBe("completed");
-    expect(result.response).toBe("");
+    expect(runInPage(readLatestAnswer)).toBe("");
   });
 
   it("never cuts a long answer", () => {
@@ -737,7 +779,7 @@ describe("extractAgentStatus reads the latest turn's answer", () => {
     const long = "word ".repeat(5000).trim();
     latestAnswerRoot().innerHTML = `<p>${long}</p>`;
 
-    expect(runInPage(extractAgentStatus).response).toBe(long);
+    expect(runInPage(readLatestAnswer)).toBe(long);
   });
 
   it("reads a code block's code, and not its caption or copy button", () => {
@@ -745,7 +787,7 @@ describe("extractAgentStatus reads the latest turn's answer", () => {
     // A code block as the live page renders one, trimmed to structure.
     latestAnswerRoot().innerHTML = `<p>Run this:</p><div><pre><figure><figcaption><span>text</span><div><button aria-label="Copy code" type="button"></button></div></figcaption><span><code>const a = 1;\n  const b = 2;\n</code></span></figure></pre></div>`;
 
-    expect(runInPage(extractAgentStatus).response).toBe(
+    expect(runInPage(readLatestAnswer)).toBe(
       "Run this:\n\nconst a = 1;\n  const b = 2;",
     );
   });
@@ -754,7 +796,7 @@ describe("extractAgentStatus reads the latest turn's answer", () => {
     document.body.innerHTML = ONE_WORD_THREAD;
     latestAnswerRoot().innerHTML = `<p>Steps:</p><ol><li><p>Open it.</p></li><li><p>Read it.</p></li></ol>`;
 
-    expect(runInPage(extractAgentStatus).response).toBe(
+    expect(runInPage(readLatestAnswer)).toBe(
       "Steps:\n\n1. Open it.\n\n2. Read it.",
     );
   });
@@ -763,7 +805,7 @@ describe("extractAgentStatus reads the latest turn's answer", () => {
     document.body.innerHTML = ONE_WORD_THREAD;
     latestAnswerRoot().innerHTML = `<table><thead><tr><th>City</th><th>Country</th></tr></thead><tbody><tr><td>Paris</td><td>France</td></tr></tbody></table>`;
 
-    expect(runInPage(extractAgentStatus).response).toBe(
+    expect(runInPage(readLatestAnswer)).toBe(
       "City | Country\n\nParis | France",
     );
   });
@@ -777,59 +819,7 @@ describe("extractAgentStatus reads the latest turn's answer", () => {
       </main>
       <div>Ask a follow-up</div>`;
 
-    expect(runInPage(extractAgentStatus)).toMatchObject({
-      status: "completed",
-      response: "Rome.",
-    });
-  });
-});
-
-// A page in another language: Perplexity translates the stop control's
-// label, so its icon, which only `Stop dictation` shares in the input bar,
-// is what keeps an answer in progress from reading as complete.
-describe("extractAgentStatus on a page in another language", () => {
-  /** The one-word thread, its input bar's placeholder in Russian. */
-  function loadRussianThread(): void {
-    document.body.innerHTML = ONE_WORD_THREAD;
-    const placeholder = [...document.querySelectorAll("div")].find(
-      (div) => div.textContent === "Ask a follow-up",
-    ) as HTMLElement;
-    placeholder.textContent = "Задайте уточняющий вопрос";
-  }
-
-  it("reads the input bar's stop icon under a translated label as an answer in progress, never complete", () => {
-    loadRussianThread();
-    latestAnswerRoot().innerHTML = "<p>Столица Франции —</p>";
-    replaceSubmitButtonWith(iconButton("Остановить ответ (Esc)"));
-
-    expect(runInPage(extractAgentStatus)).toMatchObject({
-      status: "working",
-      response: "",
-    });
-  });
-
-  it("still reads a complete answer while the input bar shows Stop dictation", () => {
-    document.body.innerHTML = ONE_WORD_THREAD;
-    (
-      document.querySelector('button[aria-label="Dictation"]') as HTMLElement
-    ).outerHTML = iconButton("Stop dictation");
-
-    expect(runInPage(extractAgentStatus)).toMatchObject({
-      status: "completed",
-      response: "Paris",
-    });
-  });
-
-  it("still reads a complete answer beside the read-aloud player's stop icon", () => {
-    document.body.innerHTML = ONE_WORD_THREAD;
-    answerBlocks()
-      .at(-1)
-      ?.insertAdjacentHTML("beforeend", iconButton("Остановить"));
-
-    expect(runInPage(extractAgentStatus)).toMatchObject({
-      status: "completed",
-      response: "Paris",
-    });
+    expect(runInPage(readLatestAnswer)).toBe("Rome.");
   });
 });
 
@@ -879,6 +869,88 @@ describe("readThreadState on a thread", () => {
     document.body.innerHTML = `<div data-workflow-entry="">q</div><div data-workflow-entry="x">q</div>`;
 
     expect(runInPage(readThreadState).latestTurn).toBeNull();
+  });
+});
+
+// Which turns' question blocks hold the question the ask sent: the page's own
+// proof of its submit, since a block that shows a turn does not say whose
+// question it holds.
+describe("readQuestionTurns on a thread", () => {
+  it("reads the turn whose question block holds the question", () => {
+    document.body.innerHTML = SEVERAL_TURNS_THREAD;
+
+    expect(runInPage(readQuestionTurns, "Invented question 3?")).toEqual([3]);
+    expect(runInPage(readQuestionTurns, "Invented question 4?")).toEqual([4]);
+  });
+
+  it("reads every turn that holds it, lowest first, when the question was asked before", () => {
+    document.body.innerHTML = SEVERAL_TURNS_THREAD;
+    const repeated = document.querySelector("[data-workflow-entry='4'] p");
+    if (repeated) repeated.textContent = "Invented question 3?";
+
+    expect(runInPage(readQuestionTurns, "Invented question 3?")).toEqual([
+      3, 4,
+    ]);
+  });
+
+  it("reads an earlier question that holds the start of the question too: the limit of the match", () => {
+    document.body.innerHTML = `<div data-workflow-entry="3"><div data-renderer="lm"><p>What is X and Y?</p></div></div><div data-workflow-entry="4"><div data-renderer="lm"><p>Something else</p></div></div>`;
+
+    expect(runInPage(readQuestionTurns, "What is X?")).toEqual([3]);
+    expect(runInPage(readQuestionTurns, "What is")).toEqual([3]);
+    expect(runInPage(readQuestionTurns, "What is X and Z?")).toEqual([]);
+  });
+
+  it("reads no turn while the new question's block is not on the page", () => {
+    document.body.innerHTML = SEVERAL_TURNS_THREAD;
+
+    expect(runInPage(readQuestionTurns, "A question not asked yet")).toEqual(
+      [],
+    );
+  });
+
+  it("finds the question through the markup, case and punctuation the page renders it with", () => {
+    document.body.innerHTML = `<div data-workflow-entry="6"><span>Sep 1, 9:00 AM</span><div data-renderer="lm"><p>What is <strong>the capital</strong> of <code>France</code>?</p></div></div>`;
+
+    expect(
+      runInPage(readQuestionTurns, "what is *the capital* of `France`"),
+    ).toEqual([6]);
+  });
+
+  it("does not read the date the block shows for the question", () => {
+    document.body.innerHTML = `<div data-workflow-entry="6"><span>Sep 1, 9:00 AM</span><div data-renderer="lm"><p>Why is the sky blue?</p></div></div>`;
+
+    expect(runInPage(readQuestionTurns, "Sep 9")).toEqual([]);
+    expect(runInPage(readQuestionTurns, "9")).toEqual([]);
+  });
+
+  it("finds a long question by its start", () => {
+    const question = `Summarise ${"the history of Rome and its empire ".repeat(40)}`;
+    document.body.innerHTML = `<div data-workflow-entry="2"><p>${question}</p></div>`;
+
+    expect(runInPage(readQuestionTurns, question.slice(0, 500))).toEqual([2]);
+  });
+
+  it("ignores a block whose index is not a number, and reads none on a page without turns", () => {
+    document.body.innerHTML = `<div data-workflow-entry="x">the question</div>`;
+    expect(runInPage(readQuestionTurns, "the question")).toEqual([]);
+
+    loadAskInputFixture();
+    expect(runInPage(readQuestionTurns, "the question")).toEqual([]);
+  });
+
+  it("locates nothing with a question that holds no letter or digit", () => {
+    document.body.innerHTML = `<div data-workflow-entry="1">?!</div>`;
+
+    expect(runInPage(readQuestionTurns, "?!")).toEqual([]);
+  });
+
+  it("receives the question as data: quotes and script text in it are inert", () => {
+    document.body.innerHTML = `<div data-workflow-entry="1">it's "fine"</div>`;
+    const hostile = `"); document.body.innerHTML = "x"; ("`;
+
+    expect(runInPage(readQuestionTurns, hostile)).toEqual([]);
+    expect(document.body.innerHTML).toContain("fine");
   });
 });
 
