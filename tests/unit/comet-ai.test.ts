@@ -5,48 +5,8 @@ import { describe, expect, it } from "vitest";
 import { CometAI } from "../../src/comet-ai.js";
 import { FakeCdpClient } from "./fakes/fake-cdp-client.js";
 
-describe("CometAI.getAgentStatus", () => {
-  it("returns the parsed shape from a canned safeEvaluate result", async () => {
-    const fake = new FakeCdpClient();
-    fake.setEvaluateResult({
-      status: "completed",
-      steps: ["Searching for X", "Reading results"],
-      currentStep: "Reading results",
-      response: "the agent's final answer",
-      hasStopButton: false,
-    });
-
-    const ai = new CometAI(fake);
-    const status = await ai.getAgentStatus();
-
-    expect(status.status).toBe("completed");
-    expect(status.steps).toEqual(["Searching for X", "Reading results"]);
-    expect(status.currentStep).toBe("Reading results");
-    expect(status.response).toBe("the agent's final answer");
-    expect(status.hasStopButton).toBe(false);
-    expect(status.agentBrowsingUrl).toBe("");
-  });
-
-  it("reports the status the page script reads, however often the same text is read", async () => {
-    const fake = new FakeCdpClient();
-    fake.setEvaluateResult({
-      status: "working",
-      steps: [],
-      currentStep: "",
-      response: "A".repeat(60),
-      hasStopButton: false,
-    });
-    const ai = new CometAI(fake);
-
-    const statuses = [];
-    for (let read = 0; read < 4; read++) {
-      statuses.push((await ai.getAgentStatus()).status);
-    }
-
-    expect(statuses).toEqual(["working", "working", "working", "working"]);
-  });
-
-  it("includes the agent-browsing URL when listTabsCategorized returns one", async () => {
+describe("CometAI.agentBrowsingUrl", () => {
+  it("is the address of the tab the agent is browsing", async () => {
     const fake = new FakeCdpClient();
     fake.setTabsResult({
       agentBrowsing: {
@@ -56,40 +16,31 @@ describe("CometAI.getAgentStatus", () => {
         url: "https://amazon.com/alm/storefront",
       },
     });
-    fake.setEvaluateResult({
-      status: "working",
-      steps: [],
-      currentStep: "",
-      response: "",
-      hasStopButton: true,
-    });
 
-    const ai = new CometAI(fake);
-    const status = await ai.getAgentStatus();
-
-    expect(status.agentBrowsingUrl).toBe("https://amazon.com/alm/storefront");
-    expect(status.status).toBe("working");
-    expect(status.hasStopButton).toBe(true);
+    expect(await new CometAI(fake).agentBrowsingUrl()).toBe(
+      "https://amazon.com/alm/storefront",
+    );
   });
 
-  it("ships a stringified IIFE of extractAgentStatus to safeEvaluate", async () => {
+  it("is empty when the agent browses no tab", async () => {
+    expect(await new CometAI(new FakeCdpClient()).agentBrowsingUrl()).toBe("");
+  });
+
+  it("is empty when the tabs cannot be listed", async () => {
     const fake = new FakeCdpClient();
-    fake.setEvaluateResult({
-      status: "idle",
-      steps: [],
-      currentStep: "",
-      response: "",
-      hasStopButton: false,
-    });
+    fake.listTabsCategorized = async () => {
+      throw new Error("not connected");
+    };
 
-    const ai = new CometAI(fake);
-    await ai.getAgentStatus();
+    expect(await new CometAI(fake).agentBrowsingUrl()).toBe("");
+  });
 
-    expect(fake.evaluateCalls.length).toBe(1);
-    const js = fake.evaluateCalls[0];
-    expect(js).toContain("function extractAgentStatus");
-    // Wrapped as an immediately-invoked function expression
-    expect(js.endsWith(")()")).toBe(true);
+  it("evaluates nothing in the page", async () => {
+    const fake = new FakeCdpClient();
+
+    await new CometAI(fake).agentBrowsingUrl();
+
+    expect(fake.evaluateCalls).toEqual([]);
   });
 });
 

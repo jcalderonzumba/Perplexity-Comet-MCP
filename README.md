@@ -426,7 +426,7 @@ File uploaded successfully: /home/user/doc.pdf
 | `comet-launch.ts`, `host-platform.ts` | Finding and launching Comet on its debug port on macOS, Linux, Windows and WSL, and what the host is (WSL detection, the fetch that reaches Windows from WSL). Nothing in the server can stop or restart Comet |
 | `core/` | The tool core both servers share: the tool table (`core/tools.ts`) and the one reply type (`core/tool-reply.ts`), `comet_connect` (`core/connect.ts` over the launch port in `core/comet-launch.ts`), `comet_screenshot`, `comet_ask`, `comet_poll` and `comet_stop`, with typing and submitting the prompt in `core/ask-send.ts`, when an answer is complete and the ask's own in `core/answer-watch.ts`, stopping it in `core/ask-stop.ts`, and the tab they use in `core/ask-tab.ts` and `core/perplexity-tab.ts`, `comet_mode`, `comet_tabs` (`core/tabs.ts`: which tabs there are, and closing only by the record of the tabs the server opened), and `comet_upload` (`core/upload.ts`: the checks in one order, then a file attached through the protocol) |
 | `perplexity-pages.ts` | Perplexity's origin and home page, the one rule that says which tab is Perplexity's main page, and which pages are Perplexity's site |
-| `comet-ai.ts` | Reading the answer and its status from the page |
+| `cdp-ask-port.ts`, `comet-ai.ts` | The ask's view of the page: the answer and its status read with page scripts (`page-scripts.ts`), the stop control found once for the status and for stopping, and the address of the tab the agent is browsing |
 | `types.ts` | TypeScript interfaces for the connection state and CDP types |
 
 ---

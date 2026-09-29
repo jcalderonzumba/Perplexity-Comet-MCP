@@ -68,51 +68,39 @@ export function readThreadState(): ThreadState {
   };
 }
 
-export interface AgentStatusResult {
+/**
+ * What the port has read of the page before the status script runs: the
+ * input bar's stop control (`locateStopControl` by its label and by its
+ * icon) and whether the latest turn has an answer (`readLatestAnswer`).
+ * Page scripts cannot call one another, so the port hands each one's
+ * outcome to the next as data (a type, not an interface, so that it is
+ * a `PageArgument`).
+ */
+export type AnswerSignals = {
+  /** The input bar shows the stop control, by its label. */
+  stopControlShown: boolean;
+  /** The input bar shows the stop icon under any label but Stop dictation. */
+  stopIconShown: boolean;
+  /** The latest turn has an answer. */
+  hasAnswer: boolean;
+};
+
+export interface AnswerStatus {
   status: "idle" | "working" | "completed";
   steps: string[];
   currentStep: string;
-  response: string;
-  hasStopButton: boolean;
 }
 
-export function extractAgentStatus(): AgentStatusResult {
+/**
+ * The answer's status from the page's text and the signals the port read
+ * first. A stop control, or on a page in another language its icon, means
+ * an answer in progress, never a complete one.
+ */
+export function readAnswerStatus(signals: AnswerSignals): AnswerStatus {
   const body = document.body.innerText;
-
-  // The input bar's buttons, up to the levels above it `locateStopControl`
-  // searches, so the stop control is found as it finds it.
-  const inputBarButtons = (): HTMLButtonElement[] => {
-    const levelsUp = 6;
-    const askInput =
-      document.querySelector<HTMLElement>("#ask-input") ??
-      document.querySelector<HTMLElement>(
-        '[contenteditable="true"][role="textbox"]',
-      ) ??
-      document.querySelector<HTMLElement>("textarea");
-    let container = askInput?.parentElement ?? null;
-    for (let level = 1; container?.parentElement && level < levelsUp; level++) {
-      container = container.parentElement;
-    }
-    return container ? [...container.querySelectorAll("button")] : [];
-  };
-  const labelOf = (button: Element): string =>
-    (button.getAttribute("aria-label") ?? "").replace(/\s+/g, " ").trim();
-  const showsStopIcon = (button: Element): boolean =>
-    [...button.querySelectorAll("use")].some(
-      (use) =>
-        (use.getAttribute("href") ?? use.getAttribute("xlink:href")) ===
-        "#pplx-icon-player-stop-filled",
-    );
-  const nearInputBar = inputBarButtons();
-  const hasActiveStopButton = nearInputBar.some(
-    (button) => labelOf(button) === "Stop response (Esc)",
-  );
-  // On a page in another language the stop control's label is translated,
-  // so its filled stop icon, which in the input bar only `Stop dictation`
-  // shares, reads as an answer in progress too: never as complete.
-  const hasStopIconBesideDictation = nearInputBar.some(
-    (button) => showsStopIcon(button) && labelOf(button) !== "Stop dictation",
-  );
+  const hasActiveStopButton = signals.stopControlShown;
+  const hasStopIconBesideDictation = signals.stopIconShown;
+  const hasAnswer = signals.hasAnswer;
 
   // More comprehensive loading detection
   const hasLoadingSpinner =
@@ -153,6 +141,79 @@ export function extractAgentStatus(): AgentStatusResult {
     body.includes("Задайте уточняющий вопрос") || // ru: input placeholder
     body.includes("Последующие вопросы"); // ru: section heading
 
+  const workingPatterns = [
+    "Working",
+    "Searching",
+    "Reviewing sources",
+    "Preparing to assist",
+    "Clicking",
+    "Typing:",
+    "Navigating to",
+    "Reading",
+    "Analyzing",
+    "Browsing",
+    "Looking at",
+    "Checking",
+    "Opening",
+    "Scrolling",
+    "Waiting",
+    "Processing",
+  ];
+  const hasWorkingText = workingPatterns.some((p) => body.includes(p));
+
+  // Determine status with improved logic
+  let status: "idle" | "working" | "completed" = "idle";
+
+  // FIRST: Check if actively working (stop button is the strongest indicator)
+  if (hasActiveStopButton || hasStopIconBesideDictation) {
+    status = "working";
+  } else if (hasLoadingSpinner || hasThinkingIndicator) {
+    status = "working";
+  }
+  // SECOND: Check completion indicators BEFORE working text
+  // (because completed pages still show historical step text)
+  else if (hasStepsCompleted || hasFinishedMarker) {
+    status = "completed";
+  } else if (hasAskFollowUp && hasAnswer) {
+    status = "completed";
+  } else if (hasSourcesIndicator && hasAnswer && !hasActiveStopButton) {
+    status = "completed";
+  } else if (hasReviewedSources && !hasActiveStopButton) {
+    status = "completed";
+  }
+  // THIRD: Fall back to working text patterns (only if no completion signals)
+  else if (hasWorkingText) {
+    status = "working";
+  }
+
+  // Extract steps
+  const steps: string[] = [];
+  const stepPatterns = [
+    /Preparing to assist[^\n]*/g,
+    /Clicking[^\n]*/g,
+    /Typing:[^\n]*/g,
+    /Navigating[^\n]*/g,
+    /Reading[^\n]*/g,
+    /Searching[^\n]*/g,
+    /Found[^\n]*/g,
+  ];
+  for (const pattern of stepPatterns) {
+    const matches = body.match(pattern);
+    if (matches) steps.push(...matches.map((s) => s.trim().substring(0, 100)));
+  }
+
+  return {
+    status,
+    steps: [...new Set(steps)].slice(-5),
+    currentStep: steps.length > 0 ? steps[steps.length - 1] : "",
+  };
+}
+
+/**
+ * The latest turn's answer, whole, or an empty string when it has none. The
+ * answer is never cut and never an earlier turn's.
+ */
+export function readLatestAnswer(): string {
   // The latest turn's answer. A thread is a flat list of blocks: each
   // question in a `data-workflow-entry` block, its answer in the
   // `data-workflow-final-text` block after it, as an element of class
@@ -271,83 +332,10 @@ export function extractAgentStatus(): AgentStatusResult {
     return latest ? outermostProse(latest) : [];
   };
 
-  const answer = latestAnswerRoots()
+  return latestAnswerRoots()
     .map(readAnswerText)
     .filter((text) => text !== "")
     .join("\n\n");
-  const hasAnswer = answer !== "";
-
-  const workingPatterns = [
-    "Working",
-    "Searching",
-    "Reviewing sources",
-    "Preparing to assist",
-    "Clicking",
-    "Typing:",
-    "Navigating to",
-    "Reading",
-    "Analyzing",
-    "Browsing",
-    "Looking at",
-    "Checking",
-    "Opening",
-    "Scrolling",
-    "Waiting",
-    "Processing",
-  ];
-  const hasWorkingText = workingPatterns.some((p) => body.includes(p));
-
-  // Determine status with improved logic
-  let status: "idle" | "working" | "completed" = "idle";
-
-  // FIRST: Check if actively working (stop button is the strongest indicator)
-  if (hasActiveStopButton || hasStopIconBesideDictation) {
-    status = "working";
-  } else if (hasLoadingSpinner || hasThinkingIndicator) {
-    status = "working";
-  }
-  // SECOND: Check completion indicators BEFORE working text
-  // (because completed pages still show historical step text)
-  else if (hasStepsCompleted || hasFinishedMarker) {
-    status = "completed";
-  } else if (hasAskFollowUp && hasAnswer) {
-    status = "completed";
-  } else if (hasSourcesIndicator && hasAnswer && !hasActiveStopButton) {
-    status = "completed";
-  } else if (hasReviewedSources && !hasActiveStopButton) {
-    status = "completed";
-  }
-  // THIRD: Fall back to working text patterns (only if no completion signals)
-  else if (hasWorkingText) {
-    status = "working";
-  }
-
-  // Extract steps
-  const steps: string[] = [];
-  const stepPatterns = [
-    /Preparing to assist[^\n]*/g,
-    /Clicking[^\n]*/g,
-    /Typing:[^\n]*/g,
-    /Navigating[^\n]*/g,
-    /Reading[^\n]*/g,
-    /Searching[^\n]*/g,
-    /Found[^\n]*/g,
-  ];
-  for (const pattern of stepPatterns) {
-    const matches = body.match(pattern);
-    if (matches) steps.push(...matches.map((s) => s.trim().substring(0, 100)));
-  }
-
-  // The answer whole, with no length limit: an answer is never cut.
-  const response = status === "completed" ? answer : "";
-
-  return {
-    status,
-    steps: [...new Set(steps)].slice(-5),
-    currentStep: steps.length > 0 ? steps[steps.length - 1] : "",
-    response,
-    hasStopButton: hasActiveStopButton,
-  };
 }
 
 // The mode control: Perplexity's input bar shows the current mode on a
@@ -526,20 +514,42 @@ export function locateSubmitButton(): PagePoint | null {
 // input bar script, as the page loaded it on 2026-09-26). Its filled stop
 // icon is shared by the input bar's "Stop dictation" button and by the
 // answer's read-aloud "Stop", so the label decides, compared exactly and in
-// English, as the mode menu's labels are. `extractAgentStatus` finds it with
-// the same search, written inside it; it also reads that icon under any
-// other label but `Stop dictation`, near the input bar, as an answer in
-// progress, since a page in another language translates the label. Only a
-// click needs the exact control.
+// English, as the mode menu's labels are. A page in another language
+// translates the label, so the status read also asks for the icon under any
+// label but `Stop dictation`, near the input bar, and reads it as an answer
+// in progress. Only a click needs the exact control, found by its label.
+
+/** How `locateStopControl` recognises the control: by its label, or its icon. */
+export type StopControlMatch = "label" | "icon";
 
 /**
  * The centre of the input bar's stop control, looked for a few levels up
- * from the input bar, or null when the input bar shows none.
+ * from the input bar, or null when the input bar shows none. By its label
+ * (the default) it is the button labelled "Stop response (Esc)"; by its icon
+ * it is any button there showing the filled stop icon under a label other
+ * than "Stop dictation". This is the one search of the input bar.
  */
-export function locateStopControl(): PagePoint | null {
+export function locateStopControl(
+  match: StopControlMatch = "label",
+): PagePoint | null {
   const findStopControl = (): HTMLButtonElement | null => {
     const stopLabel = "Stop response (Esc)";
+    const dictationLabel = "Stop dictation";
+    const stopIcon = "#pplx-icon-player-stop-filled";
     const levelsUp = 6;
+    const labelOf = (button: Element): string =>
+      (button.getAttribute("aria-label") ?? "").replace(/\s+/g, " ").trim();
+    const showsStopIcon = (button: Element): boolean =>
+      [...button.querySelectorAll("use")].some(
+        (use) =>
+          (use.getAttribute("href") ?? use.getAttribute("xlink:href")) ===
+          stopIcon,
+      );
+    const isStopControl = (button: Element): boolean =>
+      match === "icon"
+        ? showsStopIcon(button) && labelOf(button) !== dictationLabel
+        : labelOf(button) === stopLabel;
+
     const askInput =
       document.querySelector<HTMLElement>("#ask-input") ??
       document.querySelector<HTMLElement>(
@@ -549,13 +559,8 @@ export function locateStopControl(): PagePoint | null {
     let container = askInput?.parentElement ?? null;
     for (let level = 0; container && level < levelsUp; level++) {
       const stop = [
-        ...container.querySelectorAll<HTMLButtonElement>("button[aria-label]"),
-      ].find(
-        (button) =>
-          (button.getAttribute("aria-label") ?? "")
-            .replace(/\s+/g, " ")
-            .trim() === stopLabel,
-      );
+        ...container.querySelectorAll<HTMLButtonElement>("button"),
+      ].find(isStopControl);
       if (stop) return stop;
       container = container.parentElement;
     }

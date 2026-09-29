@@ -40,7 +40,7 @@ function deps(client: CdpToolsClient, launch: FakeCometLaunch): CdpToolsDeps {
   return {
     client,
     launch,
-    comet: { getAgentStatus: vi.fn() },
+    comet: { agentBrowsingUrl: vi.fn() },
     quotePage: (text) => `<<${text}>>`,
     port: CONFIGURED_PORT,
   };

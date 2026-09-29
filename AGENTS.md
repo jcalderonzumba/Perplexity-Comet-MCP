@@ -83,7 +83,7 @@ TypeScript (strict, ES2022, NodeNext) compiled by `tsc` to `dist/`, one npm pack
 | `src/cdp-tools.ts` | The composition: builds the tool table over the CDP client, the Comet module and the UNTRUSTED wrapper, and binds each tool to its core |
 | `src/cdp-client.ts` | CDP connection and reconnect, the tabs' targets, screenshots, attaching a file to an input, Windows and WSL |
 | `src/comet-launch.ts`, `src/host-platform.ts` | Finding and launching Comet on its debug port, per platform (macOS and Linux, Windows, WSL) behind the port of `src/core/comet-launch.ts`, which has no way to kill; the host (WSL detection, the fetch that reaches Windows, PowerShell quoting) |
-| `src/comet-ai.ts` | Reading the answer and its status from the page; the ask core decides when an answer is complete (`src/core/answer-watch.ts`), sends prompts (`src/core/ask-send.ts`) and stops answers (`src/core/ask-stop.ts`) |
+| `src/cdp-ask-port.ts`, `src/comet-ai.ts` | The ask port composes the status from three page scripts (the stop control, `readLatestAnswer`, `readAnswerStatus`); the Comet module reads the address of the tab the agent is browsing; the ask core decides when an answer is complete (`src/core/answer-watch.ts`), sends prompts (`src/core/ask-send.ts`) and stops answers (`src/core/ask-stop.ts`) |
 | `src/page-scripts.ts` | JavaScript run in the page, as tested functions |
 | `src/upload-validator.ts` | Allowlists for paths, tab ids, domains and selectors |
 | `tests/unit/`, `tests/gates/` | Unit tests; the gate scripts' tests |

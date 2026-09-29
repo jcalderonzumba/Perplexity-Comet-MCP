@@ -65,7 +65,7 @@ describe("createCdpToolTable's tab record", () => {
   it("gives the mode tool and the ask core the one tab choice it built, and the ask that mode tool", () => {
     createCdpToolTable({
       client: {} as never,
-      comet: { getAgentStatus: vi.fn() },
+      comet: { agentBrowsingUrl: vi.fn() },
       launch: new FakeCometLaunch(),
       quotePage: (text) => text,
       port: 9444,
@@ -95,7 +95,7 @@ describe("createCdpToolTable's tab record", () => {
           url: "https://www.perplexity.ai/",
         }),
       } as never,
-      comet: { getAgentStatus: vi.fn() },
+      comet: { agentBrowsingUrl: vi.fn() },
       launch,
       quotePage: (text) => text,
       port: 9444,

@@ -23,9 +23,12 @@ import type { BrowserTarget, PerplexityTab } from "./core/perplexity-tab.js";
 import {
   locateStopControl,
   locateSubmitButton,
+  type PageArgument,
   type PagePoint,
   pageScriptExpression,
+  readAnswerStatus,
   readAskInput,
+  readLatestAnswer,
   readThreadState,
   selectAskInput,
   type ThreadState,
@@ -54,7 +57,8 @@ export interface AskPortClient {
 
 /** The part of the Comet module the ask reads. */
 export interface AskPortComet {
-  getAgentStatus(): Promise<AskStatus>;
+  /** The address of the tab the agent is browsing, or empty. */
+  agentBrowsingUrl(): Promise<string>;
 }
 
 class CdpAskPort implements AskPort {
@@ -93,8 +97,32 @@ class CdpAskPort implements AskPort {
     return this.runPageScript(readThreadState);
   }
 
-  readStatus(): Promise<AskStatus> {
-    return this.comet.getAgentStatus();
+  /**
+   * The answer's status, in four page reads. The stop control is read first
+   * and the status last: an answer read after the stop control shows none
+   * cannot be a partial one under a status that reads complete.
+   */
+  async readStatus(): Promise<AskStatus> {
+    const agentBrowsingUrl = await this.comet.agentBrowsingUrl();
+    const stopControl = await this.locateStopControl();
+    const stopIconShown = await this.locateStopIcon();
+    const answer = await this.runPageScript(readLatestAnswer);
+    const { status, steps, currentStep } = await this.runPageScript(
+      readAnswerStatus,
+      {
+        stopControlShown: stopControl !== null,
+        stopIconShown: stopIconShown !== null,
+        hasAnswer: answer !== "",
+      },
+    );
+    return {
+      status,
+      steps,
+      currentStep,
+      response: status === "completed" ? answer : "",
+      hasStopButton: stopControl !== null,
+      agentBrowsingUrl,
+    };
   }
 
   selectAskInput(): Promise<boolean> {
@@ -110,7 +138,11 @@ class CdpAskPort implements AskPort {
   }
 
   locateStopControl(): Promise<PagePoint | null> {
-    return this.runPageScript(locateStopControl);
+    return this.runPageScript(locateStopControl, "label");
+  }
+
+  private locateStopIcon(): Promise<PagePoint | null> {
+    return this.runPageScript(locateStopControl, "icon");
   }
 
   insertText(text: string): Promise<void> {
@@ -141,9 +173,12 @@ class CdpAskPort implements AskPort {
     return new Promise((resolve) => setTimeout(resolve, ms));
   }
 
-  private async runPageScript<R>(script: () => R): Promise<R> {
+  private async runPageScript<A extends PageArgument[], R>(
+    script: (...args: A) => R,
+    ...args: A
+  ): Promise<R> {
     const response = await this.client.safeEvaluate(
-      pageScriptExpression(script),
+      pageScriptExpression(script, ...args),
     );
     if (response.exceptionDetails) {
       const { exception, text } = response.exceptionDetails;

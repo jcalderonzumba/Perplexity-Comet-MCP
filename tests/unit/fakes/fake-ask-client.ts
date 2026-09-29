@@ -12,7 +12,6 @@
 import type { AskPortClient, AskPortComet } from "../../../src/cdp-ask-port.js";
 import type { TrustedKey } from "../../../src/cdp-client.js";
 import type { TabClient } from "../../../src/cdp-perplexity-tab.js";
-import type { AskStatus } from "../../../src/core/ask.js";
 import type { BrowserTarget } from "../../../src/core/perplexity-tab.js";
 import type { PagePoint } from "../../../src/page-scripts.js";
 import type { EvaluateResult } from "../../../src/types.js";
@@ -114,21 +113,13 @@ function failedInPage(description: string): EvaluateResult {
   };
 }
 
-export const WORKING_STATUS: AskStatus = {
-  status: "working",
-  steps: ["Searching"],
-  currentStep: "Searching",
-  response: "Paris is",
-  hasStopButton: true,
-  agentBrowsingUrl: "",
-};
-
 export class FakeAskComet implements AskPortComet {
   public readonly calls: string[] = [];
-  public status: AskStatus = WORKING_STATUS;
+  /** The address of the tab the agent is browsing. */
+  public url = "";
 
-  async getAgentStatus(): Promise<AskStatus> {
-    this.calls.push("getAgentStatus");
-    return this.status;
+  async agentBrowsingUrl(): Promise<string> {
+    this.calls.push("agentBrowsingUrl");
+    return this.url;
   }
 }
