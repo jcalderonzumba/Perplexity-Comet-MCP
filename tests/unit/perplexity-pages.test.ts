@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   isPerplexityAddress,
   isPerplexityMainPage,
+  isPerplexitySite,
   PERPLEXITY_HOME,
   PERPLEXITY_ORIGIN,
 } from "../../src/perplexity-pages.js";
@@ -83,5 +84,30 @@ describe("isPerplexityAddress", () => {
     "not an address",
   ])("does not take %s for Perplexity's", (address) => {
     expect(isPerplexityAddress(address)).toBe(false);
+  });
+});
+
+describe("isPerplexitySite", () => {
+  it.each([
+    "https://www.perplexity.ai/",
+    "https://perplexity.ai/",
+    "http://perplexity.ai/x",
+    "https://www.perplexity.ai/sidecar?copilot=true",
+    "https://comet.perplexity.ai/anything",
+    "https://WWW.PERPLEXITY.AI:8443/",
+  ])("takes %s for a page of Perplexity's site", (address) => {
+    expect(isPerplexitySite(address)).toBe(true);
+  });
+
+  it.each([
+    "https://www.perplexity.ai.example/",
+    "https://notperplexity.ai/",
+    "https://news.example/perplexity.ai/story",
+    "https://news.example/?next=https://www.perplexity.ai/",
+    "about:blank",
+    "",
+    "not an address",
+  ])("does not take %s, which is only near it, for Perplexity's", (address) => {
+    expect(isPerplexitySite(address)).toBe(false);
   });
 });

@@ -95,8 +95,8 @@ const STAR_COUNT =
 /** The first line of `comet_poll`'s reply. */
 const POLL_STATUS = /^Status: ([A-Z]+)\b/;
 
-/** `comet_tabs close`'s refusal to leave Comet with no browsing tab. */
-const ONLY_BROWSING_TAB = "Cannot close - this is the only browsing tab";
+/** `comet_tabs close`'s refusal of a tab the server did not open (principle 6). */
+const NOT_OPENED_BY_SERVER = "the server did not open it";
 
 /** An empty prompt's refusal. */
 const EMPTY_PROMPT_REFUSED = /^Error: prompt cannot be empty\b/;
@@ -290,23 +290,44 @@ export function wholeAnswer(reply) {
 }
 
 /**
+ * One tab of `comet_tabs`' listing.
+ * @typedef {{ host: string, address: string, openedByServer: boolean }} ListedTab
+ */
+
+/** A tab's two lines: its purpose, host and marks, then its address. */
+const LISTED_TAB = /^ *• [A-Z-]+: (\S+)([^\n]*)\n *URL: (.*)$/gm;
+
+/**
+ * The tabs `comet_tabs` lists, in order.
+ * @param {ToolReply} listing
+ * @returns {ListedTab[]}
+ */
+function listedTabs(listing) {
+  return [...replyText(listing).matchAll(LISTED_TAB)].map((match) => ({
+    host: match[1],
+    address: match[3],
+    openedByServer: match[2].includes("[OPENED BY SERVER]"),
+  }));
+}
+
+/**
  * The host names of the tabs `comet_tabs` lists, one per tab.
  * @param {ToolReply} listing
  */
 function listedHosts(listing) {
-  return [...replyText(listing).matchAll(/^\s*• [A-Z-]+: (\S+)/gm)].map(
-    (match) => match[1],
-  );
+  return listedTabs(listing).map((tab) => tab.host);
 }
 
 /**
- * The addresses of the tabs `comet_tabs` lists, one per tab.
+ * The addresses of the tabs `comet_tabs` lists that the server did not
+ * open, one per tab: the user's and the agent's. The server's own tab moves
+ * with every thread, so its address says nothing about a tab being kept.
  * @param {ToolReply} listing
  */
 function listedAddresses(listing) {
-  return [...replyText(listing).matchAll(/^\s*URL: (.*)$/gm)].map(
-    (match) => match[1],
-  );
+  return listedTabs(listing)
+    .filter((tab) => !tab.openedByServer)
+    .map((tab) => tab.address);
 }
 
 /**
@@ -422,26 +443,43 @@ export function pollAfterStop(reply) {
 }
 
 /**
+ * The host of the tab a `comet_tabs` reply names, on the line after its
+ * header that reads `<host> (<address>)`; undefined when it names none.
+ * @param {ToolReply} reply
+ */
+function namedHost(reply) {
+  return /^(\S+) \(/m.exec(replyText(reply))?.[1];
+}
+
+/**
  * [6.3]: `comet_tabs switch` switched to a tab on the site.
  * @param {ToolReply} reply
  * @param {string} site
  */
 export function switchedToSite(reply, site) {
-  const host = /^Switched to (\S+) \(/.exec(replyText(reply))?.[1];
-  return succeeded(reply) && host !== undefined && onSite(host, site);
+  const host = namedHost(reply);
+  return (
+    succeeded(reply) &&
+    replyText(reply).startsWith("Switched to tab: ") &&
+    host !== undefined &&
+    onSite(host, site)
+  );
 }
 
 /**
- * [6.4]: `comet_tabs close` closed the site's tab, or refused because it is
- * the only browsing tab (principle 6).
+ * [6.4]: `comet_tabs close` closed the site's tab, or refused because the
+ * server did not open it (principle 6: the agent's tab is not the server's
+ * to close).
  * @param {ToolReply} reply
  * @param {string} site
  */
 export function siteTabClosed(reply, site) {
   const said = replyText(reply);
-  if (!succeeded(reply)) return said.startsWith(ONLY_BROWSING_TAB);
-  const host = /^Closed (\S+)$/.exec(said.trim())?.[1];
-  return host !== undefined && onSite(host, site);
+  if (!succeeded(reply)) return said.includes(NOT_OPENED_BY_SERVER);
+  const host = namedHost(reply);
+  return (
+    said.startsWith("Closed tab: ") && host !== undefined && onSite(host, site)
+  );
 }
 
 /**

@@ -8,6 +8,7 @@ import {
   CometRunsWithoutPort,
   ensureCometOnPort,
 } from "./core/comet-launch.js";
+import { isBrowsingTab } from "./core/tabs.js";
 import { errorMessage } from "./error-message.js";
 import { IS_WINDOWS, IS_WSL, windowsFetch } from "./host-platform.js";
 import type { PagePoint } from "./page-scripts.js";
@@ -22,7 +23,6 @@ import type {
   EvaluateResult,
   NavigateResult,
   ScreenshotResult,
-  TabContext,
 } from "./types.js";
 import { validateSelector, validateUploadPath } from "./upload-validator.js";
 
@@ -435,9 +435,6 @@ export class CometCDPClient {
   private healthCheckCache: boolean = false;
   private readonly HEALTH_CHECK_CACHE_MS: number = 2000; // Cache health check for 2s
 
-  // Tab context registry for multi-tab workflow awareness
-  private tabRegistry: Map<string, TabContext> = new Map();
-
   // Page lifecycle tracking — events accumulated per frame for the current
   // document (loaderId). Used by waitForLifecycle() so screenshots and other
   // ops can confirm the renderer has actually painted before they run.
@@ -715,14 +712,13 @@ export class CometCDPClient {
   }
 
   /**
-   * List tabs with categorization
+   * Perplexity's main page and the page the agent is browsing, each a target
+   * or null. The agent's page is a browsing tab by the tab list's rule
+   * (`isBrowsingTab`), the main page by `isPerplexityMainPage`.
    */
   async listTabsCategorized(): Promise<{
     main: CDPTarget | null;
-    sidecar: CDPTarget | null;
     agentBrowsing: CDPTarget | null;
-    overlay: CDPTarget | null;
-    others: CDPTarget[];
   }> {
     const targets = await this.listTargets();
 
@@ -730,284 +726,13 @@ export class CometCDPClient {
       main:
         targets.find((t) => t.type === "page" && isPerplexityMainPage(t.url)) ||
         null,
-      sidecar:
-        targets.find((t) => t.type === "page" && t.url.includes("sidecar")) ||
-        null,
-      agentBrowsing:
-        targets.find(
-          (t) =>
-            t.type === "page" &&
-            !t.url.includes("perplexity.ai") &&
-            !t.url.includes("chrome-extension") &&
-            !t.url.includes("chrome://") &&
-            t.url !== "about:blank",
-        ) || null,
-      overlay:
-        targets.find(
-          (t) =>
-            t.url.includes("chrome-extension") && t.url.includes("overlay"),
-        ) || null,
-      others: targets.filter(
-        (t) =>
-          t.type === "page" &&
-          !t.url.includes("perplexity.ai") &&
-          !t.url.includes("chrome-extension"),
-      ),
+      agentBrowsing: targets.find(isBrowsingTab) || null,
     };
   }
 
-  // ============ TAB REGISTRY METHODS ============
-
-  /**
-   * Extract domain from URL
-   */
-  private extractDomain(url: string): string {
-    try {
-      const parsed = new URL(url);
-      return parsed.hostname;
-    } catch {
-      return "unknown";
-    }
-  }
-
-  /**
-   * Check if URL is an internal Chrome/Comet page (not a real browsing tab)
-   */
-  private isInternalTab(url: string): boolean {
-    // Chrome internal pages
-    if (
-      url.startsWith("chrome://") ||
-      url.startsWith("chrome-extension://") ||
-      url.startsWith("devtools://") ||
-      url === "about:blank" ||
-      url === ""
-    ) {
-      return true;
-    }
-
-    // ALL Perplexity URLs are internal Comet UI, not real browsing tabs
-    if (url.includes("perplexity.ai")) {
-      return true;
-    }
-
-    return false;
-  }
-
-  /**
-   * Infer tab purpose from URL and context
-   */
-  private inferPurpose(url: string, title: string): TabContext["purpose"] {
-    if (this.isInternalTab(url)) return "unknown";
-    if (url.includes("perplexity.ai")) return "main";
-    // Default to agent-browsing for external sites
-    return "agent-browsing";
-  }
-
-  /**
-   * Update tab registry with current browser state
-   */
-  async refreshTabRegistry(): Promise<TabContext[]> {
-    const targets = await this.listTargets();
-    const currentTime = Date.now();
-
-    // Track which tabs still exist
-    const existingIds = new Set<string>();
-
-    for (const target of targets) {
-      if (target.type !== "page") continue;
-
-      // Skip internal Chrome tabs entirely
-      if (this.isInternalTab(target.url)) continue;
-
-      existingIds.add(target.id);
-
-      // Update or create tab context
-      const existing = this.tabRegistry.get(target.id);
-      const domain = this.extractDomain(target.url);
-
-      if (existing) {
-        // Update existing entry
-        existing.url = target.url;
-        existing.title = target.title;
-        existing.domain = domain;
-        existing.lastActivity = currentTime;
-        // Re-infer purpose if URL changed significantly
-        if (existing.domain !== domain) {
-          existing.purpose = this.inferPurpose(target.url, target.title);
-        }
-      } else {
-        // New tab - create entry
-        const context: TabContext = {
-          id: target.id,
-          url: target.url,
-          title: target.title,
-          purpose: this.inferPurpose(target.url, target.title),
-          domain,
-          lastActivity: currentTime,
-        };
-        this.tabRegistry.set(target.id, context);
-      }
-    }
-
-    // Remove closed tabs from registry
-    for (const id of this.tabRegistry.keys()) {
-      if (!existingIds.has(id)) {
-        this.tabRegistry.delete(id);
-      }
-    }
-
-    return Array.from(this.tabRegistry.values());
-  }
-
-  /**
-   * Get all tracked tabs with context
-   */
-  async getTabContexts(): Promise<TabContext[]> {
-    await this.refreshTabRegistry();
-    return Array.from(this.tabRegistry.values());
-  }
-
-  /**
-   * Find a tab by domain (for reuse).
-   *
-   * Match is "exact or subdomain": `findTabByDomain("github.com")` matches
-   * both `github.com` and `gist.github.com`, but NOT `notgithub.com`. The
-   * previous `includes`/reverse-`includes` heuristic produced surprising
-   * matches — `domain: "ai"` matched `perplexity.ai`, `chat.openai.com`,
-   * etc., and a search for `"mail.google.com"` would match a `google.com`
-   * tab via the reverse direction.
-   */
-  async findTabByDomain(domain: string): Promise<TabContext | null> {
-    await this.refreshTabRegistry();
-    const target = domain.toLowerCase();
-    for (const tab of this.tabRegistry.values()) {
-      const tabDomain = tab.domain.toLowerCase();
-      if (tabDomain === target || tabDomain.endsWith(`.${target}`)) {
-        return tab;
-      }
-    }
-    return null;
-  }
-
-  /**
-   * Find a tab by URL pattern
-   */
-  async findTabByUrl(urlPattern: string): Promise<TabContext | null> {
-    await this.refreshTabRegistry();
-    for (const tab of this.tabRegistry.values()) {
-      if (tab.url.includes(urlPattern)) {
-        return tab;
-      }
-    }
-    return null;
-  }
-
-  /**
-   * Find tabs by purpose
-   */
-  async findTabsByPurpose(
-    purpose: TabContext["purpose"],
-  ): Promise<TabContext[]> {
-    await this.refreshTabRegistry();
-    return Array.from(this.tabRegistry.values()).filter(
-      (t) => t.purpose === purpose,
-    );
-  }
-
-  /**
-   * Update tab purpose (for workflow tracking)
-   */
-  setTabPurpose(
-    tabId: string,
-    purpose: TabContext["purpose"],
-    taskId?: string,
-  ): void {
-    const tab = this.tabRegistry.get(tabId);
-    if (tab) {
-      tab.purpose = purpose;
-      if (taskId) tab.taskId = taskId;
-      tab.lastActivity = Date.now();
-    }
-  }
-
-  /**
-   * Set content summary for a tab
-   */
-  setTabContentSummary(tabId: string, summary: string): void {
-    const tab = this.tabRegistry.get(tabId);
-    if (tab) {
-      tab.contentSummary = summary;
-      tab.lastActivity = Date.now();
-    }
-  }
-
-  /**
-   * Navigate to URL, reusing existing tab if one exists for that domain
-   */
-  async navigateOrReuseTab(
-    url: string,
-    purpose: TabContext["purpose"] = "agent-browsing",
-  ): Promise<{ tabId: string; reused: boolean }> {
-    const domain = this.extractDomain(url);
-
-    // Check if we already have a tab for this domain
-    const existingTab = await this.findTabByDomain(domain);
-
-    if (existingTab && existingTab.purpose !== "main") {
-      // Reuse existing tab
-      await this.connect(existingTab.id);
-      await this.navigate(url, true);
-      this.setTabPurpose(existingTab.id, purpose);
-      return { tabId: existingTab.id, reused: true };
-    }
-
-    // Create new tab
-    const newTab = await this.newTab(url);
-    await new Promise((r) => setTimeout(r, 1500)); // Wait for load
-    await this.connect(newTab.id);
-
-    // Register the new tab
-    const context: TabContext = {
-      id: newTab.id,
-      url: newTab.url,
-      title: newTab.title,
-      purpose,
-      domain,
-      lastActivity: Date.now(),
-    };
-    this.tabRegistry.set(newTab.id, context);
-
-    return { tabId: newTab.id, reused: false };
-  }
-
-  /**
-   * Get formatted tab summary for context display (filters out internal Chrome tabs)
-   */
-  async getTabSummary(): Promise<string> {
-    const allTabs = await this.getTabContexts();
-
-    // Filter out internal Chrome tabs - only show real browsing tabs
-    const tabs = allTabs.filter((t) => !this.isInternalTab(t.url));
-
-    if (tabs.length === 0) {
-      return "No browsing tabs open";
-    }
-
-    const lines: string[] = [`${tabs.length} browsing tab(s) open:`];
-
-    for (const tab of tabs) {
-      const active = tab.id === this.state.activeTabId ? " [ACTIVE]" : "";
-      const task = tab.taskId ? ` (task: ${tab.taskId})` : "";
-      const summary = tab.contentSummary ? ` - ${tab.contentSummary}` : "";
-      lines.push(
-        `  • ${tab.purpose.toUpperCase()}: ${tab.domain}${active}${task}${summary}`,
-      );
-      lines.push(
-        `    URL: ${tab.url.substring(0, 80)}${tab.url.length > 80 ? "..." : ""}`,
-      );
-    }
-
-    return lines.join("\n");
+  /** The tab the connection is on; null when it is on none. */
+  connectedTabId(): string | null {
+    return this.state.activeTabId ?? null;
   }
 
   /**

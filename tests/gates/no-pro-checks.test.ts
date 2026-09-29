@@ -28,7 +28,12 @@ import {
   ok,
   type Replies,
 } from "./support/battery-replies.js";
+import { tabListing } from "./support/tabs-replies.js";
 
+const OPENED_MAIN = {
+  url: "https://www.perplexity.ai/",
+  openedByServer: true,
+};
 const MODE_REPORT = modeReport("search");
 const UNKNOWN_MODE_REPORT = modeReport(
   "unknown (no mode button found on the page)",
@@ -90,12 +95,22 @@ describe("hasScreenshot [5.1]", () => {
 });
 
 describe("tabsListed [6.1]", () => {
-  it("holds when the listing returns no error", () => {
-    expect(tabsListed(ok("Tabs (1):\n  perplexity.ai [active]"))).toBe(true);
+  it("holds when the listing counts the tabs open", async () => {
+    expect(
+      tabsListed(await tabListing("https://news.example/a", OPENED_MAIN)),
+    ).toBe(true);
+  });
+
+  it("holds when no browsing tab is open", async () => {
+    expect(tabsListed(await tabListing())).toBe(true);
   });
 
   it("fails on an error result", () => {
     expect(tabsListed(error("Error: Not connected to Comet"))).toBe(false);
+  });
+
+  it("fails on a reply that is no listing, although it is not an error", () => {
+    expect(tabsListed(ok("Switched to tab: x"))).toBe(false);
   });
 });
 
@@ -246,7 +261,7 @@ const HEALTHY: Replies = {
   [key("comet_screenshot", {})]: {
     content: [{ type: "image", data: "iVBOR", mimeType: "image/png" }],
   },
-  [key("comet_tabs", {})]: ok("Tabs (1):\n  perplexity.ai [active]"),
+  [key("comet_tabs", {})]: await tabListing(OPENED_MAIN),
   [key("comet_mode", {})]: ok(MODE_REPORT),
   [key("comet_mode", { mode: "research" })]: ok("Switched to research mode"),
   [key("comet_mode", { mode: "labs" })]: error(LABS_NOT_OFFERED),
