@@ -39,6 +39,16 @@ const INVALID_MODE = "invalid_mode_xyz";
 /** The first line of `comet_mode`'s reply when it read a mode from the page. */
 const MODE_READ = /^Current mode: (search|research|labs|learn)$/m;
 
+/**
+ * A text the server wrapped as untrusted page content: the wrapper's header
+ * line, the text, and its closing line (`src/untrusted.ts`).
+ */
+const WRAPPED_PAGE_TEXT =
+  /\[BEGIN UNTRUSTED PAGE CONTENT nonce=\w+[^\]\n]*\]\n([\s\S]*?)\n\[END UNTRUSTED PAGE CONTENT nonce=\w+\]/g;
+
+/** The longest page text a note shows, in characters. */
+const NOTE_PAGE_TEXT_LENGTH = 40;
+
 /** `comet_mode labs`'s refusal: Perplexity's input bar no longer offers it. */
 const LABS_NOT_OFFERED =
   "Cannot switch to labs mode: not offered by Perplexity's current input bar";
@@ -116,6 +126,29 @@ export function tabsListed(reply) {
  */
 export function currentMode(reply) {
   return MODE_READ.exec(replyText(reply))?.[1];
+}
+
+/**
+ * The note of a mode read: when the reply quotes text read from the page (the
+ * label of a button that maps to no mode, or a page's failure), its first
+ * line with that text unwrapped, quoted and cut to a readable length, so a
+ * failing check shows what the page said; otherwise the start of the reply.
+ * @param {ToolReply} reply
+ */
+export function modeReadNote(reply) {
+  const replied = replyText(reply);
+  const unwrapped = replied.replace(WRAPPED_PAGE_TEXT, (_wrapped, pageText) =>
+    JSON.stringify(cutTo(pageText, NOTE_PAGE_TEXT_LENGTH)),
+  );
+  return unwrapped === replied ? excerpt(reply, 60) : unwrapped.split("\n")[0];
+}
+
+/**
+ * @param {string} text
+ * @param {number} length
+ */
+function cutTo(text, length) {
+  return text.length > length ? `${text.slice(0, length)}…` : text;
 }
 
 /**
@@ -280,7 +313,7 @@ export const MODE_REPORTED = singleCall(
   15000,
   (reply) => ({
     held: reportsMode(reply),
-    note: excerpt(reply, 60),
+    note: modeReadNote(reply),
   }),
 );
 
@@ -355,7 +388,7 @@ function afterConnect(debugPort) {
     ...MODE_SWITCHES.map((check) => withVisibilityNoted(check, debugPort)),
     singleCall("7.3-reconnect", "comet_mode", {}, 10000, (reply) => ({
       held: reportsMode(reply),
-      note: excerpt(reply, 60),
+      note: modeReadNote(reply),
     })),
     INVALID_MODE_REJECTED,
     SCREENSHOT_TAKEN,

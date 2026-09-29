@@ -296,6 +296,14 @@ describe("locateModeButton", () => {
     });
   });
 
+  it("reads a label split by non-breaking and other Unicode spaces as the mode it names", () => {
+    const label = modeButton().querySelector("span + span")?.firstChild;
+    if (label) label.textContent = "\u00a0Deep\u00a0\u2009research\u202f";
+    expect(runInPage(locateModeButton)).toMatchObject({
+      text: "Deep research",
+    });
+  });
+
   it("returns null when the page has no mode button", () => {
     document.body.innerHTML = "<main><button>Search</button></main>";
     expect(runInPage(locateModeButton)).toBeNull();

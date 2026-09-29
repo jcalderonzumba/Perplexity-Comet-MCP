@@ -383,6 +383,16 @@ describe("ModeCore.readMode", () => {
     expect(page.escapes).toBe(0);
   });
 
+  it("reads what the button shows, never the mode this core last set", async () => {
+    const page = new FakeModePage({ current: "Search" });
+    const core = new ModeCore(page);
+    await core.switchMode("research");
+    page.navigateTo("Search");
+
+    expect(core.rememberedMode).toBe("research");
+    expect(await core.readMode()).toEqual({ kind: "known", mode: "search" });
+  });
+
   it("returns unknown with the text it saw, and makes no click", async () => {
     const page = new FakeModePage({ current: "Learn step by step" });
 

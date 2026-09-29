@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import { ModeCore } from "../../src/core/mode.js";
 import { answerModeTool } from "../../src/core/mode-tool.js";
+import { wrapUntrustedPageContent } from "../../src/untrusted.js";
 import {
   batteryPassed,
   type ScoredCheck,
@@ -13,6 +14,8 @@ import {
   hasScreenshot,
   invalidModeHandled,
   labsNotOffered,
+  MODE_REPORTED,
+  modeReadNote,
   reportsMode,
   runNoProBattery,
   switchedTo,
@@ -136,6 +139,71 @@ describe("reportsMode [7.1] [7.3-reconnect]", () => {
   it("fails on an error result, even one that names a mode", () => {
     expect(reportsMode(PAGE_FAILED_MODE_REPORT)).toBe(false);
     expect(reportsMode(error(MODE_REPORT))).toBe(false);
+  });
+});
+
+describe("modeReadNote [7.1] [7.3-reconnect]", () => {
+  /** comet_mode's reply for a button whose label maps to no mode, as the server words it. */
+  const unknownLabelReply = (label: string) =>
+    ok(
+      modeReport(
+        `unknown (the mode button reads ${wrapUntrustedPageContent(label)})`,
+      ),
+    );
+
+  it("shows the label an unknown reading quotes, without the wrapper", () => {
+    const note = modeReadNote(unknownLabelReply("Deep research (beta)"));
+
+    expect(note).toBe(
+      'Current mode: unknown (the mode button reads "Deep research (beta)")',
+    );
+    expect(note).not.toContain("UNTRUSTED");
+  });
+
+  it("shows an empty label as empty, so a button without a label is seen", () => {
+    expect(modeReadNote(unknownLabelReply(""))).toBe(
+      'Current mode: unknown (the mode button reads "")',
+    );
+  });
+
+  it("cuts a long label to a readable length", () => {
+    const note = modeReadNote(unknownLabelReply("Deep research ".repeat(20)));
+
+    expect(note).toBe(
+      `Current mode: unknown (the mode button reads "${"Deep research ".repeat(20).slice(0, 40)}…")`,
+    );
+  });
+
+  it("shows a page's failure message on one line, unwrapped", () => {
+    const note = modeReadNote(
+      ok(
+        modeReport(
+          `unknown (the page failed: ${wrapUntrustedPageContent("line one\nline two")})`,
+        ),
+      ),
+    );
+
+    expect(note).toBe(
+      'Current mode: unknown (the page failed: "line one\\nline two")',
+    );
+  });
+
+  it("is the note [7.1] fails with when the mode reads unknown", async () => {
+    const outcome = await MODE_REPORTED.probe(async () =>
+      unknownLabelReply("Learn step by step"),
+    );
+
+    expect(outcome).toEqual({
+      held: false,
+      note: 'Current mode: unknown (the mode button reads "Learn step by step")',
+    });
+  });
+
+  it("keeps the start of the reply when it quotes nothing", () => {
+    expect(modeReadNote(ok(MODE_REPORT))).toBe(MODE_REPORT.slice(0, 60));
+    expect(modeReadNote(ok(UNKNOWN_MODE_REPORT))).toBe(
+      UNKNOWN_MODE_REPORT.slice(0, 60),
+    );
   });
 });
 
