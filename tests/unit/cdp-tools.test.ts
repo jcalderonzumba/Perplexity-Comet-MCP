@@ -1,12 +1,10 @@
 // The composition: the tool table over the CDP client, the Comet module and
 // the UNTRUSTED wrapper. The cores' own rules are pinned in `core/`; this
 // pins what the composition itself holds: the connect, tabs and upload
-// handlers (the stdio server's behaviour, which the bridge now shares), and
-// that the client, the wrapper and the configured port reach the cores.
+// handlers (the stdio server's behaviour, which the bridge now shares).
+// That the client, the wrapper and the configured port reach the cores is
+// pinned in `cdp-tools.ask.test.ts` and `cdp-tools.tab.test.ts`.
 
-import { readFileSync } from "node:fs";
-import { dirname, join } from "node:path";
-import { fileURLToPath } from "node:url";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   type CdpToolsClient,
@@ -16,7 +14,6 @@ import {
 import { TOOL_DEFINITIONS } from "../../src/core/tools.js";
 import type { TabContext } from "../../src/types.js";
 
-const SRC = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "src");
 const CONFIGURED_PORT = 9444;
 const TAB_ID = "0a1b2c3d-1111-4222-8333-444455556666";
 
@@ -442,38 +439,5 @@ describe("comet_upload", () => {
     expect(textOf(reply as never)).toBe(
       "No file input found\n\nAvailable file inputs:\n  1. input#a\n\nTry specifying a selector parameter.",
     );
-  });
-});
-
-describe("the composition's source", () => {
-  const source = readFileSync(join(SRC, "cdp-tools.ts"), "utf8");
-
-  it("builds one tab choice over the client, for the mode tool and the ask core alike", () => {
-    expect(source.match(/createCdpPerplexityTab\(/g)).toHaveLength(1);
-    expect(source).toMatch(
-      /createCdpModeTool\(\s*client,\s*quotePage,\s*perplexity,?\s*\)/,
-    );
-  });
-
-  it("builds its ask core once, with its mode tool, the tab choice they share and the configured port", () => {
-    const builds = source.match(/createCdpAskCore\(\{[^}]*\}\)/g) ?? [];
-
-    expect(builds).toHaveLength(1);
-    expect(builds[0]).toMatch(/client\b/);
-    expect(builds[0]).toMatch(/comet\b/);
-    expect(builds[0]).toMatch(/mode:\s*modeTool\b/);
-    expect(builds[0]).toMatch(/perplexity\b/);
-    expect(builds[0]).toMatch(/cometPort:\s*port\b/);
-  });
-
-  it("words the ask, the poll and the stop through the core, quoting page text with the shared wrapper", () => {
-    expect(source).toMatch(
-      /describeAskOutcome\(\s*await askCore\.ask\(args\),\s*quotePage,?\s*\)/,
-    );
-    expect(source).toMatch(
-      /describePollOutcome\(\s*await askCore\.poll\(\),\s*quotePage,?\s*\)/,
-    );
-    expect(source).toMatch(/describeStopOutcome\(\s*await askCore\.stop\(\)/);
-    expect(source).toMatch(/answerModeTool\(args\.mode, modeTool\)/);
   });
 });
