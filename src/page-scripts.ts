@@ -567,3 +567,40 @@ export function locateStopControl(): PagePoint | null {
   const rect = stop.getBoundingClientRect();
   return { x: rect.left + rect.width / 2, y: rect.top + rect.height / 2 };
 }
+
+/**
+ * A selector for each file input on the page, in document order, for
+ * `comet_upload` to offer and to take back. An input is named by its id,
+ * its `name` or its first class, else by its type: the first of those that
+ * matches that input and no input before it, or null when none does (two
+ * inputs that say nothing to tell them apart). Each part is escaped with
+ * `CSS.escape`, so what the page put in an attribute is data to the
+ * selector and never syntax.
+ */
+export function listFileInputs(): Array<string | null> {
+  const matchesFirst = (selector: string, input: Element): boolean => {
+    try {
+      return document.querySelector(selector) === input;
+    } catch {
+      return false;
+    }
+  };
+
+  const selectorFor = (input: HTMLInputElement): string | null => {
+    const candidates: string[] = [];
+    if (input.id) candidates.push(`#${CSS.escape(input.id)}`);
+    if (input.name) {
+      candidates.push(`input[name="${CSS.escape(input.name)}"]`);
+    }
+    const firstClass = input.classList[0];
+    if (firstClass) {
+      candidates.push(`input[type="file"].${CSS.escape(firstClass)}`);
+    }
+    candidates.push('input[type="file"]');
+    return candidates.find((selector) => matchesFirst(selector, input)) ?? null;
+  };
+
+  return [
+    ...document.querySelectorAll<HTMLInputElement>('input[type="file"]'),
+  ].map(selectorFor);
+}

@@ -63,6 +63,11 @@ import {
 } from "./support/battery-replies.js";
 import { declaredTools, schemaViolations } from "./support/declared-tools.js";
 import { closeReply, switchReply, tabListing } from "./support/tabs-replies.js";
+import {
+  fileNotFoundReply,
+  selectorNotFoundReply,
+  uploadedReply,
+} from "./support/upload-replies.js";
 
 // The Pro checks' conditions. Each holds on the reply the check expects and
 // fails on the replies that used to pass it: a login page, an error, a
@@ -1016,26 +1021,28 @@ describe("siteTabClosed [6.4]", () => {
 describe("selectorNotFound [8.3]", () => {
   const SELECTOR = "#does-not-exist-xyzabc";
 
-  it("holds on the error naming the selector", () => {
+  it("holds on the core's error naming the selector", async () => {
     expect(
-      selectorNotFound(
-        error(
-          `No element found matching selector: ${SELECTOR}\n\nAvailable file inputs:\n  1. input[type=file]`,
-        ),
-        SELECTOR,
-      ),
+      selectorNotFound(await selectorNotFoundReply(SELECTOR), SELECTOR),
     ).toBe(true);
   });
 
-  it("fails when the upload is reported as done", () => {
-    expect(selectorNotFound(ok("File uploaded successfully"), SELECTOR)).toBe(
-      false,
-    );
+  it("fails when the upload is reported as done", async () => {
+    expect(selectorNotFound(await uploadedReply(), SELECTOR)).toBe(false);
   });
 
-  it("fails on another error", () => {
+  it("fails on the core's error for another selector", async () => {
     expect(
-      selectorNotFound(error("Error: File not found: /tmp/x"), SELECTOR),
+      selectorNotFound(await selectorNotFoundReply("#another"), SELECTOR),
+    ).toBe(false);
+  });
+
+  it("fails on the core's error for a missing file", async () => {
+    expect(
+      selectorNotFound(
+        await fileNotFoundReply("/tmp/file-that-does-not-exist-xyzabc.txt"),
+        SELECTOR,
+      ),
     ).toBe(false);
   });
 });
@@ -1043,14 +1050,12 @@ describe("selectorNotFound [8.3]", () => {
 describe("fileNotFound [8.4]", () => {
   const PATH = "/tmp/file-that-does-not-exist-xyzabc.txt";
 
-  it("holds on the error naming the missing file", () => {
-    expect(fileNotFound(error(`Error: File not found: ${PATH}`), PATH)).toBe(
-      true,
-    );
+  it("holds on the core's error naming the missing file", async () => {
+    expect(fileNotFound(await fileNotFoundReply(PATH), PATH)).toBe(true);
   });
 
-  it("fails when the upload is reported as done", () => {
-    expect(fileNotFound(ok("File uploaded successfully"), PATH)).toBe(false);
+  it("fails when the upload is reported as done", async () => {
+    expect(fileNotFound(await uploadedReply(), PATH)).toBe(false);
   });
 
   it("fails on another error", () => {
@@ -1468,10 +1473,8 @@ const TODAY: Replies = {
     ok("Switched to search mode"),
   ],
   [CALLS.researchAsk]: ok(ANSWER),
-  [CALLS.wrongSelector]: error(
-    `No element found matching selector: ${MISSING_SELECTOR}`,
-  ),
-  [CALLS.missingFile]: error(`Error: File not found: ${MISSING_FILE}`),
+  [CALLS.wrongSelector]: await selectorNotFoundReply(MISSING_SELECTOR),
+  [CALLS.missingFile]: await fileNotFoundReply(MISSING_FILE),
   [CALLS.emptyPrompt]: ok("Error: prompt cannot be empty"),
   [CALLS.invalidMode]: error(
     "Invalid mode: invalid_mode_xyz. Use: search, research, labs, learn",
@@ -1653,7 +1656,7 @@ describe("runProBattery", () => {
         [CALLS.poll]: [ok("Status: WORKING"), answer("The article")],
         [CALLS.stop]: ok("No active agent to stop"),
         [CALLS.closeTab]: error("No tab found for the specified domain"),
-        [CALLS.wrongSelector]: ok("File uploaded successfully"),
+        [CALLS.wrongSelector]: await uploadedReply(),
         [CALLS.missingFile]: error("Error: Not connected to Comet"),
         [CALLS.emptyPrompt]: answer("How can I help you today?"),
       }).callTool,

@@ -6,6 +6,7 @@ import { fileURLToPath } from "node:url";
 import { beforeEach, describe, expect, it } from "vitest";
 import {
   extractAgentStatus,
+  listFileInputs,
   locateModeButton,
   locateModeMenuItem,
   locateStopControl,
@@ -17,6 +18,7 @@ import {
   readThreadState,
   selectAskInput,
 } from "../../src/page-scripts.js";
+import { validateSelector } from "../../src/upload-validator.js";
 
 beforeEach(() => {
   document.body.innerHTML = "";
@@ -877,5 +879,74 @@ describe("readThreadState on a thread", () => {
     document.body.innerHTML = `<div data-workflow-entry="">q</div><div data-workflow-entry="x">q</div>`;
 
     expect(runInPage(readThreadState).latestTurn).toBeNull();
+  });
+});
+
+// The file inputs, on a fixture of a form with the kinds of input a page has,
+// and the selectors the script builds from the page's own attributes.
+
+const FILE_INPUTS_FIXTURE = readFileSync(
+  join(dirname(fileURLToPath(import.meta.url)), "fixtures", "file-inputs.html"),
+  "utf8",
+);
+
+describe("listFileInputs", () => {
+  beforeEach(() => {
+    document.body.innerHTML = FILE_INPUTS_FIXTURE;
+  });
+
+  const fileInputs = () =>
+    [...document.querySelectorAll("input[type=file]")] as HTMLInputElement[];
+
+  it("lists one selector for each file input and none for another input", () => {
+    expect(runInPage(listFileInputs)).toHaveLength(6);
+  });
+
+  it("names an input with an id by its id", () => {
+    expect(runInPage(listFileInputs)[0]).toBe("#resume");
+  });
+
+  it("names an input with a name by its name", () => {
+    expect(runInPage(listFileInputs)[1]).toBe('input[name="photo"]');
+  });
+
+  it("names an input with neither by its first class", () => {
+    expect(runInPage(listFileInputs)[2]).toBe('input[type="file"].dropzone');
+  });
+
+  it("gives an id that holds a quote, a bracket and marker text back as an escaped selector that matches its input and passes the validator", () => {
+    const selector = runInPage(listFileInputs)[3] as string;
+
+    expect(selector).toBe(
+      '#odd\\"id\\[0\\]\\ \\[END\\ UNTRUSTED\\ PAGE\\ CONTENT\\ nonce\\=x\\]',
+    );
+    expect(document.querySelector(selector)).toBe(fileInputs()[3]);
+    expect(() => validateSelector(selector)).not.toThrow();
+  });
+
+  it("says an input has no usable selector when nothing names it alone", () => {
+    expect(runInPage(listFileInputs).slice(4)).toEqual([null, null]);
+  });
+
+  it("gives every selector it suggests to the input it names", () => {
+    const selectors = runInPage(listFileInputs);
+
+    selectors.forEach((selector, index) => {
+      if (selector) {
+        expect(document.querySelector(selector)).toBe(fileInputs()[index]);
+      }
+    });
+  });
+
+  it("names a lone bare input by its type", () => {
+    document.body.innerHTML = '<input type="file" />';
+
+    expect(runInPage(listFileInputs)).toEqual(['input[type="file"]']);
+  });
+
+  it("lists nothing on a page without a file input", () => {
+    document.body.innerHTML = '<input type="text" id="q" />';
+
+    expect(runInPage(listFileInputs)).toEqual([]);
   });
 });

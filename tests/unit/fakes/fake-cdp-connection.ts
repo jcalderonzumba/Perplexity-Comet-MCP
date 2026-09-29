@@ -16,6 +16,12 @@ export type InputCall =
   | { method: "Input.insertText"; params: unknown }
   | { method: "Emulation.setFocusEmulationEnabled"; params: unknown };
 
+/** A DOM call the client made, with its parameters. */
+export interface DomCall {
+  method: "DOM.querySelector" | "DOM.setFileInputFiles";
+  params: unknown;
+}
+
 export class FakeCdpConnection {
   public topFrame: TopFrame = {
     url: "https://www.perplexity.ai/search/a-thread",
@@ -51,7 +57,22 @@ export class FakeCdpConnection {
     },
   };
 
-  readonly DOM = { enable: async () => {} };
+  /** Every DOM query and file set, in the order made. */
+  public readonly domCalls: DomCall[] = [];
+  /** The selectors that match an element, by the node id they find. */
+  public readonly elements = new Map<string, number>();
+
+  readonly DOM = {
+    enable: async () => {},
+    getDocument: async () => ({ root: { nodeId: 1 } }),
+    querySelector: async (params: { nodeId: number; selector: string }) => {
+      this.domCalls.push({ method: "DOM.querySelector", params });
+      return { nodeId: this.elements.get(params.selector) ?? 0 };
+    },
+    setFileInputFiles: async (params: { nodeId: number; files: string[] }) => {
+      this.domCalls.push({ method: "DOM.setFileInputFiles", params });
+    },
+  };
   readonly Network = { enable: async () => {} };
 
   readonly Input = {

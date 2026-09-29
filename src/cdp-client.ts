@@ -24,7 +24,10 @@ import type {
   NavigateResult,
   ScreenshotResult,
 } from "./types.js";
-import { validateSelector, validateUploadPath } from "./upload-validator.js";
+import type {
+  ValidatedSelector,
+  ValidatedUploadPath,
+} from "./upload-validator.js";
 
 // chrome-remote-interface@^0.34.0 exposes `ProtocolError` at runtime
 // (`module.exports.ProtocolError = ...`), but @types/chrome-remote-interface
@@ -946,101 +949,6 @@ export class CometCDPClient {
   }
 
   /**
-   * Navigate to a URL with automatic retry on failure
-   * @param url - URL to navigate to
-   * @param maxRetries - Maximum number of retry attempts (default: 3)
-   * @param retryDelay - Delay between retries in ms (default: 1000)
-   */
-  async navigateWithRetry(
-    url: string,
-    maxRetries: number = 3,
-    retryDelay: number = 1000,
-  ): Promise<{
-    success: boolean;
-    url: string;
-    attempts: number;
-    error?: string;
-  }> {
-    let lastError: string = "";
-
-    try {
-      this.assertNavigableUrl(url);
-    } catch (e: any) {
-      return { success: false, url, attempts: 0, error: e.message };
-    }
-
-    for (let attempt = 1; attempt <= maxRetries; attempt++) {
-      try {
-        await this.withAutoReconnect(async () => {
-          this.ensureConnected();
-          const result = await this.client!.Page.navigate({ url });
-
-          // Check if navigation succeeded
-          if (result.errorText) {
-            throw new Error(result.errorText);
-          }
-
-          // Wait for load with timeout.
-          // `client.Page.loadEventFired()` resolves on the next event but
-          // leaves the underlying listener registered if the timeout
-          // branch of Promise.race wins. After many timeouts in one
-          // session the listener list grows unbounded. Subscribe via
-          // `once` (which auto-unsubscribes after one event) and
-          // explicitly remove the listener when the timeout wins.
-          //
-          // The CRI Client is an EventEmitter at runtime, but the type
-          // declaration in @types/chrome-remote-interface only exposes
-          // `on(...)` — not `once`/`removeListener`. Cast to a minimal
-          // EventEmitter-shaped surface so this compiles without
-          // pulling in `events` as a value import for a type-only need.
-          interface CdpEmitter {
-            once(event: string, listener: (...args: unknown[]) => void): void;
-            removeListener(
-              event: string,
-              listener: (...args: unknown[]) => void,
-            ): void;
-          }
-          const client = this.client! as unknown as CdpEmitter;
-          await new Promise<void>((resolve, reject) => {
-            const onLoad = () => {
-              clearTimeout(timer);
-              resolve();
-            };
-            const timer = setTimeout(() => {
-              client.removeListener("Page.loadEventFired", onLoad);
-              reject(new Error("Page load timeout"));
-            }, 15000);
-            client.once("Page.loadEventFired", onLoad);
-          });
-
-          this.state.currentUrl = url;
-        });
-
-        return { success: true, url, attempts: attempt };
-      } catch (error: any) {
-        lastError = error.message || String(error);
-
-        // Don't retry for certain errors
-        if (
-          lastError.includes("net::ERR_NAME_NOT_RESOLVED") ||
-          lastError.includes("net::ERR_INVALID_URL")
-        ) {
-          return { success: false, url, attempts: attempt, error: lastError };
-        }
-
-        // Wait before retry
-        if (attempt < maxRetries) {
-          await new Promise((resolve) =>
-            setTimeout(resolve, retryDelay * attempt),
-          );
-        }
-      }
-    }
-
-    return { success: false, url, attempts: maxRetries, error: lastError };
-  }
-
-  /**
    * Capture screenshot
    */
   async screenshot(format: "png" | "jpeg" = "png"): Promise<ScreenshotResult> {
@@ -1219,303 +1127,30 @@ export class CometCDPClient {
   }
 
   /**
-   * Upload a file to a file input element on the page
-   * Uses CDP DOM.setFileInputFiles to inject file into input
+   * Set `path` as the file of the first element `selector` matches, through
+   * the protocol: the selector is a parameter of `DOM.querySelector`, never
+   * script text. `DOM.setFileInputFiles` makes the browser fire the input's
+   * `input` and `change` events itself, as a user's pick does (checked on
+   * Comet 152), so no script runs in the page.
    *
-   * @param filePath - Absolute path to the file to upload
-   * @param selector - Optional CSS selector for the file input (auto-detects if not provided)
-   * @returns Result with success status and details
+   * Both arguments are branded: only the validators make them, so no
+   * unvalidated string reaches the DOM calls. False when nothing matches.
    */
-  async uploadFile(
-    filePath: string,
-    selector?: string,
-  ): Promise<{ success: boolean; message: string; inputFound: boolean }> {
+  async attachFile(
+    path: ValidatedUploadPath,
+    selector: ValidatedSelector,
+  ): Promise<boolean> {
     return this.withAutoReconnect(async () => {
       this.ensureConnected();
-
-      // Validate and resolve the path before touching the DOM.
-      // This enforces COMET_UPLOAD_ROOT allowlist (if set) and the sensitive-
-      // path denylist at the CDP layer so every caller is protected, not just
-      // the MCP tool handler in index.ts.
-      let resolvedPath: string;
-      try {
-        resolvedPath = validateUploadPath(filePath);
-      } catch (err: unknown) {
-        return {
-          success: false,
-          message: err instanceof Error ? err.message : String(err),
-          inputFound: false,
-        };
-      }
-
-      // Find the file input element
-      let nodeId: number;
-
-      if (selector) {
-        // Validate the user-supplied selector before passing it to the CDP
-        // DOM.querySelector call — guards against pathologically long or
-        // malformed selectors that could cause excessive renderer CPU usage.
-        try {
-          validateSelector(selector);
-        } catch (err: unknown) {
-          return {
-            success: false,
-            message: err instanceof Error ? err.message : String(err),
-            inputFound: false,
-          };
-        }
-
-        // Use provided selector
-        const doc = await this.client!.DOM.getDocument();
-        const result = await this.client!.DOM.querySelector({
-          nodeId: doc.root.nodeId,
-          selector: selector,
-        });
-
-        if (!result.nodeId) {
-          return {
-            success: false,
-            message: `No element found matching selector: ${selector}`,
-            inputFound: false,
-          };
-        }
-        nodeId = result.nodeId;
-      } else {
-        // Auto-detect file input - find first visible file input
-        const doc = await this.client!.DOM.getDocument();
-
-        // Try common file input selectors
-        const selectors = [
-          'input[type="file"]:not([disabled])',
-          'input[type="file"]',
-          '[data-testid*="file"] input',
-          '[class*="upload"] input[type="file"]',
-          '[class*="dropzone"] input[type="file"]',
-        ];
-
-        let found = false;
-        for (const sel of selectors) {
-          try {
-            const result = await this.client!.DOM.querySelector({
-              nodeId: doc.root.nodeId,
-              selector: sel,
-            });
-            if (result.nodeId) {
-              nodeId = result.nodeId;
-              found = true;
-              break;
-            }
-          } catch {}
-        }
-
-        if (!found) {
-          return {
-            success: false,
-            message:
-              "No file input element found on the page. Try providing a specific selector.",
-            inputFound: false,
-          };
-        }
-      }
-
-      // Set the file on the input element using the validated canonical path.
-      try {
-        await this.client!.DOM.setFileInputFiles({
-          nodeId: nodeId!,
-          files: [resolvedPath],
-        });
-
-        // Trigger change event to notify the page
-        const safeSelector = JSON.stringify(selector || 'input[type="file"]');
-        await this.client!.Runtime.evaluate({
-          expression: `
-            (function() {
-              const input = document.querySelector(${safeSelector});
-              if (input) {
-                input.dispatchEvent(new Event('change', { bubbles: true }));
-                input.dispatchEvent(new Event('input', { bubbles: true }));
-              }
-            })();
-          `,
-        });
-
-        return {
-          success: true,
-          message: `File uploaded successfully: ${resolvedPath}`,
-          inputFound: true,
-        };
-      } catch (error: any) {
-        return {
-          success: false,
-          message: `Failed to set file: ${error.message}`,
-          inputFound: true,
-        };
-      }
-    });
-  }
-
-  /**
-   * Upload multiple files to a file input element
-   *
-   * @param filePaths - Array of absolute file paths
-   * @param selector - Optional CSS selector for the file input
-   */
-  async uploadFiles(
-    filePaths: string[],
-    selector?: string,
-  ): Promise<{ success: boolean; message: string }> {
-    return this.withAutoReconnect(async () => {
-      this.ensureConnected();
-
-      // Validate all paths before touching the DOM.
-      const resolvedPaths: string[] = [];
-      for (const fp of filePaths) {
-        try {
-          resolvedPaths.push(validateUploadPath(fp));
-        } catch (err: unknown) {
-          return {
-            success: false,
-            message: err instanceof Error ? err.message : String(err),
-          };
-        }
-      }
-
-      // Validate the user-supplied selector (if any) before passing to CDP.
-      if (selector) {
-        try {
-          validateSelector(selector);
-        } catch (err: unknown) {
-          return {
-            success: false,
-            message: err instanceof Error ? err.message : String(err),
-          };
-        }
-      }
-
-      const doc = await this.client!.DOM.getDocument();
-      const sel = selector || 'input[type="file"]';
-
-      const result = await this.client!.DOM.querySelector({
-        nodeId: doc.root.nodeId,
-        selector: sel,
+      const { DOM } = this.client!;
+      const document = await DOM.getDocument();
+      const { nodeId } = await DOM.querySelector({
+        nodeId: document.root.nodeId,
+        selector,
       });
-
-      if (!result.nodeId) {
-        return {
-          success: false,
-          message: `No file input found with selector: ${sel}`,
-        };
-      }
-
-      try {
-        await this.client!.DOM.setFileInputFiles({
-          nodeId: result.nodeId,
-          files: resolvedPaths,
-        });
-
-        // Trigger change event
-        const safeSel = JSON.stringify(sel);
-        await this.client!.Runtime.evaluate({
-          expression: `
-            (function() {
-              const input = document.querySelector(${safeSel});
-              if (input) {
-                input.dispatchEvent(new Event('change', { bubbles: true }));
-                input.dispatchEvent(new Event('input', { bubbles: true }));
-              }
-            })();
-          `,
-        });
-
-        return {
-          success: true,
-          message: `${filePaths.length} file(s) uploaded successfully`,
-        };
-      } catch (error: any) {
-        return {
-          success: false,
-          message: `Failed to upload files: ${error.message}`,
-        };
-      }
-    });
-  }
-
-  /**
-   * Check if the current page has any file inputs
-   */
-  async hasFileInput(): Promise<{
-    found: boolean;
-    count: number;
-    selectors: string[];
-  }> {
-    return this.withAutoReconnect(async () => {
-      this.ensureConnected();
-
-      const result = await this.client!.Runtime.evaluate({
-        expression: `
-          (function() {
-            const inputs = document.querySelectorAll('input[type="file"]');
-            const selectors = [];
-            inputs.forEach((input, i) => {
-              let sel = 'input[type="file"]';
-              if (input.id) sel = '#' + input.id;
-              else if (input.name) sel = 'input[name="' + input.name + '"]';
-              else if (input.className) sel = 'input[type="file"].' + input.className.split(' ')[0];
-              selectors.push(sel);
-            });
-            return { count: inputs.length, selectors };
-          })();
-        `,
-        returnByValue: true,
-      });
-
-      const data = result.result.value as {
-        count: number;
-        selectors: string[];
-      };
-      return {
-        found: data.count > 0,
-        count: data.count,
-        selectors: data.selectors,
-      };
-    });
-  }
-
-  /**
-   * Click on a file input to potentially trigger a file picker dialog
-   * Note: This won't actually open a native dialog in headless mode,
-   * but can trigger custom file picker UIs
-   */
-  async clickFileInput(
-    selector?: string,
-  ): Promise<{ success: boolean; message: string }> {
-    return this.withAutoReconnect(async () => {
-      this.ensureConnected();
-
-      const sel = selector || 'input[type="file"]';
-      const safeSel = JSON.stringify(sel);
-
-      const result = await this.client!.Runtime.evaluate({
-        expression: `
-          (function() {
-            const input = document.querySelector(${safeSel});
-            if (input) {
-              input.click();
-              return { clicked: true };
-            }
-            return { clicked: false };
-          })();
-        `,
-        returnByValue: true,
-      });
-
-      const data = result.result.value as { clicked: boolean };
-      return {
-        success: data.clicked,
-        message: data.clicked
-          ? "File input clicked"
-          : "No file input found to click",
-      };
+      if (!nodeId) return false;
+      await DOM.setFileInputFiles({ nodeId, files: [path] });
+      return true;
     });
   }
 }

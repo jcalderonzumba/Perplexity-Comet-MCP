@@ -4,7 +4,11 @@
 // CDP input.
 
 import { cometClient } from "./cdp-client.js";
-import { type AgentStatusResult, extractAgentStatus } from "./page-scripts.js";
+import {
+  type AgentStatusResult,
+  extractAgentStatus,
+  pageScriptExpression,
+} from "./page-scripts.js";
 
 /**
  * Minimal CDP-client surface used by `CometAI.getAgentStatus`. Letting
@@ -49,7 +53,7 @@ export class CometAI {
     }
 
     const result = await this.client.safeEvaluate(
-      `(${extractAgentStatus.toString()})()`,
+      pageScriptExpression(extractAgentStatus),
     );
 
     return {

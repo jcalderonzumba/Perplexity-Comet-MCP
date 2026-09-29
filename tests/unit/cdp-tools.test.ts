@@ -1,10 +1,10 @@
 // The composition: the tool table over the CDP client, the Comet module and
 // the UNTRUSTED wrapper. The cores' own rules are pinned in `core/`; this
 // pins what the composition itself holds: that connect is bound to the
-// configured port and the shared tab choice, and the tabs and upload
-// handlers (the stdio server's behaviour, which the bridge now shares).
-// That the client, the wrapper and the configured port reach the cores is
-// pinned in `cdp-tools.ask.test.ts` and `cdp-tools.tab.test.ts`.
+// configured port and the shared tab choice, and that the upload core's
+// port is bound to the client. That the client, the wrapper and the
+// configured port reach the other cores is pinned in
+// `cdp-tools.ask.test.ts` and `cdp-tools.tab.test.ts`.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
@@ -332,7 +332,15 @@ describe("comet_upload", () => {
   beforeEach(() => {
     // The validator warns, once per call, when no upload root is set.
     vi.spyOn(console, "error").mockImplementation(() => {});
+    vi.stubEnv("COMET_UPLOAD_ROOT", "");
   });
+
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  const inputsOnPage = (selectors: Array<string | null>) =>
+    vi.fn().mockResolvedValue({ result: { type: "object", value: selectors } });
 
   it("needs a filePath", async () => {
     const reply = await tableOver({}).call("comet_upload", {});
@@ -345,83 +353,87 @@ describe("comet_upload", () => {
   });
 
   it("refuses a path the validator refuses, before the page is touched", async () => {
-    const hasFileInput = vi.fn();
+    const safeEvaluate = vi.fn();
+    const attachFile = vi.fn();
 
-    const reply = await tableOver({ hasFileInput }).call("comet_upload", {
-      filePath: "relative/path.png",
-      checkOnly: true,
-    });
+    const reply = await tableOver({ safeEvaluate, attachFile }).call(
+      "comet_upload",
+      { filePath: "relative/path.png", checkOnly: true },
+    );
 
-    expect(hasFileInput).not.toHaveBeenCalled();
+    expect(safeEvaluate).not.toHaveBeenCalled();
+    expect(attachFile).not.toHaveBeenCalled();
     expect(reply).toMatchObject({ isError: true });
     expect(textOf(reply as never)).toMatch(/^Error: /);
   });
 
-  it("lists the page's file inputs on checkOnly", async () => {
+  it("lists the page's file inputs on checkOnly, wrapped as page content", async () => {
     const reply = await tableOver({
-      hasFileInput: async () => ({
-        found: true,
-        count: 1,
-        selectors: ["input#file"],
-      }),
+      safeEvaluate: inputsOnPage(["#file"]),
     }).call("comet_upload", {
       filePath: import.meta.filename,
       checkOnly: true,
     });
 
     expect(textOf(reply as never)).toBe(
-      "Found 1 file input(s) on the page:\n  1. input#file\n\nUse comet_upload with filePath to upload to one of these inputs.",
+      "Found 1 file input(s) on the page:\n<<  1. #file>>\n\nUse comet_upload with filePath to upload to one of these inputs.",
     );
   });
 
   it("refuses a selector the validator refuses, before the page is touched", async () => {
-    const uploadFile = vi.fn();
+    const attachFile = vi.fn();
 
-    const reply = await tableOver({ uploadFile }).call("comet_upload", {
+    const reply = await tableOver({ attachFile }).call("comet_upload", {
       filePath: import.meta.filename,
       selector: "input<script>",
     });
 
-    expect(uploadFile).not.toHaveBeenCalled();
+    expect(attachFile).not.toHaveBeenCalled();
     expect(reply).toMatchObject({ isError: true });
   });
 
-  it("uploads to the resolved path and reports the client's message", async () => {
-    const uploadFile = vi.fn().mockResolvedValue({
-      success: true,
-      message: "Uploaded",
-      inputFound: true,
-    });
+  it("attaches the resolved path to the input the selector names", async () => {
+    const attachFile = vi.fn().mockResolvedValue(true);
 
-    const reply = await tableOver({ uploadFile }).call("comet_upload", {
+    const reply = await tableOver({ attachFile }).call("comet_upload", {
       filePath: import.meta.filename,
-      selector: "input#file",
+      selector: "#file",
     });
 
-    expect(uploadFile).toHaveBeenCalledWith(
+    expect(attachFile).toHaveBeenCalledWith(
       expect.stringContaining("cdp-tools.test.ts"),
-      "input#file",
+      "#file",
     );
-    expect(reply).toEqual({ kind: "text", text: "Uploaded", isError: false });
+    expect(textOf(reply as never)).toMatch(/^File uploaded successfully: /);
   });
 
-  it("lists the available inputs when the upload found none", async () => {
+  it("lists the available inputs when the selector matched nothing", async () => {
     const reply = await tableOver({
-      uploadFile: async () => ({
-        success: false,
-        message: "No file input found",
-        inputFound: false,
-      }),
-      hasFileInput: async () => ({
-        found: true,
-        count: 1,
-        selectors: ["input#a"],
-      }),
-    }).call("comet_upload", { filePath: import.meta.filename });
+      attachFile: async () => false,
+      safeEvaluate: inputsOnPage(["#a"]),
+    }).call("comet_upload", {
+      filePath: import.meta.filename,
+      selector: "#missing",
+    });
 
     expect(reply).toMatchObject({ isError: true });
     expect(textOf(reply as never)).toBe(
-      "No file input found\n\nAvailable file inputs:\n  1. input#a\n\nTry specifying a selector parameter.",
+      "No element found matching selector: #missing\n\nAvailable file inputs:\n<<  1. #a>>\n\nTry specifying a selector parameter.",
     );
+  });
+
+  it("words a failure of the connection as an error reply", async () => {
+    const reply = await tableOver({
+      attachFile: () => Promise.reject(new Error("Not connected to Comet")),
+    }).call("comet_upload", {
+      filePath: import.meta.filename,
+      selector: "#file",
+    });
+
+    expect(reply).toEqual({
+      kind: "text",
+      text: "Error: Not connected to Comet",
+      isError: true,
+    });
   });
 });

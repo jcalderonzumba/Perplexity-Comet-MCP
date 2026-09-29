@@ -1,13 +1,26 @@
 /**
- * Shared upload path and tab-ID validation utilities.
+ * The allowlists for what a caller supplies: an upload path, a tab id, a
+ * domain and a CSS selector.
  *
- * Extracted from index.ts so that cdp-client.ts and http-bridge.ts can
- * import them without introducing circular dependencies.
+ * The path and the selector are checked into branded types that only
+ * `validateUploadPath` and `validateSelector` can make. The upload port
+ * accepts nothing else, so no caller can reach the DOM calls with a string
+ * no validator has seen (principle 3).
  */
 
 import { realpathSync, statSync } from "fs";
 import { homedir } from "os";
 import { sep as PATH_SEP, resolve as resolvePath } from "path";
+
+declare const validated: unique symbol;
+
+/** A canonical upload path that `validateUploadPath` accepted. */
+export type ValidatedUploadPath = string & {
+  readonly [validated]: "upload path";
+};
+
+/** A CSS selector that `validateSelector` accepted. */
+export type ValidatedSelector = string & { readonly [validated]: "selector" };
 
 /**
  * Validate a user-supplied upload path against the optional allowlist root
@@ -30,7 +43,7 @@ import { sep as PATH_SEP, resolve as resolvePath } from "path";
  *
  * Returns the canonical absolute path, or throws with a user-facing message.
  */
-export function validateUploadPath(filePath: string): string {
+export function validateUploadPath(filePath: string): ValidatedUploadPath {
   // Atomically resolve the path (follows symlinks) and fail on ENOENT —
   // no separate existsSync pre-check, which would introduce a TOCTOU race.
   let real: string;
@@ -85,7 +98,7 @@ export function validateUploadPath(filePath: string): string {
           `Resolved path: ${real}`,
       );
     }
-    return real;
+    return real as ValidatedUploadPath;
   }
 
   // No allowlist configured. Block obviously-sensitive paths to make the
@@ -141,7 +154,7 @@ export function validateUploadPath(filePath: string): string {
     `[comet-mcp] WARN: comet_upload received '${real}' without COMET_UPLOAD_ROOT set. ` +
       `Consider setting the env var to restrict allowed paths.`,
   );
-  return real;
+  return real as ValidatedUploadPath;
 }
 
 /**
@@ -196,34 +209,34 @@ export function validateDomain(domain: string): string {
  * Enforces:
  *  - Maximum 500 characters — prevents a pathologically long selector from
  *    causing the Comet renderer to spend significant CPU time parsing (DoS).
- *  - Character allowlist covering the full CSS selector grammar: letters,
- *    digits, space and tab (the only whitespace valid in CSS selectors), and
- *    the punctuation characters used by class (`.`),
- *    ID (`#`), attribute (`[`, `]`, `=`, `~`, `^`, `$`, `*`, `|`),
- *    pseudo-class/element (`:`), combinators (`>`, `+`, `~`), grouping (`,`),
- *    quotes (`"`, `'`), parentheses, hyphens, underscores, and at-signs.
- *  - Rejects null bytes and characters outside that set (e.g. raw `<`, `>` as
- *    HTML-injection attempts, or control characters).
+ *  - Character allowlist covering the CSS selector grammar: letters, digits,
+ *    space and tab (the only whitespace valid in CSS selectors), and the
+ *    punctuation characters used by class (`.`), ID (`#`), attribute (`[`,
+ *    `]`, `=`, `~`, `^`, `$`, `*`, `|`), pseudo-class/element (`:`),
+ *    combinators (`>`, `+`, `~`), grouping (`,`), quotes (`"`, `'`),
+ *    parentheses, hyphens, underscores, at-signs and backslash escapes.
+ *  - Rejects everything outside that set: a null byte, a control character
+ *    such as a newline, a backtick, `<`, and any non-ASCII character. The
+ *    child combinator `>` is in the set and allowed; `<` is not.
  *
  * The error message intentionally does NOT echo back the supplied value —
  * user-controlled strings reflected in responses are a stored-XSS vector if
  * the MCP client ever renders them as HTML.
  *
- * Returns the (unchanged) selector string on success, throws on rejection.
+ * Returns the (unchanged) selector on success, typed as validated; throws on
+ * rejection.
  */
-export function validateSelector(selector: string): string {
+export function validateSelector(selector: string): ValidatedSelector {
   if (selector.length === 0 || selector.length > 500) {
     throw new Error("Invalid selector: must be 1–500 characters long");
   }
-  // Allowlist: CSS selector grammar characters only.
   // Use explicit [ \t] instead of \s — \s also matches \n, \r, \f, \v which
   // are not valid in CSS selectors and can corrupt error messages that echo
   // the selector back to the caller.
-  // Excludes: <, >, null bytes, and all other characters not used in CSS selectors.
   if (!/^[A-Za-z0-9 \t.#[\]=~^$*|:>+,"'()\-_\\/@!;{}%&]+$/.test(selector)) {
     throw new Error(
       "Invalid selector: contains characters not permitted in CSS selectors",
     );
   }
-  return selector;
+  return selector as ValidatedSelector;
 }
