@@ -16,6 +16,11 @@ import {
 } from "../../src/core/ask-reply.js";
 import { ModeCore } from "../../src/core/mode.js";
 import { PerplexityTab } from "../../src/core/perplexity-tab.js";
+import {
+  errorReply,
+  imageReply,
+  textReply,
+} from "../../src/core/tool-reply.js";
 import { toBridgeResult, toStdioResult } from "../../src/tool-results.js";
 import { wrapUntrustedPageContent } from "../../src/untrusted.js";
 import { FakeAskPort, reading } from "./fakes/fake-ask-port.js";
@@ -72,37 +77,46 @@ function wrapped(pageText: string): string {
 }
 
 describe("toStdioResult", () => {
-  it("puts a reply's text in one text block", () => {
-    expect(
-      toStdioResult({ text: "Switched to search mode", isError: false }),
-    ).toEqual({
+  it("puts a text reply's text in one text block", () => {
+    expect(toStdioResult(textReply("Switched to search mode"))).toEqual({
       content: [{ type: "text", text: "Switched to search mode" }],
     });
   });
 
   it("flags an error reply", () => {
-    expect(toStdioResult({ text: "Error: no", isError: true })).toEqual({
+    expect(toStdioResult(errorReply("Error: no"))).toEqual({
       content: [{ type: "text", text: "Error: no" }],
       isError: true,
+    });
+  });
+
+  it("puts an image reply in one MCP image block", () => {
+    expect(toStdioResult(imageReply("iVBOR", "image/png"))).toEqual({
+      content: [{ type: "image", data: "iVBOR", mimeType: "image/png" }],
     });
   });
 });
 
 describe("toBridgeResult", () => {
-  it("puts a reply's text in content, as a success", () => {
-    expect(
-      toBridgeResult({ text: "Switched to search mode", isError: false }),
-    ).toEqual({
+  it("puts a text reply's text in content, as a success", () => {
+    expect(toBridgeResult(textReply("Switched to search mode"))).toEqual({
       success: true,
       content: "Switched to search mode",
     });
   });
 
   it("puts an error reply's text in error, with empty content", () => {
-    expect(toBridgeResult({ text: "Error: no", isError: true })).toEqual({
+    expect(toBridgeResult(errorReply("Error: no"))).toEqual({
       success: false,
       content: "",
       error: "Error: no",
+    });
+  });
+
+  it("puts an image reply in a content array, as a success", () => {
+    expect(toBridgeResult(imageReply("iVBOR", "image/png"))).toEqual({
+      success: true,
+      content: [{ type: "image", data: "iVBOR", mimeType: "image/png" }],
     });
   });
 });

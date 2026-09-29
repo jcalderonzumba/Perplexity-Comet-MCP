@@ -5,7 +5,7 @@ import { declaredTools, schemaViolations } from "./support/declared-tools.js";
 const tools = declaredTools();
 
 describe("declaredTools", () => {
-  it("reads every tool the stdio server declares", () => {
+  it("reads every tool the servers declare", () => {
     expect([...tools.keys()].sort()).toEqual([
       "comet_ask",
       "comet_connect",

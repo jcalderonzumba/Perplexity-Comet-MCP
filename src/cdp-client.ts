@@ -526,6 +526,11 @@ function cometLaunchArgs(port: number): string[] {
 
 export class CometCDPClient {
   private client: CDP.Client | null = null;
+  /**
+   * How many callers hold focus emulation, per connection: it is one on/off
+   * switch per CDP session, so it ends only when its last holder stops.
+   */
+  private readonly focusHolders = new WeakMap<CDP.Client, number>();
   private cometProcess: ChildProcess | null = null;
   private state: CometState = {
     connected: false,
@@ -1833,19 +1838,44 @@ export class CometCDPClient {
    *
    * `Emulation.setFocusEmulationEnabled` is marked experimental in the
    * protocol: a Comet that changes it shows up as a submit not taken.
+   *
+   * Counted: a start adds its holder before its round trip, so a stop that
+   * overlaps it sees the holder and leaves the emulation on, and takes the
+   * holder back if the emulation could not be switched on. The emulation is
+   * turned off only when the last holder stops, so an ask, a stop and a mode
+   * switch that overlap never end each other's.
    */
   async startFocusEmulation(): Promise<void> {
-    const { Emulation } = await this.onPerplexity("emulate focus");
-    await Emulation.setFocusEmulationEnabled({ enabled: true });
+    const client = await this.onPerplexity("emulate focus");
+    this.focusHolders.set(client, this.focusHoldersOf(client) + 1);
+    try {
+      await client.Emulation.setFocusEmulationEnabled({ enabled: true });
+    } catch (error) {
+      await this.releaseFocusHolder(client).catch(() => {});
+      throw error;
+    }
   }
 
   /**
-   * End `startFocusEmulation`. Not gated on the tab's origin: stopping lets
-   * nothing more through, and must happen wherever the tab went since.
+   * End one holder's `startFocusEmulation`, and the emulation itself when it
+   * was the last. Not gated on the tab's origin: stopping lets nothing more
+   * through, and must happen wherever the tab went since. A stop with no
+   * holder counted, as after a reconnect, still turns the emulation off.
    */
   async stopFocusEmulation(): Promise<void> {
     this.ensureConnected();
-    await this.client!.Emulation.setFocusEmulationEnabled({ enabled: false });
+    await this.releaseFocusHolder(this.client!);
+  }
+
+  private async releaseFocusHolder(client: CDP.Client): Promise<void> {
+    const remaining = Math.max(0, this.focusHoldersOf(client) - 1);
+    this.focusHolders.set(client, remaining);
+    if (remaining > 0) return;
+    await client.Emulation.setFocusEmulationEnabled({ enabled: false });
+  }
+
+  private focusHoldersOf(client: CDP.Client): number {
+    return this.focusHolders.get(client) ?? 0;
   }
 
   /** The connection, once the connected tab is known to be on Perplexity. */

@@ -28,8 +28,10 @@ import {
 /** @typedef {{ id: string, probe: (callTool: CallTool) => Promise<ProbeOutcome> }} NoProCheck */
 
 /**
- * The debug port the server under test uses, and whether Comet answers on it.
- * @typedef {{ port: number, answers: () => Promise<boolean> }} DebugPort
+ * The debug port the server under test uses, whether Comet answers on it,
+ * and, when the battery can ask, the `document.visibilityState` of Comet's
+ * main Perplexity page (undefined when there is none).
+ * @typedef {{ port: number, answers: () => Promise<boolean>, pageVisibility?: () => Promise<string | undefined> }} DebugPort
  */
 
 const INVALID_MODE = "invalid_mode_xyz";
@@ -292,20 +294,70 @@ export const MODE_SWITCHES = [
 ];
 
 /**
- * The checks after connect, in the order they run.
- * @type {readonly NoProCheck[]}
+ * The state of the page a mode switch runs on, appended to the check's note
+ * unless the page was hidden: the hidden-window fix is tested only when
+ * Comet's page is hidden, and a run with Comet in front must say it did not.
+ * Read just before the check's calls; a read that fails never fails a check.
+ * @param {NoProCheck} check
+ * @param {DebugPort} debugPort
+ * @returns {NoProCheck}
  */
-const AFTER_CONNECT = [
-  SCREENSHOT_TAKEN,
-  TABS_LISTED,
-  MODE_REPORTED,
-  ...MODE_SWITCHES,
-  singleCall("7.3-reconnect", "comet_mode", {}, 10000, (reply) => ({
-    held: reportsMode(reply),
-    note: excerpt(reply, 60),
-  })),
-  INVALID_MODE_REJECTED,
-];
+function withVisibilityNoted(check, debugPort) {
+  const { pageVisibility } = debugPort;
+  if (pageVisibility === undefined) return check;
+  return {
+    id: check.id,
+    probe: async (callTool) => {
+      const state = await pageVisibility().catch(
+        (/** @type {unknown} */ error) =>
+          error instanceof Error ? error : new Error(String(error)),
+      );
+      const outcome = await check.probe(callTool);
+      const caveat = visibilityCaveat(state);
+      return caveat === null
+        ? outcome
+        : { ...outcome, note: `${outcome.note} [${caveat}]` };
+    },
+  };
+}
+
+/**
+ * What to say about the page's visibility, or null when it was hidden.
+ * @param {string | undefined | Error} state
+ * @returns {string | null}
+ */
+function visibilityCaveat(state) {
+  if (state === "hidden") return null;
+  if (state instanceof Error) {
+    return `page visibility not read: ${state.message}`;
+  }
+  if (state === undefined) {
+    return "page visibility not read: no Perplexity page is open";
+  }
+  return `page not hidden (visibilityState: ${state}): this run does not test switching with Comet hidden`;
+}
+
+/**
+ * The checks after connect, in the order they run. The mode checks run
+ * first and the screenshot last, because a screenshot raises Comet's window
+ * (`Page.bringToFront`) and a mode switch made after it can no longer show
+ * whether it works with the window behind others.
+ * @param {DebugPort} debugPort
+ * @returns {readonly NoProCheck[]}
+ */
+function afterConnect(debugPort) {
+  return [
+    TABS_LISTED,
+    MODE_REPORTED,
+    ...MODE_SWITCHES.map((check) => withVisibilityNoted(check, debugPort)),
+    singleCall("7.3-reconnect", "comet_mode", {}, 10000, (reply) => ({
+      held: reportsMode(reply),
+      note: excerpt(reply, 60),
+    })),
+    INVALID_MODE_REJECTED,
+    SCREENSHOT_TAKEN,
+  ];
+}
 
 /**
  * @param {NoProCheck} check
@@ -340,7 +392,7 @@ export async function runNoProBattery(callTool, debugPort, report = () => {}) {
   report(connect);
   const checks = [connect];
   const connectHeld = connect.verdict === "PASS";
-  for (const check of AFTER_CONNECT) {
+  for (const check of afterConnect(debugPort)) {
     const result = connectHeld ? await scored(check, callTool) : notRun(check);
     report(result);
     checks.push(result);

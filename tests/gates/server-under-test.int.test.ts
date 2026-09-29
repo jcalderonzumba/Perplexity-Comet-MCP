@@ -140,3 +140,101 @@ describe("the debug port's page list", () => {
     }
   });
 });
+
+describe("the debug port's page visibility", () => {
+  const TARGETS = JSON.stringify([
+    {
+      id: "sidecar-1",
+      type: "page",
+      url: "https://www.perplexity.ai/sidecar?copilot=true",
+    },
+    { id: "other-1", type: "page", url: "https://github.com/" },
+    {
+      id: "main-1",
+      type: "page",
+      url: "https://www.perplexity.ai/search/a-thread",
+    },
+  ]);
+
+  /** A page connection that answers `value` to evaluations, recording them. */
+  function fakePages(value: unknown) {
+    const opened: string[] = [];
+    const evaluated: string[] = [];
+    let closed = 0;
+    return {
+      opened,
+      evaluated,
+      closed: () => closed,
+      open: async (targetId: string) => {
+        opened.push(targetId);
+        return {
+          Runtime: {
+            evaluate: async ({ expression }: { expression: string }) => {
+              evaluated.push(expression);
+              return { result: { value } };
+            },
+          },
+          close: async () => {
+            closed += 1;
+          },
+        };
+      },
+    };
+  }
+
+  it("reads document.visibilityState of Perplexity's main page, not the sidecar or another page", async () => {
+    const listener = await loopbackListener(200, TARGETS);
+    const pages = fakePages("hidden");
+    try {
+      expect(await debugPort(listener.port, pages.open).pageVisibility()).toBe(
+        "hidden",
+      );
+      expect(pages.opened).toEqual(["main-1"]);
+      expect(pages.evaluated).toEqual(["document.visibilityState"]);
+      expect(pages.closed()).toBe(1);
+    } finally {
+      await listener.close();
+    }
+  });
+
+  it("is undefined when Comet has no main Perplexity page open", async () => {
+    const listener = await loopbackListener(
+      200,
+      JSON.stringify([
+        { id: "other-1", type: "page", url: "https://github.com/" },
+      ]),
+    );
+    const pages = fakePages("hidden");
+    try {
+      expect(
+        await debugPort(listener.port, pages.open).pageVisibility(),
+      ).toBeUndefined();
+      expect(pages.opened).toEqual([]);
+    } finally {
+      await listener.close();
+    }
+  });
+
+  it("closes the connection it opened when the page does not answer", async () => {
+    const listener = await loopbackListener(200, TARGETS);
+    let closed = 0;
+    const open = async () => ({
+      Runtime: {
+        evaluate: async () => {
+          throw new Error("page gone");
+        },
+      },
+      close: async () => {
+        closed += 1;
+      },
+    });
+    try {
+      await expect(
+        debugPort(listener.port, open).pageVisibility(),
+      ).rejects.toThrow("page gone");
+      expect(closed).toBe(1);
+    } finally {
+      await listener.close();
+    }
+  });
+});

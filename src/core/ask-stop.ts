@@ -7,17 +7,17 @@
 // stop is taken once the control is gone.
 
 import type { PagePoint } from "../page-scripts.js";
+import {
+  type FocusEmulationPort,
+  withFocusEmulated,
+} from "./focus-emulation.js";
 
 /** What the stop needs from the browser. */
-export interface StopPort {
+export interface StopPort extends FocusEmulationPort {
   /** The centre of the input bar's stop control, or null when none shows. */
   locateStopControl(): Promise<PagePoint | null>;
   /** Clicks at a point in the page, as trusted input. */
   clickAt(point: PagePoint): Promise<void>;
-  /** Makes the page believe itself focused and visible; refused off Perplexity. */
-  startFocusEmulation(): Promise<void>;
-  /** Ends `startFocusEmulation`. */
-  stopFocusEmulation(): Promise<void>;
   /** Milliseconds, on the clock `wait` advances. */
   now(): number;
   wait(ms: number): Promise<void>;
@@ -43,15 +43,21 @@ export type StopOutcome =
 export async function stopAnswer(port: StopPort): Promise<StopOutcome> {
   const control = await port.locateStopControl();
   if (control === null) return { kind: "nothing-to-stop" };
-  await port.startFocusEmulation();
-  try {
-    await port.clickAt(control);
-    return (await goneWithin(port))
-      ? { kind: "stopped" }
-      : { kind: "not-taken" };
-  } finally {
-    await port.stopFocusEmulation().catch(() => undefined);
-  }
+  return withFocusEmulated(
+    port,
+    () => clickAndWaitForGone(port, control),
+    (error) => {
+      throw error;
+    },
+  );
+}
+
+async function clickAndWaitForGone(
+  port: StopPort,
+  control: PagePoint,
+): Promise<StopOutcome> {
+  await port.clickAt(control);
+  return (await goneWithin(port)) ? { kind: "stopped" } : { kind: "not-taken" };
 }
 
 /** True once the stop control is gone, within the stop's wait. */

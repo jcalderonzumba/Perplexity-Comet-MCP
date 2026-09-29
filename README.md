@@ -397,9 +397,11 @@ File uploaded successfully: /home/user/doc.pdf
 
 | Component | Purpose |
 |-----------|---------|
-| `index.ts` | MCP server and tool handlers |
+| `index.ts`, `stdio-server.ts` | The stdio MCP server: it lists the tool table's tools and answers each call through the table |
+| `http-bridge.ts`, `bridge-server.ts` | The HTTP bridge: the token, CORS and routes over the same table (`GET /tools` lists each tool's description and input schema; `GET /health` reports the package's version) |
+| `cdp-tools.ts` | Builds the tool table over the CDP client: what each tool does when it is called |
 | `cdp-client.ts` | Chrome DevTools Protocol client with reconnection logic |
-| `core/` | The tool core both servers share: `comet_ask`, `comet_poll` and `comet_stop`, with typing and submitting the prompt in `core/ask-send.ts`, when an answer is complete and the ask's own in `core/answer-watch.ts`, stopping it in `core/ask-stop.ts`, and the tab they use in `core/ask-tab.ts` and `core/perplexity-tab.ts`, and `comet_mode` |
+| `core/` | The tool core both servers share: the tool table (`core/tools.ts`) and the one reply type (`core/tool-reply.ts`), `comet_screenshot`, `comet_ask`, `comet_poll` and `comet_stop`, with typing and submitting the prompt in `core/ask-send.ts`, when an answer is complete and the ask's own in `core/answer-watch.ts`, stopping it in `core/ask-stop.ts`, and the tab they use in `core/ask-tab.ts` and `core/perplexity-tab.ts`, and `comet_mode` |
 | `perplexity-pages.ts` | Perplexity's origin and home page, and the one rule that says which tab is Perplexity's main page |
 | `comet-ai.ts` | Reading the answer and its status from the page |
 | `types.ts` | TypeScript interfaces for tabs, state, and CDP types |

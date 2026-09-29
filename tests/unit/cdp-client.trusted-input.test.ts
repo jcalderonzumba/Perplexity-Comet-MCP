@@ -158,6 +158,95 @@ describe("CometCDPClient focus emulation", () => {
     });
   });
 
+  it("ends only when its last holder stops", async () => {
+    await client.startFocusEmulation();
+    await client.startFocusEmulation();
+    tab.inputs.length = 0;
+
+    await client.stopFocusEmulation();
+    expect(tab.inputs).toEqual([]);
+
+    await client.stopFocusEmulation();
+    expect(tab.inputs).toEqual([
+      {
+        method: "Emulation.setFocusEmulationEnabled",
+        params: { enabled: false },
+      },
+    ]);
+  });
+
+  it("does not count a start that was refused", async () => {
+    await client.startFocusEmulation();
+    tab.moveTo("https://example.com/");
+    await expect(client.startFocusEmulation()).rejects.toThrow();
+    tab.inputs.length = 0;
+
+    await client.stopFocusEmulation();
+
+    expect(tab.inputs.at(-1)).toEqual({
+      method: "Emulation.setFocusEmulationEnabled",
+      params: { enabled: false },
+    });
+  });
+
+  it("does not let a stop end an emulation that another start is still switching on", async () => {
+    await client.startFocusEmulation();
+    const finishEnable = tab.holdFocusEnables();
+    const secondStart = client.startFocusEmulation();
+    await vi.waitFor(() => expect(tab.inputs).toHaveLength(2));
+
+    await client.stopFocusEmulation();
+    finishEnable();
+    await secondStart;
+
+    expect(tab.inputs.map((input) => input.params)).toEqual([
+      { enabled: true },
+      { enabled: true },
+    ]);
+  });
+
+  it("does not count a start whose switching on failed, and leaves the emulation off once no one holds it", async () => {
+    await client.startFocusEmulation();
+    tab.focusEnableError = new Error("Target closed");
+    await expect(client.startFocusEmulation()).rejects.toThrow("Target closed");
+    tab.inputs.length = 0;
+
+    await client.stopFocusEmulation();
+
+    expect(tab.inputs.map((input) => input.params)).toEqual([
+      { enabled: false },
+    ]);
+  });
+
+  it("switches the emulation off when the last holder's start fails after the others stopped", async () => {
+    await client.startFocusEmulation();
+    const finishEnable = tab.holdFocusEnables();
+    tab.focusEnableError = new Error("Target closed");
+    const secondStart = client.startFocusEmulation();
+    const failed = expect(secondStart).rejects.toThrow("Target closed");
+    await vi.waitFor(() => expect(tab.inputs).toHaveLength(2));
+    await client.stopFocusEmulation();
+    tab.inputs.length = 0;
+
+    finishEnable();
+    await failed;
+
+    expect(tab.inputs.map((input) => input.params)).toEqual([
+      { enabled: false },
+    ]);
+  });
+
+  it("counts again from none after the last holder stopped", async () => {
+    await client.startFocusEmulation();
+    await client.stopFocusEmulation();
+    await client.startFocusEmulation();
+    tab.inputs.length = 0;
+
+    await client.stopFocusEmulation();
+
+    expect(tab.inputs).toHaveLength(1);
+  });
+
   it("does not stop when not connected", async () => {
     await expect(new CometCDPClient().stopFocusEmulation()).rejects.toThrow(
       "Not connected to Comet. Call connect() first.",

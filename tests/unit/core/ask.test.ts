@@ -1529,6 +1529,10 @@ describe("src/core/ask.ts and its siblings", () => {
     "thread-turn.ts",
     "perplexity-tab.ts",
     "page-script-failed.ts",
+    "tool-reply.ts",
+    "focus-emulation.ts",
+    "screenshot.ts",
+    "tools.ts",
   ];
 
   it.each(FILES)(
@@ -1539,7 +1543,7 @@ describe("src/core/ask.ts and its siblings", () => {
 
       for (const imported of imports) {
         expect(imported).toMatch(
-          /^(\.\/(ask|answer-watch|ask-input|ask-previous|ask-send|ask-stop|ask-task|ask-reply|ask-mode|ask-tab|perplexity-tab|mode|mode-tool|page-script-failed|thread-turn)\.js|\.\.\/(page-scripts|modes|perplexity-pages|error-message)\.js|node:crypto)$/,
+          /^(\.\/(ask|answer-watch|ask-input|ask-previous|ask-send|ask-stop|ask-task|ask-reply|ask-mode|ask-tab|perplexity-tab|mode|mode-tool|page-script-failed|thread-turn|tool-reply|focus-emulation|screenshot|tools)\.js|\.\.\/(page-scripts|modes|perplexity-pages|error-message)\.js|node:crypto)$/,
         );
       }
     },

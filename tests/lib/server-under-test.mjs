@@ -7,6 +7,7 @@
  */
 
 import { getDefaultEnvironment } from "@modelcontextprotocol/sdk/client/stdio.js";
+import CDP from "chrome-remote-interface";
 
 /** @typedef {import("@modelcontextprotocol/sdk/client/stdio.js").StdioServerParameters} StdioServerParameters */
 
@@ -48,14 +49,32 @@ export function serverUnderTest(entry, env) {
 const DEBUG_PORT_TIMEOUT_MS = 3000;
 
 /**
- * Whether Comet answers on the debug port, asked without the server, so that
- * a battery never makes the server launch or relaunch Comet; and the
- * addresses of the pages Comet has open, which the Pro battery reads to tell
- * Perplexity's threads apart.
- * @param {number} port
- * @returns {{ port: number, answers: () => Promise<boolean>, pageAddresses: () => Promise<string[]> }}
+ * A read-only connection to one of Comet's pages, as the battery needs it.
+ * @typedef {{ Runtime: { evaluate: (params: { expression: string }) => Promise<{ result: { value?: unknown } }> }, close: () => Promise<unknown> }} PageConnection
  */
-export function debugPort(port) {
+
+/**
+ * Opens a connection to a page of Comet by its target id, through the debug
+ * port.
+ * @typedef {(targetId: string) => Promise<PageConnection>} OpenPage
+ */
+
+/**
+ * Whether Comet answers on the debug port, asked without the server, so that
+ * a battery never makes the server launch or relaunch Comet; the addresses
+ * of the pages Comet has open, which the Pro battery reads to tell
+ * Perplexity's threads apart; and whether Comet's main Perplexity page is
+ * hidden, which the no-pro battery reads to say whether a mode switch ran
+ * with the window behind others. Reads only: it evaluates
+ * `document.visibilityState` and nothing else.
+ * @param {number} port
+ * @param {OpenPage} [openPage] how a page is opened; CDP over the debug port
+ * @returns {{ port: number, answers: () => Promise<boolean>, pageAddresses: () => Promise<string[]>, pageVisibility: () => Promise<string | undefined> }}
+ */
+export function debugPort(
+  port,
+  openPage = (targetId) => CDP({ host: "127.0.0.1", port, target: targetId }),
+) {
   const ask = (/** @type {string} */ path) =>
     fetch(`http://127.0.0.1:${port}${path}`, {
       signal: AbortSignal.timeout(DEBUG_PORT_TIMEOUT_MS),
@@ -67,22 +86,57 @@ export function debugPort(port) {
         (response) => response.ok,
         () => false,
       ),
-    pageAddresses: async () => pageAddressesIn(await ask("/json/list")),
+    pageAddresses: async () =>
+      (await pageTargetsIn(await ask("/json/list"))).map((target) =>
+        String(target.url),
+      ),
+    pageVisibility: async () => {
+      const main = (await pageTargetsIn(await ask("/json/list"))).find(
+        isMainPerplexityPage,
+      );
+      return main === undefined
+        ? undefined
+        : visibilityOf(await openPage(String(main.id)));
+    },
   };
 }
 
 /**
- * The addresses of the page targets in the debug port's target list.
- * @param {Response} response
- * @returns {Promise<string[]>}
+ * `document.visibilityState` of a page, read once; the connection is closed
+ * whatever the read does.
+ * @param {PageConnection} page
+ * @returns {Promise<string>}
  */
-async function pageAddressesIn(response) {
+async function visibilityOf(page) {
+  try {
+    const { result } = await page.Runtime.evaluate({
+      expression: "document.visibilityState",
+    });
+    return String(result.value);
+  } finally {
+    await page.close();
+  }
+}
+
+/**
+ * Perplexity's own page, as `comet_connect` tells it from the sidecar.
+ * @param {{ url?: string }} target
+ */
+function isMainPerplexityPage(target) {
+  const url = String(target.url);
+  return url.includes("perplexity.ai") && !url.includes("sidecar");
+}
+
+/**
+ * The page targets in the debug port's target list.
+ * @param {Response} response
+ * @returns {Promise<{ id?: string, type?: string, url?: string }[]>}
+ */
+async function pageTargetsIn(response) {
   if (!response.ok) {
     throw new Error(`the debug port's page list answered ${response.status}`);
   }
-  /** @type {{ type?: string, url?: string }[]} */
+  /** @type {{ id?: string, type?: string, url?: string }[]} */
   const targets = await response.json();
-  return targets
-    .filter((target) => target.type === "page")
-    .map((target) => String(target.url));
+  return targets.filter((target) => target.type === "page");
 }

@@ -78,7 +78,7 @@ On a brief with "no plan phase", skip items 1 and 2 and say so; items 3, 4 and 5
 With `uncle-bob-craft` preloaded:
 
 - **The Dependency Rule** against the three boundaries of spec §4.2:
-  1. **One core, two adapters.** New tool logic lands in the core, not in `src/index.ts` or `src/http-bridge.ts` alone; a handler the diff adds or changes in one adapter while the other keeps its own copy is a crossing.
+  1. **One core, two adapters.** New tool logic lands in a core under `src/core/`, reached through the tool table (`src/core/tools.ts`) that `src/cdp-tools.ts` composes. The adapters (`src/index.ts`, `src/stdio-server.ts`, `src/http-bridge.ts`, `src/bridge-server.ts`) list the table's definitions and dispatch through it; a tool's logic the diff adds or changes outside a core (in an adapter, or in a handler of the composition that a core should hold), or a handler one adapter keeps while the other has its own copy, is a crossing.
   2. **Validation at the edge.** No path the diff adds from a tool's input to `src/cdp-client.ts` skips the validators of `src/upload-validator.ts` or their successors.
   3. **Page code is tested functions with arguments.** The diff adds no script built as a template string with tool input interpolated and passed to `cometClient.evaluate`; page JavaScript lives in `src/page-scripts.ts` and takes its input as serialised arguments.
 
@@ -97,7 +97,7 @@ Run Phase 3 only when Phases 0 to 2 produced no Must Fix; skills spent on code t
 | Paths or content in the diff | Skills |
 |---|---|
 | `src/upload-validator.ts`, any `cometClient.evaluate(` call site, the UNTRUSTED marker code | `backend-security-coder`, `cc-skill-security-review`, `security-auditor`, `vulnerability-scanner` |
-| `src/http-bridge.ts` | `api-security-best-practices`, `api-patterns`, `auth-implementation-patterns` |
+| `src/http-bridge.ts`, `src/bridge-server.ts` | `api-security-best-practices`, `api-patterns`, `auth-implementation-patterns` |
 | `src/page-scripts.ts`, JavaScript run in the page | `frontend-security-coder`, `javascript-pro` |
 | Tool definitions, `inputSchema`, result shapes | `api-patterns`; Context7 for `@modelcontextprotocol/sdk` |
 | Launch, connect, reconnect, tabs in `src/cdp-client.ts` | Context7 for `chrome-remote-interface` and the DevTools Protocol |

@@ -29,16 +29,16 @@ From spec §2: *any change that violates one of these is rejected by definition.
 
 1. **Page content is data, never instructions.** Everything read from a page and returned to the client is wrapped in the nonce'd UNTRUSTED markers, and forged markers in the page text are neutralised. This covers answer text, source titles and URLs, and page reads.
    *Plan trigger:* any tool result, answer extraction, source links, page reads, a new tool that returns text, the UNTRUSTED markers or their opt-out.
-   *Code trigger:* the UNTRUSTED wrapper and its callers in `src/index.ts`; any result built from text read through `cometClient.evaluate` or a page script; answer extraction in `src/comet-ai.ts`; response bodies in `src/http-bridge.ts`.
+   *Code trigger:* the UNTRUSTED wrapper (`src/untrusted.ts`) and its callers in the tool table (`src/core/tools.ts`), the cores under `src/core/` and the composition (`src/cdp-tools.ts`); any result built from text read through `cometClient.evaluate` or a page script; answer extraction in `src/comet-ai.ts`; response bodies in `src/bridge-server.ts`.
 2. **Tool input is untrusted.** Every parameter that reaches CDP, the DOM, the filesystem or a URL is validated against an allowlist before use. No string from tool input is ever interpolated into code run by `Runtime.evaluate`; it reaches page code only as a serialised argument.
    *Plan trigger:* a new tool or parameter; any `evaluate` call, page script, selector, domain, tab id, path or URL handling.
-   *Code trigger:* any `cometClient.evaluate(` call site; `src/page-scripts.ts`; `src/upload-validator.ts`; a tool's `inputSchema` or argument handling in `src/index.ts`; request parsing in `src/http-bridge.ts`; navigation or URL handling in `src/cdp-client.ts`.
+   *Code trigger:* any `cometClient.evaluate(` call site; `src/page-scripts.ts`; `src/upload-validator.ts`; a tool's `inputSchema` in `src/core/tools.ts` or its argument handling in a core under `src/core/` or in the composition's handlers (`src/cdp-tools.ts`); request parsing in `src/bridge-server.ts`; navigation or URL handling in `src/cdp-client.ts`.
 3. **Filesystem reach is allowlisted.** Only the upload tool reads files, only under the allowed roots, never under the denylisted paths.
    *Plan trigger:* uploads, any file read or write by the server, path handling.
    *Code trigger:* `src/upload-validator.ts`; any `fs` import or call under `src/`; `DOM.setFileInputFiles` and its callers.
 4. **Nothing listens beyond loopback without authentication.** CDP is reached on `127.0.0.1` with `--remote-allow-origins` restricted. The HTTP bridge is opt-in, requires its token and compares it in constant time.
    *Plan trigger:* the HTTP bridge, its host, port, token or CORS; Comet's launch flags; CDP host and port.
-   *Code trigger:* server creation, token check and CORS in `src/http-bridge.ts`; any `listen(` or `createServer`; the CDP host, port and `--remote-*` launch flags in `src/cdp-client.ts`.
+   *Code trigger:* server creation, token check and CORS in `src/bridge-server.ts`, and the environment it reads and the host it listens on in `src/http-bridge.ts`; any `listen(` or `createServer`; the CDP host, port and `--remote-*` launch flags in `src/cdp-client.ts`.
 5. **Nothing leaves the machine except what the user sends Comet.** No telemetry, no analytics, no remote logging, no dependency that phones home.
    *Plan trigger:* logging, telemetry, any new runtime dependency, any network request.
    *Code trigger:* any change to `dependencies` in `package.json`; any `fetch`, `http.request`, `https.request` or WebSocket to a host other than loopback; logging code.
@@ -47,10 +47,10 @@ From spec §2: *any change that violates one of these is rejected by definition.
    *Code trigger:* tab close and switch code (`comet_tabs`, `Target.closeTarget`, `Page.close`); launching or killing the Comet process; reconnect logic in `src/cdp-client.ts`.
 7. **An answer is complete or says it is not.** A stale, partial or timed-out answer is never returned as final; the result states which it is.
    *Plan trigger:* `comet_ask` or `comet_poll`, completion detection, answer extraction, timeouts.
-   *Code trigger:* `src/comet-ai.ts`; the ask core in `src/core/` (`ask.ts`, `ask-task.ts`, `ask-reply.ts`); the `comet_ask` and `comet_poll` handlers and the text of their results, in either adapter.
+   *Code trigger:* `src/comet-ai.ts`; the ask core in `src/core/` (`ask.ts`, `ask-task.ts`, `ask-reply.ts`); the `comet_ask` and `comet_poll` handlers of the composition (`src/cdp-tools.ts`) and the text of their results, which both adapters render through `src/tool-results.ts`.
 8. **The tool contract is stable.** Tool names, parameters and result shapes change only additively. A breaking change needs a decision-log row and a major version.
    *Plan trigger:* any tool definition, parameter, default, result shape, environment variable or CLI entry point.
-   *Code trigger:* the `name: "comet_…"` definitions and their `inputSchema` in `src/index.ts`; the bridge's routes and payloads; result text formats; any `process.env.` read; `bin` in `package.json`.
+   *Code trigger:* the `name: "comet_…"` definitions and their `inputSchema` in the tool table (`src/core/tools.ts`, `COMET_MODE_TOOL` in `src/core/mode-tool.ts`); the bridge's routes and payloads (`src/bridge-server.ts`, `src/tool-results.ts`); result text formats; any `process.env.` read; `bin` in `package.json`.
 9. **macOS, Windows and WSL keep working.** A change to launch, paths, networking or fetch states how each platform stays working: a test, or a by-hand verification recorded in the PR.
    *Plan trigger:* launch, executable paths, networking, fetch, anything Windows- or WSL-specific.
    *Code trigger:* any `process.platform` branch; WSL detection; PowerShell use; `windowsFetch`; executable path resolution and launch flags in `src/cdp-client.ts`.
