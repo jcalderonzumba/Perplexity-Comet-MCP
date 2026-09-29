@@ -8,6 +8,7 @@ import { cdpAskPort, createCdpAskCore } from "../../src/cdp-ask-port.js";
 import { createCdpPerplexityTab } from "../../src/cdp-perplexity-tab.js";
 import { PageScriptFailed } from "../../src/core/ask.js";
 import { sendPrompt } from "../../src/core/ask-send.js";
+import { describeRunningWithoutPort } from "../../src/core/comet-launch.js";
 import { ModeCore } from "../../src/core/mode.js";
 import type { BrowserTarget } from "../../src/core/perplexity-tab.js";
 import {
@@ -462,7 +463,10 @@ describe("createCdpAskCore", () => {
     await vi.runAllTimersAsync();
     const outcome = await asking;
 
-    expect(outcome).toMatchObject({ kind: "failed" });
+    expect(outcome).toMatchObject({
+      kind: "failed",
+      message: `Failed to establish connection to Comet browser: ${describeRunningWithoutPort(9555, launch.startCommand(9555))}`,
+    });
     expect(launch.launches).toEqual([]);
     expect(client.calls).toEqual(["preOperationCheck"]);
   });

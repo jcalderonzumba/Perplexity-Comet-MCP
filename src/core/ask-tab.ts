@@ -7,6 +7,7 @@
 // the tab choice opened on it. A follow-up asks in the main tab as it is.
 // No tab other than Perplexity's main page is ever navigated.
 
+import { errorMessage } from "../error-message.js";
 import { PERPLEXITY_HOME } from "../perplexity-pages.js";
 import {
   type BrowserTarget,
@@ -38,6 +39,11 @@ export const ASK_TAB_TIMING = {
   fallbackSettleMs: 1500,
 } as const;
 
+/** Whether the ask has a connection; when it has not, why. */
+export type ConnectionResult =
+  | { readonly connected: true }
+  | { readonly connected: false; readonly cause: string };
+
 /** The connection an ask runs on, and the tab it asks in. */
 export class AskTab {
   constructor(
@@ -51,11 +57,15 @@ export class AskTab {
     readonly perplexity: PerplexityTab,
   ) {}
 
-  /** True when connected, after starting Comet again if the check failed. */
-  async connectOrRecover(): Promise<boolean> {
+  /**
+   * Connected, after starting Comet again if the check failed; otherwise the
+   * cause of the recovery's failure, such as a Comet running without the
+   * debug port, with the command that starts it.
+   */
+  async connectOrRecover(): Promise<ConnectionResult> {
     try {
       await this.port.preOperationCheck();
-      return true;
+      return { connected: true };
     } catch {
       // The connection is gone: start Comet, or find it, and reconnect.
     }
@@ -63,9 +73,9 @@ export class AskTab {
       await this.port.startComet(this.cometPort);
       const page = recoveryPage(await this.port.listTargets());
       if (page) await this.port.connect(page.id);
-      return true;
-    } catch {
-      return false;
+      return { connected: true };
+    } catch (error) {
+      return { connected: false, cause: errorMessage(error) };
     }
   }
 

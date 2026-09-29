@@ -491,7 +491,8 @@ describe("AskCore.ask: the tab it asks in", () => {
 
     expect(outcome).toEqual({
       kind: "failed",
-      message: "Failed to establish connection to Comet browser",
+      message:
+        "Failed to establish connection to Comet browser: Comet did not start",
       notice: { line: null },
     });
     expect(port.sentPrompts).toEqual([]);
@@ -723,6 +724,115 @@ describe("AskCore.ask: never the previous turn's answer", () => {
     const outcome = await core.ask({ prompt: "q", newChat: true });
 
     expect(answerOf(outcome)).toBe("Paris");
+  });
+});
+
+// The read before sending is only a floor: a long thread scrolled up renders
+// the turns near the view, so that read can name a turn below the previous
+// one. The ask's own turn is marked from the read taken once its submit is
+// confirmed, and only that turn's answer, or a later one, is the ask's.
+describe("AskCore.ask: the ask's own turn, marked at its confirmed submit", () => {
+  /** The thread as the ask reads it once the submit is confirmed. */
+  const atSubmit = (latestTurn: number) => ({
+    latestTurn,
+    proseCount: 1,
+    lastProseText: "",
+  });
+
+  /**
+   * A thread whose previous turn is 3, though the read before sending, with
+   * the page scrolled up, shows only turn 1.
+   */
+  function scrolledUpAt(after: PageReading[]): Rig {
+    const built = answering(after);
+    built.port.before = reading("", { status: "idle", latestTurn: 1 });
+    built.port.atSubmit = atSubmit(4);
+    return built;
+  }
+
+  it("does not return the previous turn's completed answer when the read before sending named a lower turn", async () => {
+    const { core } = scrolledUpAt([
+      reading(PREVIOUS_ANSWER, { status: "completed", latestTurn: 3 }),
+      reading("", { latestTurn: 4 }),
+      reading(LONG_ANSWER, { status: "completed", latestTurn: 4 }),
+    ]);
+
+    const outcome = await core.ask({ prompt: "q" });
+
+    expect(answerOf(outcome)).toBe(LONG_ANSWER);
+  });
+
+  it("gives no partial answer from the previous turn when time runs out", async () => {
+    const { core } = scrolledUpAt([
+      reading(PREVIOUS_ANSWER, { status: "completed", latestTurn: 3 }),
+    ]);
+
+    const outcome = await core.ask({ prompt: "q", timeout: 6000 });
+
+    expect(outcome.kind).toBe("timed-out");
+    expect(outcome.kind === "timed-out" && outcome.progress.partialAnswer).toBe(
+      "",
+    );
+  });
+
+  it("holds when the page has not rendered the new question at the confirmed submit", async () => {
+    const { port, core } = scrolledUpAt([
+      reading(PREVIOUS_ANSWER, { status: "completed", latestTurn: 1 }),
+      reading(LONG_ANSWER, { status: "completed", latestTurn: 2 }),
+    ]);
+    port.atSubmit = atSubmit(1);
+
+    const outcome = await core.ask({ prompt: "q" });
+
+    expect(answerOf(outcome)).toBe(LONG_ANSWER);
+  });
+
+  it("follows the same turn in comet_poll", async () => {
+    const { port, core } = scrolledUpAt([
+      reading(PREVIOUS_ANSWER, { status: "completed", latestTurn: 3 }),
+    ]);
+    expect((await core.ask({ prompt: "q", timeout: 3000 })).kind).toBe(
+      "timed-out",
+    );
+    port.after.push(
+      reading(PREVIOUS_ANSWER, { status: "completed", latestTurn: 3 }),
+    );
+
+    const working = await core.poll();
+    port.after.push(
+      reading(LONG_ANSWER, { status: "completed", latestTurn: 4 }),
+    );
+    const answered = await core.poll();
+
+    expect(working.kind).toBe("working");
+    expect(working.kind === "working" && working.progress.partialAnswer).toBe(
+      "",
+    );
+    expect(answered).toEqual({ kind: "answered", answer: LONG_ANSWER });
+  });
+
+  it("reads the thread once more after the submit, taking no poll's place", async () => {
+    const { port, core } = scrolledUpAt([
+      reading(LONG_ANSWER, { status: "completed", latestTurn: 4 }),
+    ]);
+
+    await core.ask({ prompt: "q" });
+
+    const sent = port.calls.indexOf("pressEnter");
+    expect(port.calls.slice(sent)).toContain("readThreadState");
+    expect(port.polls).toBe(1);
+  });
+
+  it("falls back to the floor when the read at the submit fails", async () => {
+    const { port, core } = scrolledUpAt([
+      reading(PREVIOUS_ANSWER, { status: "completed", latestTurn: 1 }),
+      reading(LONG_ANSWER, { status: "completed", latestTurn: 2 }),
+    ]);
+    port.atSubmit = new Error("Page is navigating");
+
+    const outcome = await core.ask({ prompt: "q" });
+
+    expect(answerOf(outcome)).toBe(LONG_ANSWER);
   });
 });
 
