@@ -47,7 +47,7 @@ For each existing symbol the plan proposes to modify (max 10, prioritized by fan
 
 For each modified symbol:
 
-1. Run `codegraph impact <symbol> --depth 4 --json` and keep the entry points it reaches: the tool handlers (the `comet_*` cases of `src/index.ts` and the `handle*` functions of `src/http-bridge.ts`), the bridge's request handler, and the two process entry points (`src/index.ts`, `src/http-bridge.ts`). Map each to a critical path by name
+1. Run `codegraph impact <symbol> --depth 4 --json` and keep the entry points it reaches: the tool table's handlers (`createCdpToolTable` in `src/cdp-tools.ts` and the cores under `src/core/` it composes), the adapters' dispatch (the `CallTool` handler in `src/stdio-server.ts`, the request handler in `src/bridge-server.ts`), and the two process entry points (`src/index.ts`, `src/http-bridge.ts`). Map each to a critical path by name
 2. Run `codegraph affected <changed files...> --json` once over every file the plan modifies, for the existing test files the change reaches
 3. Deduplicate flows and test files across all modified symbols
 4. Cross-reference both lists against the plan's test strategy
@@ -104,7 +104,7 @@ Skips (always noted): skip 1–2 when the plan is docs-only or pure scaffolding 
 | Category | Trigger | Skills |
 |---|---|---|
 | Security surface | Plan touches input validation (`src/upload-validator.ts`), `cometClient.evaluate` call sites, or the UNTRUSTED markers | `backend-security-coder`, `cc-skill-security-review`, `security-auditor`, `vulnerability-scanner` |
-| HTTP bridge | Plan touches `src/http-bridge.ts`: auth, CORS, binding, routes | `api-security-best-practices`, `api-patterns`, `auth-implementation-patterns` |
+| HTTP bridge | Plan touches `src/http-bridge.ts` or `src/bridge-server.ts`: auth, CORS, binding, routes | `api-security-best-practices`, `api-patterns`, `auth-implementation-patterns` |
 | Page scripts | Plan adds or changes JavaScript run in the page | `frontend-security-coder`, `javascript-pro` |
 | Tool contract | Plan adds or changes a tool, a parameter, a default or a result shape | `api-patterns`; Context7 for `@modelcontextprotocol/sdk` |
 | CDP and the browser | Plan touches launch, connect, reconnect or tabs in `src/cdp-client.ts` | Context7 for `chrome-remote-interface` and the DevTools Protocol |
