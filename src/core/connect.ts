@@ -8,12 +8,16 @@ import {
   describeRunningWithoutPort,
   ensureCometOnPort,
 } from "./comet-launch.js";
+import type { TabMove } from "./perplexity-tab.js";
 import { errorReply, type ToolReply, textReply } from "./tool-reply.js";
 
-/** The connection's tab, once Comet is on its port. */
+/**
+ * The connection's tab, once Comet is on its port: the tab choice the ask
+ * and the mode share, so a tab connect opens is in their record. It moves
+ * the connection or opens a tab, and navigates nothing (principle 6).
+ */
 export interface ConnectTabs {
-  /** Puts the connection on Perplexity and says how, in one line. */
-  connectToPerplexity(): Promise<string>;
+  bringToMainPage(): Promise<TabMove>;
 }
 
 export interface ConnectDeps {
@@ -42,8 +46,16 @@ export async function answerConnect({
   } catch (failure) {
     return errorReply(launchFailed(port, launch, failure));
   }
-  return textReply(`${stateLine}\n${await tabs.connectToPerplexity()}`);
+  return textReply(`${stateLine}\n${TAB_LINES[await tabs.bringToMainPage()]}`);
 }
+
+const TAB_LINES: Record<TabMove, string> = {
+  stayed:
+    "Connected to Perplexity's main page: the connection was already on it.",
+  moved:
+    "Connected to Perplexity's main page: moved the connection to the tab already open on it.",
+  opened: "Connected to Perplexity's main page: opened it in a new tab.",
+};
 
 function running(port: number, browser: string): string {
   return `Comet is running with the debug port ${port} (${browser}).`;

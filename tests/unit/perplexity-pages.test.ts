@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  isPerplexityAddress,
   isPerplexityMainPage,
   PERPLEXITY_HOME,
   PERPLEXITY_ORIGIN,
@@ -63,5 +64,24 @@ describe("Perplexity's addresses", () => {
     expect(PERPLEXITY_ORIGIN).toBe("https://www.perplexity.ai");
     expect(PERPLEXITY_HOME).toBe("https://www.perplexity.ai/");
     expect(isPerplexityMainPage(PERPLEXITY_HOME)).toBe(true);
+  });
+});
+
+describe("isPerplexityAddress", () => {
+  it.each([
+    "https://www.perplexity.ai/",
+    "https://www.perplexity.ai/search/a-thread-abc123",
+    "https://www.perplexity.ai/sidecar?copilot=true",
+  ])("takes %s for Perplexity's, the sidecar included", (address) => {
+    expect(isPerplexityAddress(address)).toBe(true);
+  });
+
+  it.each([
+    "https://news.example/out?to=https://www.perplexity.ai/",
+    "https://www.perplexity.ai.example/",
+    "about:blank",
+    "not an address",
+  ])("does not take %s for Perplexity's", (address) => {
+    expect(isPerplexityAddress(address)).toBe(false);
   });
 });

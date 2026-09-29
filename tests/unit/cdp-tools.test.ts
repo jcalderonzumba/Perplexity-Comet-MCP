@@ -1,6 +1,7 @@
 // The composition: the tool table over the CDP client, the Comet module and
 // the UNTRUSTED wrapper. The cores' own rules are pinned in `core/`; this
-// pins what the composition itself holds: the connect, tabs and upload
+// pins what the composition itself holds: that connect is bound to the
+// configured port and the shared tab choice, and the tabs and upload
 // handlers (the stdio server's behaviour, which the bridge now shares).
 // That the client, the wrapper and the configured port reach the cores is
 // pinned in `cdp-tools.ask.test.ts` and `cdp-tools.tab.test.ts`.
@@ -139,10 +140,7 @@ describe("comet_connect", () => {
     const launch = answeringLaunch();
     const table = tableOver(
       {
-        connect: async () => "ok",
-        listTargets: async () => [
-          target("main", "https://www.perplexity.ai/search/x"),
-        ],
+        pageAddress: async () => "https://www.perplexity.ai/search/x",
       },
       launch,
     );
@@ -153,7 +151,7 @@ describe("comet_connect", () => {
     expect(launch.launches).toEqual([]);
     expect(reply).toEqual({
       kind: "text",
-      text: "Comet is running with the debug port 9444 (Comet/140.0).\nConnected to Perplexity",
+      text: "Comet is running with the debug port 9444 (Comet/140.0).\nConnected to Perplexity's main page: the connection was already on it.",
       isError: false,
     });
   });
@@ -161,12 +159,7 @@ describe("comet_connect", () => {
   it("launches Comet on the configured port when none runs", async () => {
     const launch = new FakeCometLaunch();
     const table = tableOver(
-      {
-        connect: async () => "ok",
-        listTargets: async () => [
-          target("main", "https://www.perplexity.ai/search/x"),
-        ],
-      },
+      { pageAddress: async () => "https://www.perplexity.ai/search/x" },
       launch,
     );
 
@@ -190,10 +183,11 @@ describe("comet_connect", () => {
     expect(launch.launches).toEqual([]);
   });
 
-  it("connects to the main Perplexity tab before the sidecar", async () => {
+  it("moves the connection to the main page, not the sidecar listed before it", async () => {
     const connect = vi.fn().mockResolvedValue("ok");
     const table = tableOver({
       connect,
+      pageAddress: async () => "https://news.example/today",
       listTargets: async () => [
         target("side", "https://www.perplexity.ai/sidecar?x=1"),
         target("main", "https://www.perplexity.ai/"),
@@ -202,41 +196,30 @@ describe("comet_connect", () => {
 
     await table.call("comet_connect", {});
 
+    expect(connect).toHaveBeenCalledTimes(1);
     expect(connect).toHaveBeenCalledWith("main");
   });
 
-  it("navigates a tab that is not on Perplexity, then connects", async () => {
-    vi.useFakeTimers();
-    const navigate = vi.fn().mockResolvedValue({});
-    const table = tableOver({
-      connect: async () => "ok",
-      navigate,
-      listTargets: async () => [target("other", "https://example.com/")],
-    });
-
-    const pending = table.call("comet_connect", {});
-    await vi.advanceTimersByTimeAsync(1500);
-    await pending;
-
-    expect(navigate).toHaveBeenCalledWith("https://www.perplexity.ai/", true);
-  });
-
-  it("opens a Perplexity tab when Comet has no page", async () => {
+  it("leaves a user's page where it was: it navigates nothing, and opens a tab when no main page is open", async () => {
     vi.useFakeTimers();
     const connect = vi.fn().mockResolvedValue("ok");
+    const navigate = vi.fn();
     const table = tableOver({
       connect,
+      navigate,
+      pageAddress: async () => "https://example.com/",
       newTab: async () => target("fresh", "https://www.perplexity.ai/"),
-      listTargets: async () => [],
+      listTargets: async () => [target("other", "https://example.com/")],
     });
 
     const pending = table.call("comet_connect", {});
     await vi.advanceTimersByTimeAsync(2000);
     const reply = await pending;
 
+    expect(navigate).not.toHaveBeenCalled();
     expect(connect).toHaveBeenCalledWith("fresh");
     expect(textOf(reply as never)).toBe(
-      "Comet is running with the debug port 9444 (Comet/140.0).\nCreated new tab and navigated to Perplexity",
+      "Comet is running with the debug port 9444 (Comet/140.0).\nConnected to Perplexity's main page: opened it in a new tab.",
     );
   });
 });

@@ -11,7 +11,11 @@ import {
 import { errorMessage } from "./error-message.js";
 import { IS_WINDOWS, IS_WSL, windowsFetch } from "./host-platform.js";
 import type { PagePoint } from "./page-scripts.js";
-import { isPerplexityMainPage, PERPLEXITY_ORIGIN } from "./perplexity-pages.js";
+import {
+  isPerplexityAddress,
+  isPerplexityMainPage,
+  PERPLEXITY_ORIGIN,
+} from "./perplexity-pages.js";
 import type {
   CDPTarget,
   CometState,
@@ -392,6 +396,15 @@ export interface CometClientOptions {
   readonly launch?: CometLaunch;
 }
 
+/** The tab a reconnect goes to among `targets`, by the one rule for the main page. */
+function reconnectTarget(targets: readonly CDPTarget[]): CDPTarget | undefined {
+  const pages = targets.filter((t) => t.type === "page");
+  return (
+    pages.find((t) => isPerplexityMainPage(t.url)) ??
+    pages.find((t) => t.url !== "about:blank" && !isPerplexityAddress(t.url))
+  );
+}
+
 export class CometCDPClient {
   private client: CDP.Client | null = null;
   /**
@@ -616,21 +629,7 @@ export class CometCDPClient {
             try {
               await this.ensureCometRunning();
               await new Promise((r) => setTimeout(r, 1500));
-              const targets = await this.listTargets();
-              // Pick main Perplexity tab, NOT the sidecar.
-              const page =
-                targets.find(
-                  (t) =>
-                    t.type === "page" &&
-                    t.url.includes("perplexity") &&
-                    !t.url.includes("sidecar"),
-                ) ||
-                targets.find(
-                  (t) => t.type === "page" && t.url.includes("perplexity"),
-                );
-              const anyPage = page || targets.find((t) => t.type === "page");
-              if (anyPage) {
-                await this.connect(anyPage.id);
+              if ((await this.connectToReconnectTarget()) !== null) {
                 return await operation();
               }
             } catch {
@@ -697,28 +696,22 @@ export class CometCDPClient {
       }
     }
 
-    // Find best target. Prefer the MAIN Perplexity tab — explicitly
-    // exclude `sidecar` URLs, which Comet uses for its right-panel
-    // chat helper. Connecting to the sidecar by mistake silently
-    // routes the prompt and the stop to the wrong tab.
-    const targets = await this.listTargets();
-    const target =
-      targets.find(
-        (t) =>
-          t.type === "page" &&
-          t.url.includes("perplexity.ai") &&
-          !t.url.includes("sidecar"),
-      ) ||
-      targets.find(
-        (t) => t.type === "page" && t.url.includes("perplexity.ai"),
-      ) ||
-      targets.find((t) => t.type === "page" && t.url !== "about:blank");
-
-    if (target) {
-      return await this.connect(target.id);
-    }
+    const connected = await this.connectToReconnectTarget();
+    if (connected !== null) return connected;
 
     throw new Error("No suitable tab found for reconnection");
+  }
+
+  /**
+   * Connects to the best tab there is: Perplexity's main page when one is
+   * open, else a page that is not Perplexity's at all (the tab choice moves
+   * the connection off it before anything is typed). Never the sidecar, the
+   * side panel's chat, which routes a prompt and a stop to the wrong tab.
+   * Null when there is no such tab.
+   */
+  private async connectToReconnectTarget(): Promise<string | null> {
+    const target = reconnectTarget(await this.listTargets());
+    return target ? await this.connect(target.id) : null;
   }
 
   /**

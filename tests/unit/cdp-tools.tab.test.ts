@@ -4,7 +4,7 @@
 // builders are wrapped to pass through to the real ones while recording what
 // they were given and what they returned.
 
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 const built = vi.hoisted(() => ({
   tabs: [] as unknown[],
@@ -77,5 +77,39 @@ describe("createCdpToolTable's tab record", () => {
     expect(built.modeTabs[0]).toBe(built.tabs[0]);
     expect(built.askTabs[0]).toBe(built.tabs[0]);
     expect(built.askModes[0]).toBe(built.modeTools[0]);
+  });
+
+  it("puts the tab comet_connect opens in the record the ask and the mode share", async () => {
+    vi.useFakeTimers();
+    const launch = new FakeCometLaunch();
+    launch.answering = "Comet/140.0";
+    const table = createCdpToolTable({
+      client: {
+        pageAddress: async () => "https://news.example/today",
+        listTargets: async () => [],
+        connect: async () => "ok",
+        newTab: async () => ({
+          id: "fresh",
+          type: "page",
+          title: "",
+          url: "https://www.perplexity.ai/",
+        }),
+      } as never,
+      comet: { getAgentStatus: vi.fn() },
+      launch,
+      quotePage: (text) => text,
+      port: 9444,
+    });
+
+    const pending = table.call("comet_connect", {});
+    await vi.advanceTimersByTimeAsync(2000);
+    await pending;
+
+    const shared = built.tabs[built.tabs.length - 1] as {
+      opened(id: string): boolean;
+    };
+    expect(shared.opened("fresh")).toBe(true);
+    expect(built.modeTabs[built.modeTabs.length - 1]).toBe(shared);
+    vi.useRealTimers();
   });
 });

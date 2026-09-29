@@ -31,6 +31,14 @@ export function isPerplexityMainPage(address: string): boolean {
   );
 }
 
+/**
+ * Whether `address` is on Perplexity's origin, the sidecar included; an
+ * address that does not parse is not.
+ */
+export function isPerplexityAddress(address: string): boolean {
+  return parsed(address)?.origin === PERPLEXITY_ORIGIN;
+}
+
 function isSidecarPath(path: string): boolean {
   return path === SIDECAR_PATH || path.startsWith(`${SIDECAR_PATH}/`);
 }

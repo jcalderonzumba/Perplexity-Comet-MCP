@@ -136,7 +136,7 @@ Clients configured with an `mcpServers` JSON file take the same command, argumen
 
 ### comet_connect
 
-Connect to Comet on the configured debug port (`COMET_PORT`). Launches Comet with the port when none is running; it never restarts a Comet that is, since that would close your windows. When Comet runs without the port, the reply is an error that names the port and the command that starts Comet with it.
+Connect to Comet on the configured debug port (`COMET_PORT`). Launches Comet with the port when none is running; it never restarts a Comet that is, since that would close your windows. When Comet runs without the port, the reply is an error that names the port and the command that starts Comet with it. Once Comet answers, it puts the connection on Perplexity's main page by the same rule as `comet_ask` (see below): it stays on the main page it is on, moves to one already open, or opens Perplexity's home page in a new tab and remembers it opened it. It never navigates a page of yours and never connects to the sidecar.
 
 ```
 Parameters: None
@@ -147,7 +147,7 @@ Returns: Connection status message
 ```
 > comet_connect
 Comet is running with the debug port 9222 (Comet/141.0.7390.55).
-Connected to Perplexity
+Connected to Perplexity's main page: moved the connection to the tab already open on it.
 ```
 
 **Comet running without the debug port:**
