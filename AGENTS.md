@@ -79,9 +79,10 @@ TypeScript (strict, ES2022, NodeNext) compiled by `tsc` to `dist/`, one npm pack
 |---|---|
 | `src/index.ts`, `src/stdio-server.ts` | The stdio MCP server: the entry starts the transport and shutdown; the server lists the tool table's definitions and answers a call through it. Nothing else |
 | `src/http-bridge.ts`, `src/bridge-server.ts` | The HTTP bridge exposing the same tools to remote clients: the entry reads the environment and listens; the server keeps the token, CORS and routes over the same table. Nothing else |
-| `src/core/` | The tool table (`tools.ts`: each tool's definition and handler, and the one dispatch), the reply type (`tool-reply.ts`) and the cores: ask, mode, screenshot |
+| `src/core/` | The tool table (`tools.ts`: each tool's definition and handler, and the one dispatch), the reply type (`tool-reply.ts`) and the cores: connect (with the launch port, `comet-launch.ts`), ask, mode, screenshot |
 | `src/cdp-tools.ts` | The composition: builds the tool table over the CDP client, the Comet module and the UNTRUSTED wrapper; holds the connect, tabs and upload handlers until their cores land |
-| `src/cdp-client.ts` | Comet launch, CDP connection and reconnect, tabs, screenshots, uploads, Windows and WSL |
+| `src/cdp-client.ts` | CDP connection and reconnect, tabs, screenshots, uploads, Windows and WSL |
+| `src/comet-launch.ts`, `src/host-platform.ts` | Finding and launching Comet on its debug port, per platform (macOS and Linux, Windows, WSL) behind the port of `src/core/comet-launch.ts`, which has no way to kill; the host (WSL detection, the fetch that reaches Windows, PowerShell quoting) |
 | `src/comet-ai.ts` | Reading the answer and its status from the page; the ask core decides when an answer is complete (`src/core/answer-watch.ts`), sends prompts (`src/core/ask-send.ts`) and stops answers (`src/core/ask-stop.ts`) |
 | `src/page-scripts.ts` | JavaScript run in the page, as tested functions |
 | `src/upload-validator.ts` | Allowlists for paths, tab ids, domains and selectors |

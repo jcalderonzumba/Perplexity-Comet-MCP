@@ -38,13 +38,13 @@ From spec §2: *any change that violates one of these is rejected by definition.
    *Code trigger:* `src/upload-validator.ts`; any `fs` import or call under `src/`; `DOM.setFileInputFiles` and its callers.
 4. **Nothing listens beyond loopback without authentication.** CDP is reached on `127.0.0.1` with `--remote-allow-origins` restricted. The HTTP bridge is opt-in, requires its token and compares it in constant time.
    *Plan trigger:* the HTTP bridge, its host, port, token or CORS; Comet's launch flags; CDP host and port.
-   *Code trigger:* server creation, token check and CORS in `src/bridge-server.ts`, and the environment it reads and the host it listens on in `src/http-bridge.ts`; any `listen(` or `createServer`; the CDP host, port and `--remote-*` launch flags in `src/cdp-client.ts`.
+   *Code trigger:* server creation, token check and CORS in `src/bridge-server.ts`, and the environment it reads and the host it listens on in `src/http-bridge.ts`; any `listen(` or `createServer`; the CDP host, port and `--remote-*` launch flags in `src/cdp-client.ts` and `src/comet-launch.ts`.
 5. **Nothing leaves the machine except what the user sends Comet.** No telemetry, no analytics, no remote logging, no dependency that phones home.
    *Plan trigger:* logging, telemetry, any new runtime dependency, any network request.
    *Code trigger:* any change to `dependencies` in `package.json`; any `fetch`, `http.request`, `https.request` or WebSocket to a host other than loopback; logging code.
 6. **Never damage the user's browser.** Never close the last external tab, never close a tab the tool did not open, never crash Comet, never drop the user's signed-in session.
    *Plan trigger:* tabs, connect and reconnect, launch, stop, `newChat`, mode switching, a new tool that opens or closes tabs.
-   *Code trigger:* tab close and switch code (`comet_tabs`, `Target.closeTarget`, `Page.close`); launching or killing the Comet process; reconnect logic in `src/cdp-client.ts`.
+   *Code trigger:* tab close and switch code (`comet_tabs`, `Target.closeTarget`, `Page.close`); launching or killing the Comet process (`src/comet-launch.ts`, `src/core/comet-launch.ts`); reconnect logic in `src/cdp-client.ts`.
 7. **An answer is complete or says it is not.** A stale, partial or timed-out answer is never returned as final; the result states which it is.
    *Plan trigger:* `comet_ask` or `comet_poll`, completion detection, answer extraction, timeouts.
    *Code trigger:* `src/comet-ai.ts`; the ask core in `src/core/` (`ask.ts`, `ask-task.ts`, `ask-reply.ts`); the `comet_ask` and `comet_poll` handlers of the composition (`src/cdp-tools.ts`) and the text of their results, which both adapters render through `src/tool-results.ts`.
@@ -53,7 +53,7 @@ From spec §2: *any change that violates one of these is rejected by definition.
    *Code trigger:* the `name: "comet_…"` definitions and their `inputSchema` in the tool table (`src/core/tools.ts`, `COMET_MODE_TOOL` in `src/core/mode-tool.ts`); the bridge's routes and payloads (`src/bridge-server.ts`, `src/tool-results.ts`); result text formats; any `process.env.` read; `bin` in `package.json`.
 9. **macOS, Windows and WSL keep working.** A change to launch, paths, networking or fetch states how each platform stays working: a test, or a by-hand verification recorded in the PR.
    *Plan trigger:* launch, executable paths, networking, fetch, anything Windows- or WSL-specific.
-   *Code trigger:* any `process.platform` branch; WSL detection; PowerShell use; `windowsFetch`; executable path resolution and launch flags in `src/cdp-client.ts`.
+   *Code trigger:* any `process.platform` branch; WSL detection; PowerShell use; `windowsFetch`; `src/host-platform.ts`; executable path resolution, process detection and launch flags in `src/comet-launch.ts`.
 
 - **Must Fix** — the work violates a triggered principle, weakens it, or (for a plan) fails to state how its changes preserve one its scope puts at risk.
 

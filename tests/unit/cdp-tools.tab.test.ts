@@ -59,12 +59,14 @@ vi.mock("../../src/cdp-ask-port.js", async (importActual) => {
 });
 
 import { createCdpToolTable } from "../../src/cdp-tools.js";
+import { FakeCometLaunch } from "./fakes/fake-comet-launch.js";
 
 describe("createCdpToolTable's tab record", () => {
   it("gives the mode tool and the ask core the one tab choice it built, and the ask that mode tool", () => {
     createCdpToolTable({
       client: {} as never,
       comet: { getAgentStatus: vi.fn() },
+      launch: new FakeCometLaunch(),
       quotePage: (text) => text,
       port: 9444,
     });

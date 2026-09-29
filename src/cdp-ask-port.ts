@@ -1,7 +1,8 @@
-// The ask core's port, over the CDP client and the Comet module: the one
+// The ask core's port, over the CDP client, the Comet module and the launch: the one
 // `AskPort` both adapters build when they start, and the core built on it.
 //
-// Each method is one call to the client or the Comet module. The page is
+// Each method is one call to the client, the Comet module or the launch (which
+// never restarts Comet). The page is
 // read only through the tested functions of `page-scripts.ts`, through the
 // client's evaluate that reconnects when the connection drops. The prompt
 // reaches the page only as the client's trusted text, which, like its keys,
@@ -16,6 +17,7 @@ import {
   type AskStatus,
   PageScriptFailed,
 } from "./core/ask.js";
+import { type CometLaunch, startCometOnPort } from "./core/comet-launch.js";
 import type { ModeTool } from "./core/mode-tool.js";
 import type { BrowserTarget, PerplexityTab } from "./core/perplexity-tab.js";
 import {
@@ -33,7 +35,6 @@ import type { EvaluateResult } from "./types.js";
 /** The part of the CDP client the ask drives. */
 export interface AskPortClient {
   preOperationCheck(): Promise<unknown>;
-  startComet(port: number): Promise<unknown>;
   listTargets(): Promise<readonly BrowserTarget[]>;
   connect(targetId: string): Promise<unknown>;
   ensureConnection(): Promise<unknown>;
@@ -60,14 +61,16 @@ class CdpAskPort implements AskPort {
   constructor(
     private readonly client: AskPortClient,
     private readonly comet: AskPortComet,
+    private readonly launch: CometLaunch,
   ) {}
 
   preOperationCheck(): Promise<unknown> {
     return this.client.preOperationCheck();
   }
 
+  /** Comet on `port`, launched when none runs; never restarted (principle 6). */
   startComet(port: number): Promise<unknown> {
-    return this.client.startComet(port);
+    return startCometOnPort(this.launch, port);
   }
 
   listTargets(): Promise<readonly BrowserTarget[]> {
@@ -154,13 +157,16 @@ class CdpAskPort implements AskPort {
 export function cdpAskPort(
   client: AskPortClient,
   comet: AskPortComet,
+  launch: CometLaunch,
 ): AskPort {
-  return new CdpAskPort(client, comet);
+  return new CdpAskPort(client, comet, launch);
 }
 
 export interface CdpAskCoreOptions {
   readonly client: AskPortClient;
   readonly comet: AskPortComet;
+  /** How Comet is found and launched when the connection is lost. */
+  readonly launch: CometLaunch;
   /** The adapter's `comet_mode` tool, whose remembered mode the ask puts back. */
   readonly mode: Pick<ModeTool, "core" | "quotePage">;
   /** The tab choice that mode tool shares, from `createCdpPerplexityTab`. */
@@ -176,7 +182,7 @@ export interface CdpAskCoreOptions {
  */
 export function createCdpAskCore(options: CdpAskCoreOptions): AskCore {
   return new AskCore({
-    port: cdpAskPort(options.client, options.comet),
+    port: cdpAskPort(options.client, options.comet, options.launch),
     mode: options.mode,
     perplexity: options.perplexity,
     cometPort: options.cometPort,

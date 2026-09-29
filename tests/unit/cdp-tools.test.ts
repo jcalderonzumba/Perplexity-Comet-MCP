@@ -13,6 +13,7 @@ import {
 } from "../../src/cdp-tools.js";
 import { TOOL_DEFINITIONS } from "../../src/core/tools.js";
 import type { TabContext } from "../../src/types.js";
+import { FakeCometLaunch } from "./fakes/fake-comet-launch.js";
 
 const CONFIGURED_PORT = 9444;
 const TAB_ID = "0a1b2c3d-1111-4222-8333-444455556666";
@@ -48,17 +49,28 @@ function clientWith(methods: Record<string, unknown>): CdpToolsClient {
   }) as unknown as CdpToolsClient;
 }
 
-function deps(client: CdpToolsClient): CdpToolsDeps {
+function deps(client: CdpToolsClient, launch: FakeCometLaunch): CdpToolsDeps {
   return {
     client,
+    launch,
     comet: { getAgentStatus: vi.fn() },
     quotePage: (text) => `<<${text}>>`,
     port: CONFIGURED_PORT,
   };
 }
 
-function tableOver(methods: Record<string, unknown>) {
-  return createCdpToolTable(deps(clientWith(methods)));
+/** Comet answers on the port, unless a test says otherwise. */
+function answeringLaunch(): FakeCometLaunch {
+  const launch = new FakeCometLaunch();
+  launch.answering = "Comet/140.0";
+  return launch;
+}
+
+function tableOver(
+  methods: Record<string, unknown>,
+  launch: FakeCometLaunch = answeringLaunch(),
+) {
+  return createCdpToolTable(deps(clientWith(methods), launch));
 }
 
 function textOf(reply: { kind: string } & Record<string, unknown>): string {
@@ -123,32 +135,64 @@ describe("createCdpToolTable", () => {
 });
 
 describe("comet_connect", () => {
-  it("starts Comet on the configured port, never a fixed one", async () => {
-    const startComet = vi.fn().mockResolvedValue("Comet started");
-    const connect = vi.fn().mockResolvedValue("ok");
-    const table = tableOver({
-      startComet,
-      connect,
-      listTargets: async () => [
-        target("main", "https://www.perplexity.ai/search/x"),
-      ],
-    });
+  it("probes the configured port, never a fixed one, and names it", async () => {
+    const launch = answeringLaunch();
+    const table = tableOver(
+      {
+        connect: async () => "ok",
+        listTargets: async () => [
+          target("main", "https://www.perplexity.ai/search/x"),
+        ],
+      },
+      launch,
+    );
 
     const reply = await table.call("comet_connect", {});
 
-    expect(startComet).toHaveBeenCalledTimes(1);
-    expect(startComet).toHaveBeenCalledWith(CONFIGURED_PORT);
+    expect(launch.probes).toEqual([CONFIGURED_PORT]);
+    expect(launch.launches).toEqual([]);
     expect(reply).toEqual({
       kind: "text",
-      text: "Comet started\nConnected to Perplexity",
+      text: "Comet is running with the debug port 9444 (Comet/140.0).\nConnected to Perplexity",
       isError: false,
     });
+  });
+
+  it("launches Comet on the configured port when none runs", async () => {
+    const launch = new FakeCometLaunch();
+    const table = tableOver(
+      {
+        connect: async () => "ok",
+        listTargets: async () => [
+          target("main", "https://www.perplexity.ai/search/x"),
+        ],
+      },
+      launch,
+    );
+
+    const reply = await table.call("comet_connect", {});
+
+    expect(launch.launches).toEqual([CONFIGURED_PORT]);
+    expect(textOf(reply as never)).toContain("Started Comet");
+  });
+
+  it("fails without touching the browser when Comet runs without the port", async () => {
+    const launch = new FakeCometLaunch();
+    launch.processRunning = true;
+    const table = tableOver({}, launch);
+
+    const reply = await table.call("comet_connect", {});
+
+    expect(reply).toMatchObject({ kind: "text", isError: true });
+    expect(textOf(reply as never)).toContain(
+      "comet --remote-debugging-port=9444",
+    );
+    expect(launch.launches).toEqual([]);
   });
 
   it("connects to the main Perplexity tab before the sidecar", async () => {
     const connect = vi.fn().mockResolvedValue("ok");
     const table = tableOver({
-      startComet: async () => "started",
       connect,
       listTargets: async () => [
         target("side", "https://www.perplexity.ai/sidecar?x=1"),
@@ -165,7 +209,6 @@ describe("comet_connect", () => {
     vi.useFakeTimers();
     const navigate = vi.fn().mockResolvedValue({});
     const table = tableOver({
-      startComet: async () => "started",
       connect: async () => "ok",
       navigate,
       listTargets: async () => [target("other", "https://example.com/")],
@@ -182,7 +225,6 @@ describe("comet_connect", () => {
     vi.useFakeTimers();
     const connect = vi.fn().mockResolvedValue("ok");
     const table = tableOver({
-      startComet: async () => "started",
       connect,
       newTab: async () => target("fresh", "https://www.perplexity.ai/"),
       listTargets: async () => [],
@@ -194,7 +236,7 @@ describe("comet_connect", () => {
 
     expect(connect).toHaveBeenCalledWith("fresh");
     expect(textOf(reply as never)).toBe(
-      "started\nCreated new tab and navigated to Perplexity",
+      "Comet is running with the debug port 9444 (Comet/140.0).\nCreated new tab and navigated to Perplexity",
     );
   });
 });

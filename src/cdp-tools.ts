@@ -22,11 +22,14 @@ import {
   type TabClient,
 } from "./cdp-perplexity-tab.js";
 import { cometAI } from "./comet-ai.js";
+import { systemCometLaunch } from "./comet-launch.js";
 import {
   describeAskOutcome,
   describePollOutcome,
   describeStopOutcome,
 } from "./core/ask-reply.js";
+import type { CometLaunch } from "./core/comet-launch.js";
+import { answerConnect, type ConnectTabs } from "./core/connect.js";
 import { answerModeTool } from "./core/mode-tool.js";
 import { answerScreenshot } from "./core/screenshot.js";
 import { errorReply, type ToolReply, textReply } from "./core/tool-reply.js";
@@ -45,7 +48,7 @@ import {
 
 type ConnectClient = Pick<
   CometCDPClient,
-  "startComet" | "listTargets" | "connect" | "navigate" | "newTab"
+  "listTargets" | "connect" | "navigate" | "newTab"
 >;
 
 type TabsClient = Pick<
@@ -71,6 +74,8 @@ export type CdpToolsClient = AskPortClient &
 export interface CdpToolsDeps {
   readonly client: CdpToolsClient;
   readonly comet: AskPortComet;
+  /** How Comet is found and launched: the one launch, which never kills. */
+  readonly launch: CometLaunch;
   /** The UNTRUSTED wrapper: the only way page text reaches a reply. */
   readonly quotePage: (pageText: string) => string;
   /** The debug port Comet is started on, from the environment. */
@@ -79,7 +84,7 @@ export interface CdpToolsDeps {
 
 /** The tool table over `deps`. */
 export function createCdpToolTable(deps: CdpToolsDeps): ToolTable {
-  const { client, comet, quotePage, port } = deps;
+  const { client, comet, launch, quotePage, port } = deps;
   // The tab choice comet_ask and comet_mode share, and with it the one
   // record of the tabs the server opened, whichever of them opened a tab.
   const perplexity = createCdpPerplexityTab(client);
@@ -89,6 +94,7 @@ export function createCdpToolTable(deps: CdpToolsDeps): ToolTable {
   const askCore = createCdpAskCore({
     client,
     comet,
+    launch,
     mode: modeTool,
     perplexity,
     cometPort: port,
@@ -96,7 +102,8 @@ export function createCdpToolTable(deps: CdpToolsDeps): ToolTable {
 
   return createToolTable(
     {
-      comet_connect: connectHandler(client, port),
+      comet_connect: () =>
+        answerConnect({ launch, port, tabs: connectedTabs(client) }),
       comet_ask: async (args) =>
         describeAskOutcome(await askCore.ask(args), quotePage),
       comet_poll: async () =>
@@ -127,6 +134,7 @@ export function createCdpTools(): CdpTools {
     table: createCdpToolTable({
       client: cometClient,
       comet: cometAI,
+      launch: systemCometLaunch,
       quotePage: wrapUntrustedPageContent,
       port: DEFAULT_PORT,
     }),
@@ -140,46 +148,45 @@ export function createCdpTools(): CdpTools {
 
 const PERPLEXITY_HOME = "https://www.perplexity.ai/";
 
-function connectHandler(client: ConnectClient, port: number): ToolHandler {
-  return async () => {
-    // Auto-start Comet with debug port (will restart if running without it)
-    const startResult = await client.startComet(port);
+function connectedTabs(client: ConnectClient): ConnectTabs {
+  return {
+    connectToPerplexity: async () => {
+      // Get all tabs - DON'T clean up tabs, as closing them can crash Comet
+      const targets = await client.listTargets();
 
-    // Get all tabs - DON'T clean up tabs, as closing them can crash Comet
-    const targets = await client.listTargets();
+      // Prefer connecting to the MAIN Perplexity tab (not the sidecar).
+      // Comet's right-panel chat helper lives at a sidecar URL that also
+      // matches `perplexity.ai` substring — connecting to it routes
+      // the prompt and the stop to the wrong tab.
+      const perplexityTab =
+        targets.find(
+          (t) =>
+            t.type === "page" &&
+            t.url.includes("perplexity.ai") &&
+            !t.url.includes("sidecar"),
+        ) ||
+        targets.find(
+          (t) => t.type === "page" && t.url.includes("perplexity.ai"),
+        );
+      const anyPage = perplexityTab || targets.find((t) => t.type === "page");
 
-    // Prefer connecting to the MAIN Perplexity tab (not the sidecar).
-    // Comet's right-panel chat helper lives at a sidecar URL that also
-    // matches `perplexity.ai` substring — connecting to it routes
-    // the prompt and the stop to the wrong tab.
-    const perplexityTab =
-      targets.find(
-        (t) =>
-          t.type === "page" &&
-          t.url.includes("perplexity.ai") &&
-          !t.url.includes("sidecar"),
-      ) ||
-      targets.find((t) => t.type === "page" && t.url.includes("perplexity.ai"));
-    const anyPage = perplexityTab || targets.find((t) => t.type === "page");
+      if (anyPage) {
+        await client.connect(anyPage.id);
 
-    if (anyPage) {
-      await client.connect(anyPage.id);
-
-      // Only navigate to Perplexity if not already there
-      if (!anyPage.url.includes("perplexity.ai")) {
-        await client.navigate(PERPLEXITY_HOME, true);
-        await pause(1500);
+        // Only navigate to Perplexity if not already there
+        if (!anyPage.url.includes("perplexity.ai")) {
+          await client.navigate(PERPLEXITY_HOME, true);
+          await pause(1500);
+        }
+        return "Connected to Perplexity";
       }
-      return textReply(`${startResult}\nConnected to Perplexity`);
-    }
 
-    // No tabs at all - create a new one
-    const newTab = await client.newTab(PERPLEXITY_HOME);
-    await pause(2000); // Wait for page load
-    await client.connect(newTab.id);
-    return textReply(
-      `${startResult}\nCreated new tab and navigated to Perplexity`,
-    );
+      // No tabs at all - create a new one
+      const newTab = await client.newTab(PERPLEXITY_HOME);
+      await pause(2000); // Wait for page load
+      await client.connect(newTab.id);
+      return "Created new tab and navigated to Perplexity";
+    },
   };
 }
 

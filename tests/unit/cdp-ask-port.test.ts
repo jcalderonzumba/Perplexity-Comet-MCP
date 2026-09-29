@@ -23,6 +23,7 @@ import {
   FakeAskComet,
   WORKING_STATUS,
 } from "./fakes/fake-ask-client.js";
+import { FakeCometLaunch } from "./fakes/fake-comet-launch.js";
 import { FakeModePage } from "./fakes/fake-mode-page.js";
 
 const MAIN: BrowserTarget = {
@@ -39,26 +40,52 @@ afterEach(() => {
 function rig() {
   const client = new FakeAskClient();
   const comet = new FakeAskComet();
-  return { client, comet, port: cdpAskPort(client, comet) };
+  const launch = new FakeCometLaunch();
+  return { client, comet, launch, port: cdpAskPort(client, comet, launch) };
 }
 
 describe("cdpAskPort: the connection and the tabs", () => {
-  it("checks, starts, connects, reconnects and navigates through the CDP client", async () => {
+  it("checks, connects, reconnects and navigates through the CDP client", async () => {
     const { client, port } = rig();
 
     await port.preOperationCheck();
-    await port.startComet(9555);
     await port.connect("main");
     await port.ensureConnection();
     await port.navigate("https://www.perplexity.ai/", true);
 
     expect(client.calls).toEqual([
       "preOperationCheck",
-      "startComet 9555",
       "connect main",
       "ensureConnection",
       "navigate https://www.perplexity.ai/ wait=true",
     ]);
+  });
+
+  it("launches Comet on the port it is given when none runs", async () => {
+    const { launch, port } = rig();
+
+    await port.startComet(9555);
+
+    expect(launch.launches).toEqual([9555]);
+  });
+
+  it("finds a Comet already answering on the port and launches nothing", async () => {
+    const { launch, port } = rig();
+    launch.answering = "Comet/140.0";
+
+    await port.startComet(9555);
+
+    expect(launch.launches).toEqual([]);
+  });
+
+  it("refuses a Comet running without the port, naming the port and the command, and launches nothing", async () => {
+    const { launch, port } = rig();
+    launch.processRunning = true;
+
+    await expect(port.startComet(9555)).rejects.toThrow(
+      "comet --remote-debugging-port=9555",
+    );
+    expect(launch.launches).toEqual([]);
   });
 
   it("lists the client's targets", async () => {
@@ -236,11 +263,13 @@ describe("createCdpAskCore", () => {
     vi.useFakeTimers();
     const client = new FakeAskClient();
     const comet = new FakeAskComet();
+    const launch = new FakeCometLaunch();
     client.preCheckFails = true;
     client.targets = [MAIN];
     const core = createCdpAskCore({
       client,
       comet,
+      launch,
       mode: { core: new ModeCore(new FakeModePage()), quotePage: (t) => t },
       perplexity: createCdpPerplexityTab(client),
       cometPort: 9555,
@@ -250,9 +279,9 @@ describe("createCdpAskCore", () => {
     await vi.runAllTimersAsync();
     const outcome = await asking;
 
-    expect(client.calls.slice(0, 4)).toEqual([
+    expect(launch.launches).toEqual([9555]);
+    expect(client.calls.slice(0, 3)).toEqual([
       "preOperationCheck",
-      "startComet 9555",
       "listTargets",
       "connect main",
     ]);
@@ -261,5 +290,30 @@ describe("createCdpAskCore", () => {
       message:
         "The prompt was not sent: the input bar was not found on the page",
     });
+  });
+
+  it("does not recover a connection lost while Comet runs without the port: it fails and launches nothing", async () => {
+    vi.useFakeTimers();
+    const client = new FakeAskClient();
+    const launch = new FakeCometLaunch();
+    launch.processRunning = true;
+    client.preCheckFails = true;
+    client.targets = [MAIN];
+    const core = createCdpAskCore({
+      client,
+      comet: new FakeAskComet(),
+      launch,
+      mode: { core: new ModeCore(new FakeModePage()), quotePage: (t) => t },
+      perplexity: createCdpPerplexityTab(client),
+      cometPort: 9555,
+    });
+
+    const asking = core.ask({ prompt: "What is the capital of France?" });
+    await vi.runAllTimersAsync();
+    const outcome = await asking;
+
+    expect(outcome).toMatchObject({ kind: "failed" });
+    expect(launch.launches).toEqual([]);
+    expect(client.calls).toEqual(["preOperationCheck"]);
   });
 });

@@ -107,7 +107,7 @@ Skips (always noted): skip 1–2 when the plan is docs-only or pure scaffolding 
 | HTTP bridge | Plan touches `src/http-bridge.ts` or `src/bridge-server.ts`: auth, CORS, binding, routes | `api-security-best-practices`, `api-patterns`, `auth-implementation-patterns` |
 | Page scripts | Plan adds or changes JavaScript run in the page | `frontend-security-coder`, `javascript-pro` |
 | Tool contract | Plan adds or changes a tool, a parameter, a default or a result shape | `api-patterns`; Context7 for `@modelcontextprotocol/sdk` |
-| CDP and the browser | Plan touches launch, connect, reconnect or tabs in `src/cdp-client.ts` | Context7 for `chrome-remote-interface` and the DevTools Protocol |
+| CDP and the browser | Plan touches launch (`src/comet-launch.ts`), connect, reconnect or tabs in `src/cdp-client.ts` | Context7 for `chrome-remote-interface` and the DevTools Protocol |
 | Prompts to Comet | Plan changes prompt text or prompt shaping sent to Comet | `prompt-engineering` |
 | Secrets | The work involves: secret, credential, token, key, env var, `.env` | `secrets-management` |
 | Data leaving the machine | Plan touches logging, network requests, or adds a runtime dependency | `privacy-by-design` |
