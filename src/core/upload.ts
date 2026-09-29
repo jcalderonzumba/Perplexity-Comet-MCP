@@ -157,6 +157,9 @@ async function upload(
   path: ValidatedUploadPath,
   selector: ValidatedSelector | undefined,
 ): Promise<ToolReply> {
+  // A candidate the port fails on ends the upload: the candidates are valid
+  // selectors, so a failure is the connection's, which the client's
+  // reconnect handles and a skipped candidate would hide.
   const candidates = selector ? [selector] : COMMON_FILE_INPUTS;
   for (const candidate of candidates) {
     if (await deps.port.attachFile(path, candidate)) {

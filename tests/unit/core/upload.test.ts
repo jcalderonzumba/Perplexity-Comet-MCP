@@ -285,6 +285,21 @@ describe("comet_upload", () => {
     });
   });
 
+  it("ends the upload at the first candidate the port fails on, trying no other", async () => {
+    const port = new FakeUploadPort();
+    port.matching = ['input[type="file"]'];
+    port.failure = { call: "attachFile", error: new Error("Not connected") };
+
+    const reply = await say(uploadOver(port), { filePath: FILE });
+
+    expect(reply).toEqual({
+      kind: "text",
+      isError: true,
+      text: "Error: Not connected",
+    });
+    expect(port.calls).toEqual(["attachFile"]);
+  });
+
   it("is an error reply when the port fails listing the inputs", async () => {
     const port = new FakeUploadPort();
     port.failure = { call: "listFileInputs", error: new Error("gone") };

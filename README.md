@@ -287,6 +287,8 @@ Parameters:
 Returns: Tab listing or action confirmation
 ```
 
+An `action`, `tabId` or `domain` that is not text is refused with `Error: <name> must be a string`.
+
 **Examples:**
 
 ```
@@ -425,7 +427,7 @@ File uploaded successfully: /home/user/doc.pdf
 | `core/` | The tool core both servers share: the tool table (`core/tools.ts`) and the one reply type (`core/tool-reply.ts`), `comet_connect` (`core/connect.ts` over the launch port in `core/comet-launch.ts`), `comet_screenshot`, `comet_ask`, `comet_poll` and `comet_stop`, with typing and submitting the prompt in `core/ask-send.ts`, when an answer is complete and the ask's own in `core/answer-watch.ts`, stopping it in `core/ask-stop.ts`, and the tab they use in `core/ask-tab.ts` and `core/perplexity-tab.ts`, `comet_mode`, `comet_tabs` (`core/tabs.ts`: which tabs there are, and closing only by the record of the tabs the server opened), and `comet_upload` (`core/upload.ts`: the checks in one order, then a file attached through the protocol) |
 | `perplexity-pages.ts` | Perplexity's origin and home page, the one rule that says which tab is Perplexity's main page, and which pages are Perplexity's site |
 | `comet-ai.ts` | Reading the answer and its status from the page |
-| `types.ts` | TypeScript interfaces for tabs, state, and CDP types |
+| `types.ts` | TypeScript interfaces for the connection state and CDP types |
 
 ---
 

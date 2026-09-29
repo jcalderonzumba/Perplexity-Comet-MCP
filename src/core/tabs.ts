@@ -7,8 +7,8 @@
 //
 // Principle 6: the server closes only a tab it opened. CDP cannot tell the
 // agent's tabs from the user's, so `PerplexityTab`'s record of the tabs it
-// opened decides (D28): `close` refuses every other tab, the last page tab
-// and the tab the connection is on, which the ask and the mode work in.
+// opened decides: `close` refuses every other tab, the last page tab and the
+// tab the connection is on, which the ask and the mode work in.
 // Principle 1: a tab's address and domain are text the page chose, so they
 // reach a reply only through the UNTRUSTED wrapper.
 
@@ -54,8 +54,9 @@ export async function answerTabs(
   args: Record<string, unknown>,
   deps: TabsDeps,
 ): Promise<ToolReply> {
-  const action = text(args.action) || "list";
-  const choice = { tabId: text(args.tabId), domain: text(args.domain) };
+  const given = textArguments(args);
+  if ("kind" in given) return given;
+  const { action, choice } = given;
   switch (action) {
     case "list":
       return listTabs(deps);
@@ -68,8 +69,25 @@ export async function answerTabs(
   }
 }
 
-function text(value: unknown): string | undefined {
-  return typeof value === "string" ? value : undefined;
+/**
+ * The arguments, or the reply that refuses one that is given and is not
+ * text; an absent one stays absent, and the action defaults to `list`.
+ */
+function textArguments(
+  args: Record<string, unknown>,
+): { action: string; choice: TabChoice } | ToolReply {
+  for (const name of ["action", "tabId", "domain"]) {
+    const value = args[name];
+    if (value !== undefined && typeof value !== "string")
+      return errorReply(`Error: ${name} must be a string`);
+  }
+  return {
+    action: (args.action as string | undefined) || "list",
+    choice: {
+      tabId: args.tabId as string | undefined,
+      domain: args.domain as string | undefined,
+    },
+  };
 }
 
 // ============================================================================

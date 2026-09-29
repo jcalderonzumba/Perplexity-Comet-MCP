@@ -1121,9 +1121,15 @@ export class CometCDPClient {
   }
 
   private ensureConnected(): void {
+    this.connectedClient();
+  }
+
+  /** The connection, or an error when there is none. */
+  private connectedClient(): CDP.Client {
     if (!this.client) {
       throw new Error("Not connected to Comet. Call connect() first.");
     }
+    return this.client;
   }
 
   /**
@@ -1141,8 +1147,7 @@ export class CometCDPClient {
     selector: ValidatedSelector,
   ): Promise<boolean> {
     return this.withAutoReconnect(async () => {
-      this.ensureConnected();
-      const { DOM } = this.client!;
+      const { DOM } = this.connectedClient();
       const document = await DOM.getDocument();
       const { nodeId } = await DOM.querySelector({
         nodeId: document.root.nodeId,

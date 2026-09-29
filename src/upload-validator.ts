@@ -214,7 +214,9 @@ export function validateDomain(domain: string): string {
  *    punctuation characters used by class (`.`), ID (`#`), attribute (`[`,
  *    `]`, `=`, `~`, `^`, `$`, `*`, `|`), pseudo-class/element (`:`),
  *    combinators (`>`, `+`, `~`), grouping (`,`), quotes (`"`, `'`),
- *    parentheses, hyphens, underscores, at-signs and backslash escapes.
+ *    parentheses, hyphens, underscores, at-signs and backslash escapes; also
+ *    allowed are `/`, `!`, `;`, `{`, `}`, `%` and `&`, which appear in
+ *    attribute values.
  *  - Rejects everything outside that set: a null byte, a control character
  *    such as a newline, a backtick, `<`, and any non-ASCII character. The
  *    child combinator `>` is in the set and allowed; `<` is not.

@@ -440,12 +440,31 @@ describe("comet_tabs, any action", () => {
     });
   });
 
-  it("ignores an argument that is not text", async () => {
+  it.each([
+    ["action", { action: 5 }],
+    ["tabId", { action: "switch", tabId: 5 }],
+    ["domain", { action: "close", domain: ["github.com"] }],
+  ])(
+    "refuses a %s that is not text, naming it, before any port call",
+    async (name, args) => {
+      const port = new FakeTabsPort(USERS_TAB);
+
+      const reply = await say(tabsOver(port), args);
+
+      expect(reply).toEqual({
+        kind: "text",
+        isError: true,
+        text: `Error: ${name} must be a string`,
+      });
+      expect(port.calls).toEqual([]);
+    },
+  );
+
+  it("reads an argument that is absent as absent", async () => {
     const port = new FakeTabsPort(USERS_TAB);
 
-    const reply = await say(tabsOver(port), { action: "switch", tabId: 5 });
+    const reply = await say(tabsOver(port), { tabId: undefined });
 
-    expect(reply.text).toBe("Specify domain or tabId to switch");
-    expect(port.calls).toEqual([]);
+    expect(reply.text).toMatch(/^1 tab\(s\) open:/);
   });
 });
