@@ -8,9 +8,9 @@
 // stop a process: Comet is the user's browser, and nothing here or anywhere
 // in `src/` kills it (principle 6, D29).
 
-import { execSync, spawn } from "child_process";
-import { existsSync } from "fs";
-import { platform } from "os";
+import { execSync, spawn } from "node:child_process";
+import { existsSync } from "node:fs";
+import { platform } from "node:os";
 import type { CometLaunch } from "./core/comet-launch.js";
 import {
   IS_WINDOWS,

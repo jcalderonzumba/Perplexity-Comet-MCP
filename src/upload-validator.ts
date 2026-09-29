@@ -8,9 +8,9 @@
  * no validator has seen (principle 3).
  */
 
-import { realpathSync, statSync } from "fs";
-import { homedir } from "os";
-import { sep as PATH_SEP, resolve as resolvePath } from "path";
+import { realpathSync, statSync } from "node:fs";
+import { homedir } from "node:os";
+import { sep as PATH_SEP, resolve as resolvePath } from "node:path";
 
 declare const validated: unique symbol;
 

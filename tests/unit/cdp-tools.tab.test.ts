@@ -4,7 +4,7 @@
 // builders are wrapped to pass through to the real ones while recording what
 // they were given and what they returned.
 
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 const built = vi.hoisted(() => ({
   tabs: [] as unknown[],

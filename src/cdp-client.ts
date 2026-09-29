@@ -138,6 +138,9 @@ export type FrameLifecycleMap = Map<
   { loaderId: string; events: Set<string> }
 >;
 
+/** The handler `Page.lifecycleEvent` takes, typed by the CDP client. */
+type LifecycleHandler = Parameters<CDP.Client["Page"]["lifecycleEvent"]>[0];
+
 /**
  * The slice of the CDP Page domain that `waitForLifecycle` uses. The return
  * type of `lifecycleEvent(handler)` is CRI's unsubscribe function — api.js:49
@@ -338,7 +341,7 @@ async function pressKeyOn(
 async function canConnectToWindowsLocalhost(port: number): Promise<boolean> {
   if (!IS_WSL) return true;
 
-  const net = await import("net");
+  const net = await import("node:net");
   return new Promise((resolve) => {
     const client = net.createConnection({ port, host: "127.0.0.1" }, () => {
       client.destroy();
@@ -442,7 +445,7 @@ export class CometCDPClient {
   // document (loaderId). Used by waitForLifecycle() so screenshots and other
   // ops can confirm the renderer has actually painted before they run.
   private frameLifecycle: FrameLifecycleMap = new Map();
-  private lifecycleListener: ((params: any) => void) | null = null;
+  private lifecycleListener: LifecycleHandler | null = null;
   private lifecycleUnsubscribe: (() => unknown) | null = null;
 
   constructor(options: CometClientOptions = {}) {
@@ -760,8 +763,8 @@ export class CometCDPClient {
           host: "127.0.0.1",
         });
         try {
-          const { targetInfos } = await (tempClient as any).Target.getTargets();
-          return targetInfos.map((t: any) => ({
+          const { targetInfos } = await tempClient.Target.getTargets();
+          return targetInfos.map((t) => ({
             id: t.targetId,
             type: t.type,
             title: t.title,
@@ -815,16 +818,16 @@ export class CometCDPClient {
 
     // Set window size for consistent UI
     try {
-      const { windowId } = await (
-        this.client as any
-      ).Browser.getWindowForTarget({ targetId });
-      await (this.client as any).Browser.setWindowBounds({
+      const { windowId } = await this.client.Browser.getWindowForTarget({
+        targetId,
+      });
+      await this.client.Browser.setWindowBounds({
         windowId,
         bounds: { width: 1440, height: 900, windowState: "normal" },
       });
     } catch {
       try {
-        await (this.client as any).Emulation.setDeviceMetricsOverride({
+        await this.client.Emulation.setDeviceMetricsOverride({
           width: 1440,
           height: 900,
           deviceScaleFactor: 1,
@@ -850,7 +853,7 @@ export class CometCDPClient {
     this.lifecycleListener = null;
     try {
       await this.client.Page.setLifecycleEventsEnabled({ enabled: true });
-      this.lifecycleListener = (params: any) => {
+      this.lifecycleListener = (params) => {
         const { frameId, loaderId, name } = params || {};
         if (!frameId || !loaderId || !name) return;
         const existing = this.frameLifecycle.get(frameId);
@@ -940,10 +943,10 @@ export class CometCDPClient {
     url: string,
     waitForLoad: boolean = true,
   ): Promise<NavigateResult> {
-    this.ensureConnected();
+    const { Page } = this.connectedClient();
     this.assertNavigableUrl(url);
-    const result = await this.client!.Page.navigate({ url });
-    if (waitForLoad) await this.client!.Page.loadEventFired();
+    const result = await Page.navigate({ url });
+    if (waitForLoad) await Page.loadEventFired();
     this.state.currentUrl = url;
     return result as NavigateResult;
   }
@@ -952,27 +955,26 @@ export class CometCDPClient {
    * Capture screenshot
    */
   async screenshot(format: "png" | "jpeg" = "png"): Promise<ScreenshotResult> {
-    this.ensureConnected();
+    const { Page } = this.connectedClient();
 
     // Wait for paint readiness via Page.lifecycleEvent (Lighthouse/Puppeteer
     // approach). If firstContentfulPaint already fired for this document the
     // call returns synchronously; otherwise we wait up to 2s for the next FCP.
     await waitForLifecycle(
-      this.client!.Page,
+      Page,
       this.frameLifecycle,
       "firstContentfulPaint",
       2000,
     );
 
-    return captureScreenshotWithFallback(this.client!.Page, format);
+    return captureScreenshotWithFallback(Page, format);
   }
 
   /**
    * Execute JavaScript in the page context
    */
   async evaluate(expression: string): Promise<EvaluateResult> {
-    this.ensureConnected();
-    return this.client!.Runtime.evaluate({
+    return this.connectedClient().Runtime.evaluate({
       expression,
       awaitPromise: true,
       returnByValue: true,
@@ -984,8 +986,7 @@ export class CometCDPClient {
    */
   async safeEvaluate(expression: string): Promise<EvaluateResult> {
     return this.withAutoReconnect(async () => {
-      this.ensureConnected();
-      return this.client!.Runtime.evaluate({
+      return this.connectedClient().Runtime.evaluate({
         expression,
         awaitPromise: true,
         returnByValue: true,
@@ -1055,8 +1056,7 @@ export class CometCDPClient {
    * holder counted, as after a reconnect, still turns the emulation off.
    */
   async stopFocusEmulation(): Promise<void> {
-    this.ensureConnected();
-    await this.releaseFocusHolder(this.client!);
+    await this.releaseFocusHolder(this.connectedClient());
   }
 
   private async releaseFocusHolder(client: CDP.Client): Promise<void> {
@@ -1072,16 +1072,14 @@ export class CometCDPClient {
 
   /** The connection, once the connected tab is known to be on Perplexity. */
   private async onPerplexity(action: string): Promise<CDP.Client> {
-    this.ensureConnected();
-    const client = this.client!;
+    const client = this.connectedClient();
     await refuseOffPerplexity(client.Page, action);
     return client;
   }
 
   /** The address of the connected tab's top frame, read now through CDP. */
   async pageAddress(): Promise<string> {
-    this.ensureConnected();
-    return readTopFrameAddress(this.client!.Page);
+    return readTopFrameAddress(this.connectedClient().Page);
   }
 
   /**
@@ -1118,10 +1116,6 @@ export class CometCDPClient {
     } catch {
       return false;
     }
-  }
-
-  private ensureConnected(): void {
-    this.connectedClient();
   }
 
   /** The connection, or an error when there is none. */

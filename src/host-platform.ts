@@ -2,8 +2,8 @@
 // the Windows-aware fetch and PowerShell quoting. Shared by the client and the
 // launch, so neither carries the other's copy.
 
-import { execSync } from "child_process";
-import { platform } from "os";
+import { execSync } from "node:child_process";
+import { platform } from "node:os";
 
 // Detect if running in WSL (must be before windowsFetch)
 function isWSL(): boolean {
@@ -33,7 +33,7 @@ export function psSingleQuote(value: string): string {
 export async function windowsFetch(
   url: string,
   method: string = "GET",
-): Promise<{ ok: boolean; status: number; json: () => Promise<any> }> {
+): Promise<{ ok: boolean; status: number; json: () => Promise<unknown> }> {
   // Use native fetch only on non-Windows AND non-WSL
   if (platform() !== "win32" && !IS_WSL) {
     const response = await fetch(url, { method });
@@ -50,7 +50,7 @@ export async function windowsFetch(
     if (parsed.hostname !== "127.0.0.1" && parsed.hostname !== "localhost") {
       throw new Error(`Refusing non-loopback host: ${parsed.hostname}`);
     }
-  } catch (e: any) {
+  } catch (e: unknown) {
     return {
       ok: false,
       status: 0,
@@ -82,7 +82,7 @@ export async function windowsFetch(
       status: 200,
       json: async () => JSON.parse(result.trim()),
     };
-  } catch (error: any) {
+  } catch (error: unknown) {
     return {
       ok: false,
       status: 0,
