@@ -28,6 +28,9 @@ export class FakeCdpConnection {
   public frameTreeReads = 0;
   public readonly inputs: InputCall[] = [];
   public readonly evaluations: string[] = [];
+  /** Set to make the next focus emulation switch on fail. */
+  public focusEnableError: Error | null = null;
+  private focusEnableGate: Promise<void> | null = null;
 
   readonly Page = {
     enable: async () => {},
@@ -64,15 +67,33 @@ export class FakeCdpConnection {
   };
 
   readonly Emulation = {
-    setFocusEmulationEnabled: async (params: unknown) => {
+    setFocusEmulationEnabled: async (params: { enabled: boolean }) => {
       this.inputs.push({
         method: "Emulation.setFocusEmulationEnabled",
         params,
       });
+      if (!params.enabled) return;
+      await this.focusEnableGate;
+      const error = this.focusEnableError;
+      this.focusEnableError = null;
+      if (error) throw error;
     },
   };
 
   async close(): Promise<void> {}
+
+  /**
+   * Keeps every focus emulation switch on in flight, as a slow round trip
+   * would, until the returned function is called. The call is already
+   * recorded while it waits.
+   */
+  holdFocusEnables(): () => void {
+    let release = () => {};
+    this.focusEnableGate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    return release;
+  }
 
   /** Moves the tab's top frame, as a navigation the client did not make would. */
   moveTo(url: string): void {

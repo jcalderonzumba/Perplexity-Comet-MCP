@@ -1839,14 +1839,21 @@ export class CometCDPClient {
    * `Emulation.setFocusEmulationEnabled` is marked experimental in the
    * protocol: a Comet that changes it shows up as a submit not taken.
    *
-   * Counted: a start that succeeds adds a holder, and `stopFocusEmulation`
-   * turns the emulation off only when the last holder stops, so an ask, a
-   * stop and a mode switch that overlap never end each other's.
+   * Counted: a start adds its holder before its round trip, so a stop that
+   * overlaps it sees the holder and leaves the emulation on, and takes the
+   * holder back if the emulation could not be switched on. The emulation is
+   * turned off only when the last holder stops, so an ask, a stop and a mode
+   * switch that overlap never end each other's.
    */
   async startFocusEmulation(): Promise<void> {
     const client = await this.onPerplexity("emulate focus");
-    await client.Emulation.setFocusEmulationEnabled({ enabled: true });
     this.focusHolders.set(client, this.focusHoldersOf(client) + 1);
+    try {
+      await client.Emulation.setFocusEmulationEnabled({ enabled: true });
+    } catch (error) {
+      await this.releaseFocusHolder(client).catch(() => {});
+      throw error;
+    }
   }
 
   /**
@@ -1857,7 +1864,10 @@ export class CometCDPClient {
    */
   async stopFocusEmulation(): Promise<void> {
     this.ensureConnected();
-    const client = this.client!;
+    await this.releaseFocusHolder(this.client!);
+  }
+
+  private async releaseFocusHolder(client: CDP.Client): Promise<void> {
     const remaining = Math.max(0, this.focusHoldersOf(client) - 1);
     this.focusHolders.set(client, remaining);
     if (remaining > 0) return;
