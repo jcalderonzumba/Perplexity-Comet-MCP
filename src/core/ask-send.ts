@@ -17,11 +17,15 @@
 
 import { errorMessage } from "../error-message.js";
 import type { PagePoint, ThreadState } from "../page-scripts.js";
+import {
+  type FocusEmulationPort,
+  withFocusEmulated,
+} from "./focus-emulation.js";
 import { PageScriptFailed } from "./page-script-failed.js";
 import { showsNewTurn } from "./thread-turn.js";
 
 /** What the send step needs from the browser. */
-export interface PromptPort {
+export interface PromptPort extends FocusEmulationPort {
   /**
    * Focuses the input bar and selects everything in it, so the text inserted
    * next replaces it; false when the page has no input bar.
@@ -37,14 +41,6 @@ export interface PromptPort {
   locateSubmitButton(): Promise<PagePoint | null>;
   /** Clicks at a point in the page, as trusted input. */
   clickAt(point: PagePoint): Promise<void>;
-  /**
-   * Makes the page believe itself focused and visible, so trusted keys and
-   * clicks reach it with Comet's window behind others; refused off
-   * Perplexity, like the input it lets through.
-   */
-  startFocusEmulation(): Promise<void>;
-  /** Ends `startFocusEmulation`. */
-  stopFocusEmulation(): Promise<void>;
   /** Which turn of the thread the page shows. */
   readThreadState(): Promise<ThreadState>;
   /** Milliseconds, on the clock `wait` advances. */
@@ -96,7 +92,13 @@ export async function sendPrompt(
 ): Promise<void> {
   await selectInputBar(port);
   await typePrompt(port, prompt);
-  await withFocusEmulated(port, () => submitPrompt(port, threadBefore));
+  await withFocusEmulated(
+    port,
+    () => submitPrompt(port, threadBefore),
+    (error) => {
+      throw notSent("submit", "the submit was not taken", error);
+    },
+  );
 }
 
 async function selectInputBar(port: PromptPort): Promise<void> {
@@ -137,26 +139,6 @@ function readBackProblem(
   if (text === collapseWhitespace(prompt)) return null;
   if (text === "") return "the input bar reads back empty";
   return "the input bar reads back other text than the prompt";
-}
-
-/**
- * Runs `submit` with the page's focus emulated, and stops emulating it
- * whatever `submit` does. Failing to stop never replaces the submit's own
- * outcome: the prompt is sent or not either way, and a connection too
- * broken to stop it has ended the emulation with it.
- */
-async function withFocusEmulated(
-  port: PromptPort,
-  submit: () => Promise<void>,
-): Promise<void> {
-  await during("submit", "the submit was not taken", () =>
-    port.startFocusEmulation(),
-  );
-  try {
-    await submit();
-  } finally {
-    await port.stopFocusEmulation().catch(() => undefined);
-  }
 }
 
 async function submitPrompt(
@@ -226,15 +208,20 @@ async function during<T>(
   try {
     return await call();
   } catch (error) {
-    if (error instanceof PageScriptFailed) {
-      throw new PromptNotSent(
-        step,
-        `${what}: ${error.message}`,
-        error.pageDetail,
-      );
-    }
-    throw new PromptNotSent(step, `${what}: ${errorMessage(error)}`);
+    throw notSent(step, what, error);
   }
+}
+
+/** `PromptNotSent` for what `error` says failed `step`, keeping the page's own text apart. */
+function notSent(step: SendStep, what: string, error: unknown): PromptNotSent {
+  if (error instanceof PageScriptFailed) {
+    return new PromptNotSent(
+      step,
+      `${what}: ${error.message}`,
+      error.pageDetail,
+    );
+  }
+  return new PromptNotSent(step, `${what}: ${errorMessage(error)}`);
 }
 
 function collapseWhitespace(text: string): string {

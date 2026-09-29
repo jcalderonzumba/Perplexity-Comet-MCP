@@ -9,7 +9,6 @@ import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js"
 import {
   CallToolRequestSchema,
   ListToolsRequestSchema,
-  type Tool,
 } from "@modelcontextprotocol/sdk/types.js";
 import { readFileSync } from "fs";
 import { dirname, join } from "path";
@@ -24,7 +23,8 @@ import {
   describePollOutcome,
   describeStopOutcome,
 } from "./core/ask-reply.js";
-import { answerModeTool, COMET_MODE_TOOL } from "./core/mode-tool.js";
+import { answerModeTool } from "./core/mode-tool.js";
+import { TOOL_DEFINITIONS } from "./core/tools.js";
 import { toStdioResult } from "./tool-results.js";
 import { wrapUntrustedPageContent } from "./untrusted.js";
 import {
@@ -53,110 +53,6 @@ const SERVER_VERSION = readPackageVersion();
 
 // validateUploadPath and validateTabId are imported from ./upload-validator.js
 
-const TOOLS: Tool[] = [
-  {
-    name: "comet_connect",
-    description: "Connect to Comet browser (auto-starts if needed)",
-    inputSchema: { type: "object", properties: {} },
-  },
-  {
-    name: "comet_ask",
-    description:
-      "Send a prompt to Comet/Perplexity and wait for the complete response (blocking). Ideal for tasks requiring real browser interaction (login walls, dynamic content, filling forms) or deep research with agentic browsing.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        prompt: {
-          type: "string",
-          description:
-            "Question or task for Comet - focus on goals and context",
-        },
-        context: {
-          type: "string",
-          description:
-            "Optional context to include (e.g., file contents, codebase info, marketing guidelines). This will be prefixed to the prompt to give Comet full context.",
-        },
-        newChat: {
-          type: "boolean",
-          description: "Start a fresh conversation (default: false)",
-        },
-        timeout: {
-          type: "number",
-          description: "Max wait time in ms (default: 120000 = 2min)",
-        },
-      },
-      required: ["prompt"],
-    },
-  },
-  {
-    name: "comet_poll",
-    description:
-      "Check agent status and progress. Call repeatedly to monitor agentic tasks.",
-    inputSchema: { type: "object", properties: {} },
-  },
-  {
-    name: "comet_stop",
-    description: "Stop the current agent task if it's going off track",
-    inputSchema: { type: "object", properties: {} },
-  },
-  {
-    name: "comet_screenshot",
-    description: "Capture a screenshot of current page",
-    inputSchema: { type: "object", properties: {} },
-  },
-  {
-    name: "comet_tabs",
-    description:
-      "View and manage browser tabs. Shows all open tabs with their purpose, domain, and status. Helps coordinate multi-tab workflows without creating duplicate tabs.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        action: {
-          type: "string",
-          enum: ["list", "switch", "close"],
-          description:
-            "Action to perform: 'list' (default) shows all tabs, 'switch' activates a tab, 'close' closes a tab",
-        },
-        domain: {
-          type: "string",
-          description: "For switch/close: domain to match (e.g., 'github.com')",
-        },
-        tabId: {
-          type: "string",
-          description: "For switch/close: specific tab ID",
-        },
-      },
-    },
-  },
-  COMET_MODE_TOOL,
-  {
-    name: "comet_upload",
-    description:
-      "Upload a file to a file input on the current page. Use this to attach images, documents, or other files to forms, posts, or upload dialogs. The file must exist on the local filesystem.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        filePath: {
-          type: "string",
-          description:
-            "Absolute path to the file to upload (e.g., '/home/user/image.png' or 'C:\\Users\\user\\image.png')",
-        },
-        selector: {
-          type: "string",
-          description:
-            "Optional CSS selector for the file input element. If not provided, auto-detects the first file input on the page.",
-        },
-        checkOnly: {
-          type: "boolean",
-          description:
-            "If true, only checks if file inputs exist on the page without uploading",
-        },
-      },
-      required: ["filePath"],
-    },
-  },
-];
-
 // The tab choice comet_ask and comet_mode share, and with it the one record
 // of the tabs the server opened, whichever of them opened a tab.
 const perplexityTab = createCdpPerplexityTab(cometClient);
@@ -183,7 +79,7 @@ const server = new Server(
 );
 
 server.setRequestHandler(ListToolsRequestSchema, async () => ({
-  tools: TOOLS,
+  tools: [...TOOL_DEFINITIONS],
 }));
 
 server.setRequestHandler(CallToolRequestSchema, async (request) => {

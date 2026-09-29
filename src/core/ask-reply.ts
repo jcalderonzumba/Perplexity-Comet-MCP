@@ -16,58 +16,47 @@ import type {
 } from "./ask.js";
 import { withModeNotice } from "./ask-mode.js";
 import type { StopOutcome } from "./ask-stop.js";
+import { errorReply, type TextReply, textReply } from "./tool-reply.js";
 
 const TASK_STILL_ACTIVE =
   "The task is still active: use comet_poll to follow the answer until it is complete, or comet_stop to cancel it.";
 
 const START_A_NEW_TASK = "Use comet_ask to start a new task.";
 
-export interface AskReply {
-  readonly text: string;
-  readonly isError: boolean;
-}
-
 export function describeAskOutcome(
   outcome: AskOutcome,
   quotePage: (pageText: string) => string,
-): AskReply {
+): TextReply {
   switch (outcome.kind) {
     case "refused":
-      return { text: `Error: ${outcome.reason}`, isError: true };
+      return errorReply(`Error: ${outcome.reason}`);
     case "failed":
-      return {
-        text: withModeNotice(
+      return errorReply(
+        withModeNotice(
           outcome.notice,
           failureLine(outcome.message, outcome.pageDetail, quotePage),
         ),
-        isError: true,
-      };
+      );
     case "answered":
-      return {
-        text: withModeNotice(outcome.notice, quotePage(outcome.answer)),
-        isError: false,
-      };
+      return textReply(
+        withModeNotice(outcome.notice, quotePage(outcome.answer)),
+      );
     case "timed-out":
-      return {
-        text: withModeNotice(
+      return textReply(
+        withModeNotice(
           outcome.notice,
           describeTimeout(outcome.timeoutMs, outcome.progress, quotePage),
         ),
-        isError: false,
-      };
+      );
     case "stopped":
-      return {
-        text: withModeNotice(
+      return textReply(
+        withModeNotice(
           outcome.notice,
           describeStoppedAsk(outcome.progress, quotePage),
         ),
-        isError: false,
-      };
+      );
     case "stopped-before-sending":
-      return {
-        text: withModeNotice(outcome.notice, STOPPED_BEFORE_SENDING),
-        isError: false,
-      };
+      return textReply(withModeNotice(outcome.notice, STOPPED_BEFORE_SENDING));
   }
 }
 
@@ -134,24 +123,21 @@ function partialAnswerLines(
 export function describePollOutcome(
   outcome: PollOutcome,
   quotePage: (pageText: string) => string,
-): AskReply {
-  return {
-    text: pollText(outcome, quotePage),
-    isError: outcome.kind === "page-error",
-  };
+): TextReply {
+  const text = pollText(outcome, quotePage);
+  return outcome.kind === "page-error" ? errorReply(text) : textReply(text);
 }
 
-export function describeStopOutcome(outcome: StopOutcome): AskReply {
+export function describeStopOutcome(outcome: StopOutcome): TextReply {
   switch (outcome.kind) {
     case "stopped":
-      return { text: "Agent stopped", isError: false };
+      return textReply("Agent stopped");
     case "nothing-to-stop":
-      return { text: "No active agent to stop", isError: false };
+      return textReply("No active agent to stop");
     case "not-taken":
-      return {
-        text: "Error: The answer was not stopped: the stop control still shows after a click on it. Use comet_screenshot to see the page.",
-        isError: true,
-      };
+      return errorReply(
+        "Error: The answer was not stopped: the stop control still shows after a click on it. Use comet_screenshot to see the page.",
+      );
   }
 }
 

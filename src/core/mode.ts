@@ -28,9 +28,13 @@ import {
   type PagePoint,
   readModeMenuItems,
 } from "../page-scripts.js";
+import {
+  type FocusEmulationPort,
+  withFocusEmulated,
+} from "./focus-emulation.js";
 
 /** What the mode core needs from the page; each adapter supplies one. */
-export interface ModePage {
+export interface ModePage extends FocusEmulationPort {
   /** Runs a page script with its arguments, serialised, and returns its value. */
   run<A extends PageArgument[], R>(
     script: (...args: A) => R,
@@ -40,12 +44,6 @@ export interface ModePage {
   clickAt(point: PagePoint): Promise<void>;
   pressEscape(): Promise<void>;
   wait(ms: number): Promise<void>;
-  /**
-   * Makes the tab take trusted input as if its window were focused, until
-   * `stopFocusEmulation`; refused off Perplexity.
-   */
-  startFocusEmulation(): Promise<void>;
-  stopFocusEmulation(): Promise<void>;
 }
 
 /**
@@ -243,30 +241,18 @@ export class ModeCore {
       : { status: "failed", mode, failure: result.failure };
   }
 
-  /**
-   * Selects on the page with its focus emulated, and stops emulating it
-   * whatever the selection does. Failing to stop never replaces the
-   * selection's own result: a connection too broken to stop it has ended
-   * the emulation with it.
-   */
-  private async selectOnPage(
-    mode: ToolMode,
-    label: string,
-  ): Promise<SwitchResult> {
-    try {
-      await this.page.startFocusEmulation();
-    } catch (error) {
-      return fail({
-        kind: "focus-not-emulated",
-        mode,
-        message: errorMessage(error),
-      });
-    }
-    try {
-      return await this.selectAndClose(mode, label);
-    } finally {
-      await this.page.stopFocusEmulation().catch(() => undefined);
-    }
+  /** Selects on the page with its focus emulated. */
+  private selectOnPage(mode: ToolMode, label: string): Promise<SwitchResult> {
+    return withFocusEmulated(
+      this.page,
+      () => this.selectAndClose(mode, label),
+      (error) =>
+        fail({
+          kind: "focus-not-emulated",
+          mode,
+          message: errorMessage(error),
+        }),
+    );
   }
 
   private async selectAndClose(

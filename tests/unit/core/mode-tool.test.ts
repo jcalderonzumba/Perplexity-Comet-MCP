@@ -65,6 +65,7 @@ describe("answerModeTool without a mode", () => {
     const reply = await answerModeTool(undefined, tool);
 
     expect(reply).toEqual({
+      kind: "text",
       isError: false,
       text: [
         "Current mode: research",
@@ -141,6 +142,7 @@ describe("answerModeTool with a mode", () => {
     const reply = await answerModeTool("research", tool);
 
     expect(reply).toEqual({
+      kind: "text",
       isError: false,
       text: "Switched to research mode",
     });
@@ -163,6 +165,7 @@ describe("answerModeTool with a mode", () => {
     const reply = await answerModeTool("research", tool);
 
     expect(reply).toEqual({
+      kind: "text",
       isError: true,
       text: 'Cannot switch to research mode: after selecting "Deep research" the menu has <<Search>> checked and the mode button reads <<Search>>',
     });
@@ -177,6 +180,7 @@ describe("answerModeTool with a mode", () => {
       const reply = await answerModeTool(mode, tool);
 
       expect(reply).toEqual({
+        kind: "text",
         isError: true,
         text: `Invalid mode: ${mode}. Use: search, research, labs, learn`,
       });
@@ -196,6 +200,7 @@ describe("answerModeTool with a mode", () => {
       const reply = await answerModeTool(mode, tool);
 
       expect(reply).toEqual({
+        kind: "text",
         isError: true,
         text: `Cannot switch to ${mode} mode: ${reason}`,
       });
@@ -280,11 +285,13 @@ describe("src/core/mode-tool.ts", () => {
     "utf8",
   );
 
-  it("imports only the mode core and the catalogue, never an adapter, the CDP client or the wrapper", () => {
+  it("imports only the mode core, the catalogue and the reply type, never an adapter, the CDP client or the wrapper", () => {
     const imported = [
       ...source.matchAll(/(?:from|import)\s*\(?\s*"([^"]+)"/g),
     ].map((match) => match[1]);
 
-    expect(new Set(imported)).toEqual(new Set(["../modes.js", "./mode.js"]));
+    expect(new Set(imported)).toEqual(
+      new Set(["../modes.js", "./mode.js", "./tool-reply.js"]),
+    );
   });
 });

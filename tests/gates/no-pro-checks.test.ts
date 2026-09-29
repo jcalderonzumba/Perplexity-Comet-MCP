@@ -265,6 +265,91 @@ const SILENT: DebugPort = { port: 9223, answers: async () => false };
 const byId = (checks: readonly ScoredCheck[], id: string) =>
   checks.find((check) => check.id === id);
 
+describe("runNoProBattery and the page's visibility", () => {
+  /** A debug port whose page reads `state`, or fails to be read. */
+  function readingPort(
+    state: string | undefined | Error,
+    log: string[] = [],
+  ): DebugPort {
+    return {
+      ...LISTENING,
+      pageVisibility: async () => {
+        log.push("visibility");
+        if (state instanceof Error) throw state;
+        return state;
+      },
+    };
+  }
+
+  const switchNotes = (checks: readonly ScoredCheck[]) =>
+    ["7.2-research", "7.2-labs", "7.2-learn", "7.2-search"].map(
+      (id) => byId(checks, id)?.note ?? "",
+    );
+
+  it("adds nothing to the mode switches' notes when the page is hidden", async () => {
+    const plain = await runNoProBattery(
+      fakeServer(HEALTHY).callTool,
+      LISTENING,
+    );
+    const hidden = await runNoProBattery(
+      fakeServer(HEALTHY).callTool,
+      readingPort("hidden"),
+    );
+
+    expect(switchNotes(hidden)).toEqual(switchNotes(plain));
+    expect(summaryLine(hidden)).toBe(summaryLine(plain));
+  });
+
+  it("says on each mode switch that the run did not test switching hidden, when the page is visible", async () => {
+    const checks = await runNoProBattery(
+      fakeServer(HEALTHY).callTool,
+      readingPort("visible"),
+    );
+
+    for (const note of switchNotes(checks)) {
+      expect(note).toContain("page not hidden (visibilityState: visible)");
+      expect(note).toContain("does not test switching with Comet hidden");
+    }
+    expect(summaryLine(checks)).toBe("Results: 9 passed, 0 failed, 1 known");
+  });
+
+  it("says the visibility could not be read, without failing a check that held", async () => {
+    const unreadable = await runNoProBattery(
+      fakeServer(HEALTHY).callTool,
+      readingPort(new Error("no Perplexity page")),
+    );
+    const noPage = await runNoProBattery(
+      fakeServer(HEALTHY).callTool,
+      readingPort(undefined),
+    );
+
+    for (const checks of [unreadable, noPage]) {
+      for (const note of switchNotes(checks)) {
+        expect(note).toContain("page visibility not read");
+      }
+      expect(summaryLine(checks)).toBe("Results: 9 passed, 0 failed, 1 known");
+    }
+    expect(switchNotes(unreadable)[0]).toContain("no Perplexity page");
+  });
+
+  it("reads the visibility just before each mode switch, never once for the run", async () => {
+    const log: string[] = [];
+    const server = fakeServer(HEALTHY);
+    await runNoProBattery(
+      (name, args, timeoutMs) => {
+        log.push(key(name, args));
+        return server.callTool(name, args, timeoutMs);
+      },
+      readingPort("hidden", log),
+    );
+
+    const switches = ["research", "labs", "learn", "search"].map((mode) =>
+      log.indexOf(key("comet_mode", { mode })),
+    );
+    for (const at of switches) expect(log[at - 1]).toBe("visibility");
+  });
+});
+
 describe("runNoProBattery", () => {
   it("scores today's Comet as 9 passed and 1 known, and passes", async () => {
     const checks = await runNoProBattery(
@@ -310,7 +395,6 @@ describe("runNoProBattery", () => {
     await runNoProBattery(server.callTool, LISTENING);
     expect(server.calls).toEqual([
       key("comet_connect", {}),
-      key("comet_screenshot", {}),
       key("comet_tabs", {}),
       key("comet_mode", {}),
       key("comet_mode", { mode: "research" }),
@@ -320,7 +404,20 @@ describe("runNoProBattery", () => {
       key("comet_mode", {}),
       key("comet_mode", { mode: "invalid_mode_xyz" }),
       key("comet_mode", {}),
+      key("comet_screenshot", {}),
     ]);
+  });
+
+  it("takes the screenshot, which raises Comet's window, after every mode call", async () => {
+    const server = fakeServer(HEALTHY);
+    await runNoProBattery(server.callTool, LISTENING);
+    const screenshot = server.calls.indexOf(key("comet_screenshot", {}));
+    const lastModeCall = Math.max(
+      ...server.calls.map((call, at) =>
+        call.startsWith("comet_mode ") ? at : -1,
+      ),
+    );
+    expect(screenshot).toBeGreaterThan(lastModeCall);
   });
 
   it("reports each check as it is scored, in order", async () => {
@@ -330,7 +427,6 @@ describe("runNoProBattery", () => {
     );
     expect(reported).toEqual([
       "1.2",
-      "5.1",
       "6.1",
       "7.1",
       "7.2-research",
@@ -339,6 +435,7 @@ describe("runNoProBattery", () => {
       "7.2-search",
       "7.3-reconnect",
       "9.4",
+      "5.1",
     ]);
   });
 

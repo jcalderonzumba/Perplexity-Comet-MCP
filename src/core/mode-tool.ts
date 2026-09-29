@@ -17,6 +17,7 @@ import {
   type ModeCore,
   type ModeReading,
 } from "./mode.js";
+import { errorReply, type TextReply, textReply } from "./tool-reply.js";
 
 /** The tool's definition, as MCP lists it. Its input schema is the contract. */
 export const COMET_MODE_TOOL = {
@@ -44,11 +45,6 @@ export interface ModeTool {
   readonly quotePage: (pageText: string) => string;
 }
 
-export interface ModeToolReply {
-  readonly text: string;
-  readonly isError: boolean;
-}
-
 /**
  * Answers `comet_mode`: an absent or empty `mode` reads the current mode,
  * any other switches to it. A read the page fails is an error reply.
@@ -56,22 +52,17 @@ export interface ModeToolReply {
 export async function answerModeTool(
   mode: unknown,
   tool: ModeTool,
-): Promise<ModeToolReply> {
+): Promise<TextReply> {
   if (!mode) {
     const reading = await tool.core.readMode();
-    return {
-      text: describeReading(reading, tool.quotePage),
-      isError: reading.kind === "page-error",
-    };
+    const text = describeReading(reading, tool.quotePage);
+    return reading.kind === "page-error" ? errorReply(text) : textReply(text);
   }
   if (touchesThePage(mode)) await tool.openPerplexity();
   const result = await tool.core.switchMode(mode);
   return result.ok
-    ? { text: `Switched to ${result.mode} mode`, isError: false }
-    : {
-        text: describeModeFailure(result.failure, tool.quotePage),
-        isError: true,
-      };
+    ? textReply(`Switched to ${result.mode} mode`)
+    : errorReply(describeModeFailure(result.failure, tool.quotePage));
 }
 
 /** Whether switching to `mode` goes to the page, rather than being refused. */

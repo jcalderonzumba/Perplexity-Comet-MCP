@@ -3,12 +3,7 @@
 // adapter only puts them in its shape, through these.
 
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
-
-/** A tool's reply, as a core words it. */
-export interface ToolReply {
-  readonly text: string;
-  readonly isError: boolean;
-}
+import type { ToolReply } from "./core/tool-reply.js";
 
 /** The HTTP bridge's result for a tool call. */
 export interface BridgeToolResult {
@@ -17,17 +12,42 @@ export interface BridgeToolResult {
   error?: string;
 }
 
-/** The reply as an MCP tool result: one text block, flagged when an error. */
+/**
+ * The reply as an MCP tool result: one text block, flagged when an error, or
+ * one image block.
+ */
 export function toStdioResult(reply: ToolReply): CallToolResult {
-  return {
-    content: [{ type: "text", text: reply.text }],
-    ...(reply.isError ? { isError: true } : {}),
-  };
+  switch (reply.kind) {
+    case "text":
+      return {
+        content: [{ type: "text", text: reply.text }],
+        ...(reply.isError ? { isError: true } : {}),
+      };
+    case "image":
+      return {
+        content: [
+          { type: "image", data: reply.data, mimeType: reply.mimeType },
+        ],
+      };
+  }
 }
 
-/** The reply as the bridge's result: its text in `error` when an error. */
+/**
+ * The reply as the bridge's result: its text in `error` when an error, an
+ * image as a content array.
+ */
 export function toBridgeResult(reply: ToolReply): BridgeToolResult {
-  return reply.isError
-    ? { success: false, content: "", error: reply.text }
-    : { success: true, content: reply.text };
+  switch (reply.kind) {
+    case "text":
+      return reply.isError
+        ? { success: false, content: "", error: reply.text }
+        : { success: true, content: reply.text };
+    case "image":
+      return {
+        success: true,
+        content: [
+          { type: "image", data: reply.data, mimeType: reply.mimeType },
+        ],
+      };
+  }
 }

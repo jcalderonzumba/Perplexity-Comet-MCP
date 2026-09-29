@@ -158,6 +158,48 @@ describe("CometCDPClient focus emulation", () => {
     });
   });
 
+  it("ends only when its last holder stops", async () => {
+    await client.startFocusEmulation();
+    await client.startFocusEmulation();
+    tab.inputs.length = 0;
+
+    await client.stopFocusEmulation();
+    expect(tab.inputs).toEqual([]);
+
+    await client.stopFocusEmulation();
+    expect(tab.inputs).toEqual([
+      {
+        method: "Emulation.setFocusEmulationEnabled",
+        params: { enabled: false },
+      },
+    ]);
+  });
+
+  it("does not count a start that was refused", async () => {
+    await client.startFocusEmulation();
+    tab.moveTo("https://example.com/");
+    await expect(client.startFocusEmulation()).rejects.toThrow();
+    tab.inputs.length = 0;
+
+    await client.stopFocusEmulation();
+
+    expect(tab.inputs.at(-1)).toEqual({
+      method: "Emulation.setFocusEmulationEnabled",
+      params: { enabled: false },
+    });
+  });
+
+  it("counts again from none after the last holder stopped", async () => {
+    await client.startFocusEmulation();
+    await client.stopFocusEmulation();
+    await client.startFocusEmulation();
+    tab.inputs.length = 0;
+
+    await client.stopFocusEmulation();
+
+    expect(tab.inputs).toHaveLength(1);
+  });
+
   it("does not stop when not connected", async () => {
     await expect(new CometCDPClient().stopFocusEmulation()).rejects.toThrow(
       "Not connected to Comet. Call connect() first.",
