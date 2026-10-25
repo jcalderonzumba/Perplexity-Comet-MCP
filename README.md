@@ -76,7 +76,7 @@ npx clones the repository at that commit and builds it on first use, then reuses
 npx -y github:jcalderonzumba/Perplexity-Comet-MCP#<commit-sha>
 ```
 
-The first start clones and builds, which can take longer than an MCP client waits for a server; run the command once by hand, and stop it with Ctrl-C, before adding it to your client. To move a Claude Code setup to a newer commit, use `npm run bridge:update` from a clone (below); for another client, run the new commit once by hand, then change the SHA in its configuration.
+The first start clones and builds, which can take longer than an MCP client waits for a server; run the command once by hand, and stop it with Ctrl-C, before adding it to your client. To move to a newer commit, run the new commit once by hand, then change the SHA in your client's configuration.
 
 ### Install from Source
 
@@ -99,20 +99,20 @@ claude mcp add -s user comet-bridge -e COMET_PORT=9222 -- \
 # From a clone
 claude mcp add -s user comet-bridge -e COMET_PORT=9222 -- \
   node /path/to/Perplexity-Comet-MCP/dist/index.js
+
+# From a clone linked with `npm link`, which puts perplexity-comet-mcp on PATH
+claude mcp add -s user comet-bridge -e COMET_PORT=9222 -- perplexity-comet-mcp
 ```
 
 `claude mcp get comet-bridge` shows what it runs. When nothing answers on that port and no Comet runs, `comet_connect` starts Comet with remote debugging on it. If Comet is already running without the port, `comet_connect` leaves it alone and fails, naming the port and the command that starts Comet with it: quit Comet, run that command, and connect again.
 
 On macOS there is a way that needs no restart: Comet's remote-debugging switch. Open `comet://inspect/#remote-debugging` in Comet and turn remote debugging on; Comet keeps the choice, and from then on the server finds the Comet you open from the Dock, with no flag, when nothing answers on `COMET_PORT`. With the switch, Comet asks you to allow each new debugging connection in a dialog of its own. Click Allow only when you have just asked the server for something: any program on your Mac can make Comet show the same dialog. The server opens one connection and keeps it, so it asks once per server process, and once more only when Comet drops the connection.
 
-To move a pinned `comet-bridge` to a newer commit, run this from a clone of this repository:
+To update a server that runs from a clone, pull and rebuild it, then start a new Claude Code session so it runs the new build:
 
 ```bash
-npm run bridge:update                 # the tip of main on GitHub
-npm run bridge:update -- <commit-sha> # a given commit, for example to go back
+git pull --ff-only && npm ci && npm run build
 ```
-
-It builds that commit with npx and asks it for its tools first, and replaces the user-scope `comet-bridge` entry only when every tool answers; if adding the new entry fails, it puts the old one back. It keeps the entry's environment, with `COMET_PORT` taken from your environment when you set it there, and does nothing when the entry already runs that commit on that port. Start a new Claude Code session to run the new build. It passes the entry, its environment included, to `claude mcp add-json` on the command line, as `claude mcp add -e` does, so the values are briefly visible in the process list. It needs `git`, `npx` and `claude` on `PATH`, and runs on macOS and Linux.
 
 ### Other MCP clients
 
@@ -597,7 +597,6 @@ npm run check                         # before every commit
 | `npm run lint` · `npm run format` | Biome on its own; `format` rewrites files |
 | `npm run test:live` | the live no-pro battery |
 | `npm run test:live:pro` | the live Pro battery |
-| `npm run bridge:update [-- <sha>]` | points your user-scope Claude Code `comet-bridge` at this repository's build at a commit, by default the tip of `main` on GitHub |
 
 ### Live test batteries
 
