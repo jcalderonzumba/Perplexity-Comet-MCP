@@ -23,7 +23,7 @@ import { errorReply, type TextReply, textReply } from "./tool-reply.js";
 export const COMET_MODE_TOOL = {
   name: "comet_mode",
   description:
-    "Switch Perplexity's mode, or call without mode to read the current one from the page. 'search' is Search and 'research' is Deep research; 'labs' and 'learn' are not available and fail with the reason.",
+    "Switch Perplexity's mode, or call without mode to read the current one from the page. 'search' is Search and 'research' is Deep Research; 'labs' and 'learn' are not available and fail with the reason.",
   inputSchema: {
     type: "object" as const,
     properties: {

@@ -336,7 +336,7 @@ Returns: the current mode read from the page, or confirmation that the switch ha
 | Mode | What it selects |
 |------|-----------------|
 | search | Search, Perplexity's default |
-| research | Deep research |
+| research | Deep Research |
 | labs | Not available: Perplexity's input bar no longer offers Labs, so the call fails saying so |
 | learn | Not available yet: the call fails saying so |
 
@@ -596,7 +596,7 @@ The Pro battery ends with the same summary line. Its checks hold only on the ans
 
 The Pro battery's known-failures list names the Agentic browsing plan for Comet answering without opening the site a prompt names (`[3.1]`, `[3.2-agent-tab]`, `[3.3-tabs-kept]`, `[6.3]`), and lists the switch to `learn` as the no-pro battery does. `[3.4]` is not on it: its condition, a repository and its star count in the final answer, can hold whether or not the agent opens a tab, and it holds once the ask returns its own turn's answer.
 
-The mode checks hold only on what the server really did. `[7.1]` and `[7.3-reconnect]` pass when `comet_mode` reads a mode from the page, and fail on an error or on `unknown`; `[9.4]`'s follow-up read is judged the same way. `[7.2-research]` and `[7.2-search]` pass on `Switched to <mode> mode`, and `[7.2-labs]` passes on the error saying Perplexity's input bar no longer offers Labs. Today the no-pro battery's known-failures list holds one check, the switch to the `learn` mode: Perplexity's input bar offers "Learn step by step", and `comet_mode` does not switch to it yet.
+The mode checks hold only on what the server really did. `[7.1]` and `[7.3-reconnect]` pass when `comet_mode` reads a mode from the page, and fail on an error or on `unknown`; `[9.4]`'s follow-up read is judged the same way. `[7.2-research]` and `[7.2-search]` pass on `Switched to <mode> mode`, and `[7.2-labs]` passes on the error saying Perplexity's input bar no longer offers Labs. Today the no-pro battery's known-failures list holds one check, the switch to the `learn` mode: Perplexity's input bar offers "Learn Step by Step", and `comet_mode` does not switch to it yet.
 
 ### Gates
 
