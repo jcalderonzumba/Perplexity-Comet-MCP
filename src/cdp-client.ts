@@ -2,6 +2,11 @@
 // Modified for Windows/WSL support
 
 import CDP from "chrome-remote-interface";
+import {
+  BrowserConnection,
+  type BrowserEndpoint,
+  type PageSession,
+} from "./browser-connection.js";
 import { systemCometLaunch } from "./comet-launch.js";
 import {
   type CometLaunch,
@@ -10,7 +15,7 @@ import {
 } from "./core/comet-launch.js";
 import { isBrowsingTab } from "./core/tabs.js";
 import { errorMessage } from "./error-message.js";
-import { IS_WINDOWS, IS_WSL, windowsFetch } from "./host-platform.js";
+import { IS_WSL } from "./host-platform.js";
 import type { PagePoint } from "./page-scripts.js";
 import {
   isPerplexityAddress,
@@ -411,13 +416,21 @@ function reconnectTarget(targets: readonly CDPTarget[]): CDPTarget | undefined {
   );
 }
 
+/** The size the connected tab's window is given, for a consistent layout. */
+const WINDOW_SIZE = { width: 1440, height: 900 } as const;
+
 export class CometCDPClient {
-  private client: CDP.Client | null = null;
+  /** The one socket to Comet's browser; null until opened, or once dropped. */
+  private connection: BrowserConnection | null = null;
+  /** The opening of `connection`, which every caller meanwhile shares. */
+  private opening: Promise<BrowserConnection> | null = null;
+  /** The connected tab, attached on `connection`. */
+  private session: PageSession | null = null;
   /**
-   * How many callers hold focus emulation, per connection: it is one on/off
+   * How many callers hold focus emulation, per session: it is one on/off
    * switch per CDP session, so it ends only when its last holder stops.
    */
-  private readonly focusHolders = new WeakMap<CDP.Client, number>();
+  private readonly focusHolders = new WeakMap<PageSession, number>();
   private readonly launch: CometLaunch;
   private state: CometState = {
     connected: false,
@@ -428,9 +441,9 @@ export class CometCDPClient {
   private maxReconnectAttempts: number = 10;
   // In-flight reconnect promise. Multiple concurrent operations entering
   // `withAutoReconnect` after a transport drop must NOT each kick off
-  // their own reconnect — they would race on `this.client` (one closes
-  // while another is mid-handshake), corrupting state. We cache the
-  // single promise and let all waiters await it.
+  // their own reconnect — they would race on `this.session` (one detaches
+  // while another is mid-attach), corrupting state. We cache the single
+  // promise and let all waiters await it.
   private reconnectPromise: Promise<void> | null = null;
   // Consecutive successful operations since the last connection error.
   // Used to reset the attempt counter only after the connection has
@@ -454,7 +467,7 @@ export class CometCDPClient {
   }
 
   get isConnected(): boolean {
-    return this.state.connected && this.client !== null;
+    return this.state.connected && !this.needsReconnect();
   }
 
   get currentState(): CometState {
@@ -471,14 +484,14 @@ export class CometCDPClient {
       return this.healthCheckCache;
     }
 
-    if (!this.client) {
+    if (!this.session) {
       this.healthCheckCache = false;
       this.lastHealthCheck = now;
       return false;
     }
 
     try {
-      await this.client.Runtime.evaluate({ expression: "1+1", timeout: 3000 });
+      await this.session.Runtime.evaluate({ expression: "1+1", timeout: 3000 });
       this.healthCheckCache = true;
       this.lastHealthCheck = now;
       return true;
@@ -512,9 +525,10 @@ export class CometCDPClient {
    * Call this before critical operations
    */
   async preOperationCheck(): Promise<void> {
-    // Quick check if client exists
-    if (!this.client) {
-      await this.reconnect();
+    // No tab to drive, or its tab or the socket is gone: no health check
+    // can pass, so reconnect first.
+    if (this.needsReconnect()) {
+      await this.ensureSingleReconnect();
       return;
     }
 
@@ -529,8 +543,18 @@ export class CometCDPClient {
     // Full health check
     if (!(await this.isConnectionHealthy())) {
       this.invalidateHealthCache();
-      await this.reconnect();
+      await this.ensureSingleReconnect();
     }
+  }
+
+  /**
+   * Whether there is no tab to drive: none attached, the browser ended its
+   * session (its tab closed or went away), or Comet dropped the socket.
+   */
+  private needsReconnect(): boolean {
+    return (
+      this.connection === null || this.session === null || this.session.lost
+    );
   }
 
   /**
@@ -649,10 +673,11 @@ export class CometCDPClient {
 
   /**
    * Comet answering on the configured port: found there, or launched when no
-   * Comet runs. A Comet running without the port is reported, never
-   * restarted (principle 6): it holds the user's windows.
+   * Comet runs; its browser socket is where to connect. A Comet running
+   * without the port is reported, never restarted (principle 6): it holds
+   * the user's windows.
    */
-  private async ensureCometRunning(): Promise<void> {
+  private async ensureCometRunning(): Promise<BrowserEndpoint> {
     const port = this.state.port;
     let comet: Awaited<ReturnType<typeof ensureCometOnPort>>;
     try {
@@ -669,23 +694,18 @@ export class CometCDPClient {
     if (comet.kind === "launched") {
       await new Promise((resolve) => setTimeout(resolve, 2000));
     }
+    return comet.endpoint;
   }
 
   /**
-   * Reconnect to the last connected tab
+   * Reconnect to the last connected tab, on the same socket while Comet
+   * keeps it open: only a dropped socket is opened again.
    */
   async reconnect(): Promise<string> {
-    if (this.client) {
-      try {
-        await this.client.close();
-      } catch {
-        /* ignore */
-      }
-    }
     this.state.connected = false;
-    this.client = null;
-
-    await this.ensureCometRunning();
+    if (!this.connection) {
+      await this.browserConnection(await this.ensureCometRunning());
+    }
 
     // Try to reconnect to last target
     if (this.lastTargetId) {
@@ -741,95 +761,85 @@ export class CometCDPClient {
     return this.state.activeTabId ?? null;
   }
 
-  /**
-   * List all available tabs/targets
-   */
+  /** Every tab, through the browser connection's Target domain. */
   async listTargets(): Promise<CDPTarget[]> {
-    // On WSL, use HTTP via PowerShell (WebSocket doesn't work across WSL/Windows boundary)
-    if (IS_WSL) {
-      const response = await windowsFetch(
-        `http://127.0.0.1:${this.state.port}/json/list`,
-      );
-      if (!response.ok)
-        throw new Error(`Failed to list targets: ${response.status}`);
-      return response.json() as Promise<CDPTarget[]>;
-    }
-
-    // On native Windows (not WSL), use CDP Target.getTargets() to avoid HTTP issues
-    if (IS_WINDOWS) {
-      try {
-        const tempClient = await CDP({
-          port: this.state.port,
-          host: "127.0.0.1",
-        });
-        try {
-          const { targetInfos } = await tempClient.Target.getTargets();
-          return targetInfos.map((t) => ({
-            id: t.targetId,
-            type: t.type,
-            title: t.title,
-            url: t.url,
-            webSocketDebuggerUrl: `ws://127.0.0.1:${this.state.port}/devtools/page/${t.targetId}`,
-          }));
-        } finally {
-          // Close in `finally` so a throw inside `Target.getTargets()` does
-          // not leak the underlying WebSocket. Each retry in withAutoReconnect
-          // calls listTargets() again — even a slow leak exhausts handles.
-          await tempClient.close().catch(() => {
-            /* already closed */
-          });
-        }
-      } catch (error) {
-        throw new Error(`Failed to list targets: ${error}`);
-      }
-    }
-
-    // Fallback for other platforms (macOS, Linux)
-    const response = await windowsFetch(
-      `http://127.0.0.1:${this.state.port}/json/list`,
-    );
-    if (!response.ok)
-      throw new Error(`Failed to list targets: ${response.status}`);
-    return response.json() as Promise<CDPTarget[]>;
+    return (await this.browserConnection()).targets();
   }
 
   /**
-   * Connect to a specific tab
+   * The browser connection: the one held, else the one being opened, else a
+   * new one on `endpoint`, or on the socket the configured port names. Only
+   * this opens a socket, and never a second while one is opening.
    */
-  async connect(targetId?: string): Promise<string> {
-    if (this.client) {
-      await this.disconnect();
-    }
+  private browserConnection(
+    endpoint?: BrowserEndpoint,
+  ): Promise<BrowserConnection> {
+    if (this.connection) return Promise.resolve(this.connection);
+    this.opening ??= this.openConnection(endpoint).finally(() => {
+      this.opening = null;
+    });
+    return this.opening;
+  }
 
+  private async openConnection(
+    known?: BrowserEndpoint,
+  ): Promise<BrowserConnection> {
+    const endpoint = known ?? (await this.answeringEndpoint());
     // On WSL, check if we can connect directly (mirrored networking required)
-    const connectPort = await getWSLConnectPort(this.state.port);
+    const port = await getWSLConnectPort(endpoint.port);
+    const connection = await BrowserConnection.open({ ...endpoint, port });
+    connection.onClose(() => this.connectionDropped(connection));
+    this.connection = connection;
+    return connection;
+  }
 
-    const options: CDP.Options = { port: connectPort, host: "127.0.0.1" };
-    if (targetId) options.target = targetId;
+  /** The browser socket of the Comet answering on the configured port. */
+  private async answeringEndpoint(): Promise<BrowserEndpoint> {
+    const port = this.state.port;
+    const comet = await this.launch.probe(port);
+    if (!comet)
+      throw new Error(`Comet does not answer on the debug port ${port}`);
+    return comet.endpoint;
+  }
 
-    this.client = await CDP(options);
+  /**
+   * Comet dropped the socket. The session stays, so the next operation on
+   * it fails as a lost connection and reconnects.
+   */
+  private connectionDropped(connection: BrowserConnection): void {
+    if (this.connection !== connection) return;
+    this.connection = null;
+    this.state.connected = false;
+    this.invalidateHealthCache();
+  }
+
+  /**
+   * Connect to a specific tab: attach to it on the browser connection,
+   * opening that only when there is none, never a socket per tab.
+   */
+  async connect(targetId: string): Promise<string> {
+    const connection = await this.browserConnection();
+    await this.detachSession();
+    const session = await connection.attach(targetId);
+    this.session = session;
 
     await Promise.all([
-      this.client.Page.enable(),
-      this.client.Runtime.enable(),
-      this.client.DOM.enable(),
-      this.client.Network.enable(),
+      session.Page.enable(),
+      session.Runtime.enable(),
+      session.DOM.enable(),
+      session.Network.enable(),
     ]);
 
     // Set window size for consistent UI
     try {
-      const { windowId } = await this.client.Browser.getWindowForTarget({
-        targetId,
-      });
-      await this.client.Browser.setWindowBounds({
-        windowId,
-        bounds: { width: 1440, height: 900, windowState: "normal" },
+      await connection.setWindowBounds(targetId, {
+        ...WINDOW_SIZE,
+        windowState: "normal",
       });
     } catch {
       try {
-        await this.client.Emulation.setDeviceMetricsOverride({
-          width: 1440,
-          height: 900,
+        await session.Emulation.setDeviceMetricsOverride({
+          ...WINDOW_SIZE,
           deviceScaleFactor: 1,
           mobile: false,
         });
@@ -838,21 +848,30 @@ export class CometCDPClient {
       }
     }
 
-    // Subscribe to Page.lifecycleEvent so we can wait for paint readiness
-    // (firstContentfulPaint, networkAlmostIdle, etc.) the way Lighthouse and
-    // Puppeteer do, instead of polling document.readyState.
-    this.frameLifecycle.clear();
-    if (this.lifecycleUnsubscribe) {
-      try {
-        this.lifecycleUnsubscribe();
-      } catch {
-        /* ignore */
-      }
-      this.lifecycleUnsubscribe = null;
-    }
-    this.lifecycleListener = null;
+    await this.trackLifecycle(session);
+
+    this.state.connected = true;
+    this.state.activeTabId = targetId;
+    this.lastTargetId = targetId;
+    this.reconnectAttempts = 0;
+
+    const { result } = await session.Runtime.evaluate({
+      expression: "window.location.href",
+    });
+    this.state.currentUrl = result.value as string;
+
+    return `Connected to tab: ${this.state.currentUrl}`;
+  }
+
+  /**
+   * Subscribe to Page.lifecycleEvent so we can wait for paint readiness
+   * (firstContentfulPaint, networkAlmostIdle, etc.) the way Lighthouse and
+   * Puppeteer do, instead of polling document.readyState.
+   */
+  private async trackLifecycle(session: PageSession): Promise<void> {
+    this.stopLifecycleTracking();
     try {
-      await this.client.Page.setLifecycleEventsEnabled({ enabled: true });
+      await session.Page.setLifecycleEventsEnabled({ enabled: true });
       this.lifecycleListener = (params) => {
         const { frameId, loaderId, name } = params || {};
         if (!frameId || !loaderId || !name) return;
@@ -868,31 +887,16 @@ export class CometCDPClient {
       };
       // chrome-remote-interface's domain event callbacks return an unsubscribe
       // function (api.js: `() => chrome.removeListener(rawEventName, handler)`).
-      // Capture it so disconnect() can deregister cleanly.
-      this.lifecycleUnsubscribe = this.client.Page.lifecycleEvent(
+      // Capture it so the next tab and disconnect() can deregister cleanly.
+      this.lifecycleUnsubscribe = session.Page.lifecycleEvent(
         this.lifecycleListener,
       );
     } catch {
       /* lifecycle tracking is best-effort */
     }
-
-    this.state.connected = true;
-    this.state.activeTabId = targetId;
-    this.lastTargetId = targetId;
-    this.reconnectAttempts = 0;
-
-    const { result } = await this.client.Runtime.evaluate({
-      expression: "window.location.href",
-    });
-    this.state.currentUrl = result.value as string;
-
-    return `Connected to tab: ${this.state.currentUrl}`;
   }
 
-  /**
-   * Disconnect from current tab
-   */
-  async disconnect(): Promise<void> {
+  private stopLifecycleTracking(): void {
     if (this.lifecycleUnsubscribe) {
       try {
         this.lifecycleUnsubscribe();
@@ -903,12 +907,36 @@ export class CometCDPClient {
     }
     this.lifecycleListener = null;
     this.frameLifecycle.clear();
-    if (this.client) {
-      await this.client.close();
-      this.client = null;
-      this.state.connected = false;
-      this.state.activeTabId = undefined;
-    }
+  }
+
+  /**
+   * Detach from the current tab, leaving the socket open. A session whose
+   * socket dropped cannot be detached, and needs not be.
+   */
+  private async detachSession(): Promise<void> {
+    await this.forgetSession()
+      ?.detach()
+      .catch(() => {
+        /* its socket is gone */
+      });
+  }
+
+  /** Drops the current tab's session from the client, and returns it. */
+  private forgetSession(): PageSession | null {
+    const session = this.session;
+    this.session = null;
+    this.stopLifecycleTracking();
+    this.state.connected = false;
+    this.state.activeTabId = undefined;
+    return session;
+  }
+
+  /** Closes the browser socket: the servers' shutdown, and only that. */
+  async disconnect(): Promise<void> {
+    const connection = this.connection;
+    this.forgetSession();
+    this.connection = null;
+    await connection?.close();
   }
 
   /**
@@ -943,7 +971,7 @@ export class CometCDPClient {
     url: string,
     waitForLoad: boolean = true,
   ): Promise<NavigateResult> {
-    const { Page } = this.connectedClient();
+    const { Page } = this.connectedSession();
     this.assertNavigableUrl(url);
     const result = await Page.navigate({ url });
     if (waitForLoad) await Page.loadEventFired();
@@ -955,7 +983,7 @@ export class CometCDPClient {
    * Capture screenshot
    */
   async screenshot(format: "png" | "jpeg" = "png"): Promise<ScreenshotResult> {
-    const { Page } = this.connectedClient();
+    const { Page } = this.connectedSession();
 
     // Wait for paint readiness via Page.lifecycleEvent (Lighthouse/Puppeteer
     // approach). If firstContentfulPaint already fired for this document the
@@ -974,7 +1002,7 @@ export class CometCDPClient {
    * Execute JavaScript in the page context
    */
   async evaluate(expression: string): Promise<EvaluateResult> {
-    return this.connectedClient().Runtime.evaluate({
+    return this.connectedSession().Runtime.evaluate({
       expression,
       awaitPromise: true,
       returnByValue: true,
@@ -986,7 +1014,7 @@ export class CometCDPClient {
    */
   async safeEvaluate(expression: string): Promise<EvaluateResult> {
     return this.withAutoReconnect(async () => {
-      return this.connectedClient().Runtime.evaluate({
+      return this.connectedSession().Runtime.evaluate({
         expression,
         awaitPromise: true,
         returnByValue: true,
@@ -1039,12 +1067,12 @@ export class CometCDPClient {
    * switch that overlap never end each other's.
    */
   async startFocusEmulation(): Promise<void> {
-    const client = await this.onPerplexity("emulate focus");
-    this.focusHolders.set(client, this.focusHoldersOf(client) + 1);
+    const session = await this.onPerplexity("emulate focus");
+    this.focusHolders.set(session, this.focusHoldersOf(session) + 1);
     try {
-      await client.Emulation.setFocusEmulationEnabled({ enabled: true });
+      await session.Emulation.setFocusEmulationEnabled({ enabled: true });
     } catch (error) {
-      await this.releaseFocusHolder(client).catch(() => {});
+      await this.releaseFocusHolder(session).catch(() => {});
       throw error;
     }
   }
@@ -1056,74 +1084,52 @@ export class CometCDPClient {
    * holder counted, as after a reconnect, still turns the emulation off.
    */
   async stopFocusEmulation(): Promise<void> {
-    await this.releaseFocusHolder(this.connectedClient());
+    await this.releaseFocusHolder(this.connectedSession());
   }
 
-  private async releaseFocusHolder(client: CDP.Client): Promise<void> {
-    const remaining = Math.max(0, this.focusHoldersOf(client) - 1);
-    this.focusHolders.set(client, remaining);
+  private async releaseFocusHolder(session: PageSession): Promise<void> {
+    const remaining = Math.max(0, this.focusHoldersOf(session) - 1);
+    this.focusHolders.set(session, remaining);
     if (remaining > 0) return;
-    await client.Emulation.setFocusEmulationEnabled({ enabled: false });
+    await session.Emulation.setFocusEmulationEnabled({ enabled: false });
   }
 
-  private focusHoldersOf(client: CDP.Client): number {
-    return this.focusHolders.get(client) ?? 0;
+  private focusHoldersOf(session: PageSession): number {
+    return this.focusHolders.get(session) ?? 0;
   }
 
-  /** The connection, once the connected tab is known to be on Perplexity. */
-  private async onPerplexity(action: string): Promise<CDP.Client> {
-    const client = this.connectedClient();
-    await refuseOffPerplexity(client.Page, action);
-    return client;
+  /** The session, once the connected tab is known to be on Perplexity. */
+  private async onPerplexity(action: string): Promise<PageSession> {
+    const session = this.connectedSession();
+    await refuseOffPerplexity(session.Page, action);
+    return session;
   }
 
   /** The address of the connected tab's top frame, read now through CDP. */
   async pageAddress(): Promise<string> {
-    return readTopFrameAddress(this.connectedClient().Page);
+    return readTopFrameAddress(this.connectedSession().Page);
   }
 
-  /**
-   * Create a new tab
-   */
+  /** Opens a tab at `url` (blank without one), through the Target domain. */
   async newTab(url?: string): Promise<CDPTarget> {
-    const response = await windowsFetch(
-      `http://127.0.0.1:${this.state.port}/json/new${url ? `?${url}` : ""}`,
-      "PUT",
-    );
-    if (!response.ok)
-      throw new Error(`Failed to create new tab: ${response.status}`);
-    return response.json() as Promise<CDPTarget>;
+    return (await this.browserConnection()).createTarget(url ?? "");
   }
 
-  /**
-   * Close a tab
-   */
+  /** Closes a tab through the Target domain; false when it could not. */
   async closeTab(targetId: string): Promise<boolean> {
     try {
-      if (this.client) {
-        const result = await this.client.Target.closeTarget({ targetId });
-        return result.success;
-      }
-    } catch {
-      /* fallback to HTTP */
-    }
-
-    try {
-      const response = await windowsFetch(
-        `http://127.0.0.1:${this.state.port}/json/close/${targetId}`,
-      );
-      return response.ok;
+      return await (await this.browserConnection()).closeTarget(targetId);
     } catch {
       return false;
     }
   }
 
-  /** The connection, or an error when there is none. */
-  private connectedClient(): CDP.Client {
-    if (!this.client) {
+  /** The connected tab's session, or an error when there is none. */
+  private connectedSession(): PageSession {
+    if (!this.session) {
       throw new Error("Not connected to Comet. Call connect() first.");
     }
-    return this.client;
+    return this.session;
   }
 
   /**
@@ -1141,7 +1147,7 @@ export class CometCDPClient {
     selector: ValidatedSelector,
   ): Promise<boolean> {
     return this.withAutoReconnect(async () => {
-      const { DOM } = this.connectedClient();
+      const { DOM } = this.connectedSession();
       const document = await DOM.getDocument();
       const { nodeId } = await DOM.querySelector({
         nodeId: document.root.nodeId,

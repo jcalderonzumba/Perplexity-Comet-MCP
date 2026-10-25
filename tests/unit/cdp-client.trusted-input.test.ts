@@ -1,17 +1,23 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { CometCDPClient } from "../../src/cdp-client.js";
+import { FakeBrowser } from "./fakes/fake-browser.js";
 import { FakeCdpConnection } from "./fakes/fake-cdp-connection.js";
+import { answeringLaunch } from "./fakes/fake-comet-launch.js";
 
-// `CometCDPClient.connect` opens its connection through
-// `chrome-remote-interface`; the tests hand it a fake tab instead.
+// `CometCDPClient.connect` attaches to the tab on a browser socket that
+// `chrome-remote-interface` opens; the tests hand it a fake browser instead,
+// with the fake tab in it.
 const cdp = vi.hoisted(() => ({
-  connection: null as unknown,
+  browser: null as unknown as { open(options: unknown): unknown },
 }));
 
 vi.mock("chrome-remote-interface", () => ({
-  default: Object.assign(async () => cdp.connection, {
-    ProtocolError: class extends Error {},
-  }),
+  default: Object.assign(
+    async (options: unknown) => cdp.browser.open(options),
+    {
+      ProtocolError: class extends Error {},
+    },
+  ),
 }));
 
 let tab: FakeCdpConnection;
@@ -19,8 +25,8 @@ let client: CometCDPClient;
 
 beforeEach(async () => {
   tab = new FakeCdpConnection();
-  cdp.connection = tab;
-  client = new CometCDPClient();
+  cdp.browser = FakeBrowser.withTab("tab-1", tab);
+  client = new CometCDPClient({ launch: answeringLaunch() });
   await client.connect("tab-1");
   tab.evaluations.length = 0;
 });

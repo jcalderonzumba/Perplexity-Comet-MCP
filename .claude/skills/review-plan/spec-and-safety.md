@@ -38,13 +38,13 @@ From spec §2: *any change that violates one of these is rejected by definition.
    *Code trigger:* `src/upload-validator.ts`; any `fs` import or call under `src/`; `DOM.setFileInputFiles` and its callers.
 4. **Nothing listens beyond loopback without authentication.** CDP is reached on `127.0.0.1` with `--remote-allow-origins` restricted. The HTTP bridge is opt-in, requires its token and compares it in constant time.
    *Plan trigger:* the HTTP bridge, its host, port, token or CORS; Comet's launch flags; CDP host and port.
-   *Code trigger:* server creation, token check and CORS in `src/bridge-server.ts`, and the environment it reads and the host it listens on in `src/http-bridge.ts`; any `listen(` or `createServer`; the CDP host, port and `--remote-*` launch flags in `src/cdp-client.ts` and `src/comet-launch.ts`.
+   *Code trigger:* server creation, token check and CORS in `src/bridge-server.ts`, and the environment it reads and the host it listens on in `src/http-bridge.ts`; any `listen(` or `createServer`; the CDP host, port and `--remote-*` launch flags in `src/cdp-client.ts` and `src/comet-launch.ts`; the browser WebSocket's address in `src/browser-connection.ts`, and the probe in `src/comet-launch.ts` that finds its path.
 5. **Nothing leaves the machine except what the user sends Comet.** No telemetry, no analytics, no remote logging, no dependency that phones home.
    *Plan trigger:* logging, telemetry, any new runtime dependency, any network request.
    *Code trigger:* any change to `dependencies` in `package.json`; any `fetch`, `http.request`, `https.request` or WebSocket to a host other than loopback; logging code.
 6. **Never damage the user's browser.** Never close the last external tab, never close a tab the tool did not open, never crash Comet, never drop the user's signed-in session.
    *Plan trigger:* tabs, connect and reconnect, launch, stop, `newChat`, mode switching, a new tool that opens or closes tabs.
-   *Code trigger:* tab close and switch code (`comet_tabs`, `Target.closeTarget`, `Page.close`); launching or killing the Comet process (`src/comet-launch.ts`, `src/core/comet-launch.ts`); reconnect logic in `src/cdp-client.ts`.
+   *Code trigger:* tab close and switch code (`comet_tabs`, `Target.closeTarget`, `Page.close`); the Target domain and the attached sessions in `src/browser-connection.ts`; launching or killing the Comet process (`src/comet-launch.ts`, `src/core/comet-launch.ts`); reconnect logic in `src/cdp-client.ts`.
 7. **An answer is complete or says it is not.** A stale, partial or timed-out answer is never returned as final; the result states which it is.
    *Plan trigger:* `comet_ask` or `comet_poll`, completion detection, answer extraction, timeouts.
    *Code trigger:* `src/comet-ai.ts`; the ask core in `src/core/` (`ask.ts`, `ask-task.ts`, `ask-reply.ts`); the `comet_ask` and `comet_poll` handlers of the composition (`src/cdp-tools.ts`) and the text of their results, which both adapters render through `src/tool-results.ts`.

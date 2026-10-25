@@ -11,7 +11,8 @@
 import { execSync, spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { platform } from "node:os";
-import type { CometLaunch } from "./core/comet-launch.js";
+import { type BrowserPath, parseBrowserPath } from "./browser-connection.js";
+import type { CometLaunch, FoundComet } from "./core/comet-launch.js";
 import {
   IS_WINDOWS,
   IS_WSL,
@@ -73,13 +74,13 @@ export function createCometLaunch(host: LaunchHost): CometLaunch {
 class PlatformCometLaunch implements CometLaunch {
   constructor(private readonly host: LaunchHost) {}
 
-  async probe(port: number): Promise<string | null> {
+  async probe(port: number): Promise<FoundComet | null> {
     try {
       const response = await this.host.fetch(
         `http://127.0.0.1:${port}/json/version`,
       );
       if (!response.ok) return null;
-      return browserOf(await response.json());
+      return foundOn(port, await response.json());
     } catch {
       return null;
     }
@@ -94,7 +95,7 @@ class PlatformCometLaunch implements CometLaunch {
       : listing.stdout.toLowerCase().includes("comet.exe");
   }
 
-  async launch(port: number): Promise<string> {
+  async launch(port: number): Promise<FoundComet> {
     assertPort(port);
     await this.start(port);
     return this.waitForPort(port);
@@ -126,11 +127,11 @@ class PlatformCometLaunch implements CometLaunch {
     return `${localAppData}\\Perplexity\\Comet\\Application\\Comet.exe`;
   }
 
-  private async waitForPort(port: number): Promise<string> {
+  private async waitForPort(port: number): Promise<FoundComet> {
     await this.host.wait(WAIT.settleMs[this.host.platform]);
     for (let attempt = 1; attempt <= WAIT.attempts; attempt++) {
-      const browser = await this.probe(port);
-      if (browser !== null) return browser;
+      const found = await this.probe(port);
+      if (found !== null) return found;
       await this.host.wait(WAIT.intervalMs);
     }
     throw new Error(
@@ -139,9 +140,31 @@ class PlatformCometLaunch implements CometLaunch {
   }
 }
 
-function browserOf(version: unknown): string {
-  const browser = (version as { Browser?: unknown } | null)?.Browser;
-  return typeof browser === "string" ? browser : "unknown version";
+/**
+ * The Comet `/json/version` describes on `port`, or null when it names no
+ * browser socket. Only the socket's path is taken, and only a path
+ * `parseBrowserPath` accepts: the address is always `127.0.0.1` on the port
+ * probed, whatever host and port the answer names (principle 4).
+ */
+function foundOn(port: number, version: unknown): FoundComet | null {
+  const { Browser, webSocketDebuggerUrl } = (version ?? {}) as {
+    Browser?: unknown;
+    webSocketDebuggerUrl?: unknown;
+  };
+  const path = browserPathOf(webSocketDebuggerUrl);
+  if (path === null) return null;
+  const browser = typeof Browser === "string" ? Browser : "unknown version";
+  return { browser, endpoint: { port, path } };
+}
+
+function browserPathOf(address: unknown): BrowserPath | null {
+  if (typeof address !== "string") return null;
+  try {
+    const { pathname, search, hash } = new URL(address);
+    return parseBrowserPath(`${pathname}${search}${hash}`);
+  } catch {
+    return null;
+  }
 }
 
 function processListing(launchPlatform: LaunchPlatform): {

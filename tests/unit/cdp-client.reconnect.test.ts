@@ -1,8 +1,9 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CometCDPClient } from "../../src/cdp-client.js";
 import type { BrowserTarget } from "../../src/core/perplexity-tab.js";
 import type { CDPTarget } from "../../src/types.js";
-import { FakeCometLaunch } from "./fakes/fake-comet-launch.js";
+import { FakeBrowser } from "./fakes/fake-browser.js";
+import { answeringLaunch } from "./fakes/fake-comet-launch.js";
 import {
   LOOKALIKE_TAB,
   MAIN_TAB,
@@ -12,16 +13,25 @@ import {
 } from "./fakes/fake-tab-port.js";
 
 // The client picks the tab to reconnect to by the one rule for Perplexity's
-// main page. Nothing here reaches a browser: the listed targets and the
-// connections are stubbed, and the launch says Comet answers on its port.
+// main page. The browser socket opens on a fake browser, the listed targets
+// and the tab moves are stubbed, and the launch says Comet answers on its
+// port.
+const cdp = vi.hoisted(() => ({
+  browser: null as unknown as { open(options: unknown): unknown },
+}));
+
 vi.mock("chrome-remote-interface", () => ({
   default: Object.assign(
-    async () => {
-      throw new Error("no browser in this test");
+    async (options: unknown) => cdp.browser.open(options),
+    {
+      ProtocolError: class extends Error {},
     },
-    { ProtocolError: class extends Error {} },
   ),
 }));
+
+beforeEach(() => {
+  cdp.browser = new FakeBrowser();
+});
 
 afterEach(() => {
   vi.useRealTimers();
@@ -32,9 +42,7 @@ function listed(...targets: BrowserTarget[]): CDPTarget[] {
 }
 
 function clientListing(...targets: BrowserTarget[]) {
-  const launch = new FakeCometLaunch();
-  launch.answering = "Comet/140.0";
-  const client = new CometCDPClient({ port: 9222, launch });
+  const client = new CometCDPClient({ port: 9222, launch: answeringLaunch() });
   const connect = vi.spyOn(client, "connect").mockResolvedValue("connected");
   vi.spyOn(client, "listTargets").mockResolvedValue(listed(...targets));
   return { client, connect };

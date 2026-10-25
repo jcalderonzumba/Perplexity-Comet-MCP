@@ -9,6 +9,8 @@ import {
   type LaunchPlatform,
 } from "../../src/comet-launch.js";
 
+const BROWSER_PATH = "/devtools/browser/0f1e2d3c-4b5a-6978-8a9b-acbdcedf0102";
+
 const ARGS = [
   "--remote-debugging-port=9222",
   "--remote-allow-origins=http://127.0.0.1",
@@ -23,6 +25,8 @@ class FakeHost implements LaunchHost {
   /** How many probes fail before the port answers; Infinity: never. */
   public probesBeforeAnswer = Number.POSITIVE_INFINITY;
   public browser: string | undefined = "Comet/141.0";
+  /** The browser WebSocket address `/json/version` names. */
+  public webSocketDebuggerUrl: unknown = `ws://127.0.0.1:9222${BROWSER_PATH}`;
   public listing: CommandResult | null = { code: 1, stdout: "" };
   public spawnFailure: Error | undefined;
   public localAppData: string | undefined = "C:\\Users\\me\\AppData\\Local";
@@ -40,7 +44,10 @@ class FakeHost implements LaunchHost {
     const answers = this.fetched.length > this.probesBeforeAnswer;
     return {
       ok: answers,
-      json: async () => ({ Browser: this.browser }),
+      json: async () => ({
+        Browser: this.browser,
+        webSocketDebuggerUrl: this.webSocketDebuggerUrl,
+      }),
     };
   }
 
@@ -77,14 +84,45 @@ describe.each([
   ["Windows", WINDOWS],
   ["WSL", WSL],
 ])("the launch on %s: probe", (_name, makeHost) => {
-  it("asks 127.0.0.1:<port>/json/version and returns the browser it names", async () => {
+  it("asks 127.0.0.1:<port>/json/version and returns the browser it names and its browser socket on that port", async () => {
     const host = makeHost();
     host.probesBeforeAnswer = 0;
 
-    const version = await createCometLaunch(host).probe(9222);
+    const found = await createCometLaunch(host).probe(9222);
 
-    expect(version).toBe("Comet/141.0");
+    expect(found).toEqual({
+      browser: "Comet/141.0",
+      endpoint: { port: 9222, path: BROWSER_PATH },
+    });
     expect(host.fetched).toEqual(["http://127.0.0.1:9222/json/version"]);
+  });
+
+  it("takes only the path of the browser socket's address, on the port it probed", async () => {
+    const host = makeHost();
+    host.probesBeforeAnswer = 0;
+    host.webSocketDebuggerUrl = `ws://elsewhere.example:4444${BROWSER_PATH}`;
+
+    expect((await createCometLaunch(host).probe(9222))?.endpoint).toEqual({
+      port: 9222,
+      path: BROWSER_PATH,
+    });
+  });
+
+  it.each([
+    [
+      "a page's socket",
+      "ws://127.0.0.1:9222/devtools/page/0f1e2d3c-4b5a-6978-8a9b-acbdcedf0102",
+    ],
+    ["a query after the path", `ws://127.0.0.1:9222${BROWSER_PATH}?x=1`],
+    ["no address at all", undefined],
+    ["an address that is not a URL", "not a url"],
+    ["an address that is not text", 42],
+  ])("treats a port naming %s as not answering", async (_case, address) => {
+    const host = makeHost();
+    host.probesBeforeAnswer = 0;
+    host.webSocketDebuggerUrl = address;
+
+    expect(await createCometLaunch(host).probe(9222)).toBeNull();
   });
 
   it("returns null when nothing answers", async () => {
@@ -124,10 +162,13 @@ describe("the launch on macOS and Linux", () => {
     const host = MAC();
     host.probesBeforeAnswer = 2;
 
-    const browser = await createCometLaunch(host).launch(9222);
+    const launched = await createCometLaunch(host).launch(9222);
 
     expect(host.spawned).toEqual([[host.cometPath, ...ARGS]]);
-    expect(browser).toBe("Comet/141.0");
+    expect(launched).toEqual({
+      browser: "Comet/141.0",
+      endpoint: { port: 9222, path: BROWSER_PATH },
+    });
     expect(host.fetched).toHaveLength(3);
   });
 

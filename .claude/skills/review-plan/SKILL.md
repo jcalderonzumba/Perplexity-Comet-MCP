@@ -51,7 +51,7 @@ For each modified symbol:
 2. Run `codegraph affected <changed files...> --json` once over every file the plan modifies, for the existing test files the change reaches
 3. Deduplicate flows and test files across all modified symbols
 4. Cross-reference both lists against the plan's test strategy
-5. **Must Fix** — critical-path flows not covered in the test plan. Critical paths: `comet_ask` from submission through completion detection to answer extraction (`src/comet-ai.ts`), connect and reconnect (`src/cdp-client.ts`), tab close protection (`comet_tabs` close), upload path validation (`src/upload-validator.ts` through `comet_upload`), the HTTP bridge's token check, and the UNTRUSTED wrapping of every page-derived result
+5. **Must Fix** — critical-path flows not covered in the test plan. Critical paths: `comet_ask` from submission through completion detection to answer extraction (`src/comet-ai.ts`), connect and reconnect (`src/cdp-client.ts`, over the browser connection of `src/browser-connection.ts`), tab close protection (`comet_tabs` close), upload path validation (`src/upload-validator.ts` through `comet_upload`), the HTTP bridge's token check, and the UNTRUSTED wrapping of every page-derived result
 6. **Should Fix** — non-critical flows not mentioned for testing when total affected flows > 2, or affected test files the plan neither runs nor updates
 
 ### Check 3: Cross-module detection
@@ -107,7 +107,7 @@ Skips (always noted): skip 1–2 when the plan is docs-only or pure scaffolding 
 | HTTP bridge | Plan touches `src/http-bridge.ts` or `src/bridge-server.ts`: auth, CORS, binding, routes | `api-security-best-practices`, `api-patterns`, `auth-implementation-patterns` |
 | Page scripts | Plan adds or changes JavaScript run in the page | `frontend-security-coder`, `javascript-pro` |
 | Tool contract | Plan adds or changes a tool, a parameter, a default or a result shape | `api-patterns`; Context7 for `@modelcontextprotocol/sdk` |
-| CDP and the browser | Plan touches launch (`src/comet-launch.ts`), connect, reconnect or tabs in `src/cdp-client.ts` | Context7 for `chrome-remote-interface` and the DevTools Protocol |
+| CDP and the browser | Plan touches launch (`src/comet-launch.ts`), connect, reconnect or tabs in `src/cdp-client.ts`, or the browser connection in `src/browser-connection.ts` | Context7 for `chrome-remote-interface` and the DevTools Protocol |
 | Prompts to Comet | Plan changes prompt text or prompt shaping sent to Comet | `prompt-engineering` |
 | Secrets | The work involves: secret, credential, token, key, env var, `.env` | `secrets-management` |
 | Data leaving the machine | Plan touches logging, network requests, or adds a runtime dependency | `privacy-by-design` |
