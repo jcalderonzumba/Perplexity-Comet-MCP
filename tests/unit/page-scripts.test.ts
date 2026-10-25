@@ -254,7 +254,7 @@ describe("pageScriptExpression", () => {
       false,
       null,
       ["a", 1],
-      { nested: { label: "Deep research" } },
+      { nested: { label: "Deep Research" } },
     ];
     expect(runInPage(echo, ...args)).toEqual(args);
   });
@@ -291,17 +291,17 @@ describe("locateModeButton", () => {
 
   it("returns the current mode's text with whitespace collapsed", () => {
     const label = modeButton().querySelector("span + span")?.firstChild;
-    if (label) label.textContent = "\n   Deep \n  research  ";
+    if (label) label.textContent = "\n   Deep \n  Research  ";
     expect(runInPage(locateModeButton)).toMatchObject({
-      text: "Deep research",
+      text: "Deep Research",
     });
   });
 
   it("reads a label split by non-breaking and other Unicode spaces as the mode it names", () => {
     const label = modeButton().querySelector("span + span")?.firstChild;
-    if (label) label.textContent = "\u00a0Deep\u00a0\u2009research\u202f";
+    if (label) label.textContent = "\u00a0Deep\u00a0\u2009Research\u202f";
     expect(runInPage(locateModeButton)).toMatchObject({
-      text: "Deep research",
+      text: "Deep Research",
     });
   });
 
@@ -322,8 +322,8 @@ describe("readModeMenuItems", () => {
   it("reads the open mode menu's radio items, marking the checked one", () => {
     expect(runInPage(readModeMenuItems)).toEqual([
       { label: "Search", checked: true },
-      { label: "Deep research", checked: false },
-      { label: "Learn step by step", checked: false },
+      { label: "Deep Research", checked: false },
+      { label: "Learn Step by Step", checked: false },
     ]);
   });
 
@@ -338,7 +338,7 @@ describe("readModeMenuItems", () => {
   });
 
   it("never reads another open menu's items", () => {
-    addOtherOpenMenu("Deep research");
+    addOtherOpenMenu("Deep Research");
     closeModeMenu();
     expect(runInPage(readModeMenuItems)).toBeNull();
   });
@@ -346,7 +346,7 @@ describe("readModeMenuItems", () => {
   it("reads only the mode menu's items when another menu is open too", () => {
     addOtherOpenMenu("Some model");
     const labels = runInPage(readModeMenuItems)?.map((item) => item.label);
-    expect(labels).toEqual(["Search", "Deep research", "Learn step by step"]);
+    expect(labels).toEqual(["Search", "Deep Research", "Learn Step by Step"]);
   });
 });
 
@@ -354,11 +354,11 @@ describe("locateModeMenuItem", () => {
   beforeEach(loadModeMenuFixture);
 
   it("returns the centre point of the item with exactly that label", () => {
-    expect(runInPage(locateModeMenuItem, "Deep research")).toEqual(anyPoint);
+    expect(runInPage(locateModeMenuItem, "Deep Research")).toEqual(anyPoint);
   });
 
   it("compares labels after trimming and collapsing whitespace", () => {
-    expect(runInPage(locateModeMenuItem, "  Deep \n research ")).toEqual(
+    expect(runInPage(locateModeMenuItem, "  Deep \n Research ")).toEqual(
       anyPoint,
     );
   });

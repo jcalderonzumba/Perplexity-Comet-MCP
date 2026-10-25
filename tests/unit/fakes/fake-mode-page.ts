@@ -87,8 +87,8 @@ export class FakeModePage implements ModePage {
   constructor(options: FakeModePageOptions = {}) {
     this.labels = options.labels ?? [
       "Search",
-      "Deep research",
-      "Learn step by step",
+      "Deep Research",
+      "Learn Step by Step",
     ];
     this.checkedLabel = options.current ?? "Search";
     this.buttonText = this.checkedLabel;

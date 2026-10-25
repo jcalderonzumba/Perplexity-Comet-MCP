@@ -365,7 +365,7 @@ export function readLatestAnswer(): string {
 }
 
 // The mode control: Perplexity's input bar shows the current mode on a
-// button ("Search", "Deep research") that opens the mode menu, a
+// button ("Search", "Deep Research") that opens the mode menu, a
 // `role="menu"` of `menuitemradio` items. As read from the live page on
 // 2026-09-24: the button sits in the input bar's mode-toggle wrapper beside
 // the "Computer" toggle, and is the one of the two that controls a menu

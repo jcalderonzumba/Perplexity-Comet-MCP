@@ -198,7 +198,7 @@ describe("NO_PRO_KNOWN_FAILURES", () => {
 
   it("says why the learn mode switch fails, as the mode menu stands", () => {
     expect(NO_PRO_KNOWN_FAILURES[0]?.reason).toBe(
-      'Perplexity\'s input bar offers "Learn step by step", and comet_mode does not switch to it yet',
+      'Perplexity\'s input bar offers "Learn Step by Step", and comet_mode does not switch to it yet',
     );
   });
 });
