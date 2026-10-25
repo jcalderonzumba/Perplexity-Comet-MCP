@@ -35,6 +35,9 @@ type DomainHandlers = Record<string, Handler | undefined>;
  */
 export type PageHandlers = object;
 
+/** The product `Browser.getVersion` names. */
+export const FAKE_PRODUCT = "Chrome/155.0.8059.148";
+
 /** The page events a session can subscribe to; the rest are commands. */
 const PAGE_EVENTS = new Set(["Page.lifecycleEvent"]);
 
@@ -162,6 +165,13 @@ export class FakeBrowserSocket {
       return { windowId: this.windowOf(targetId) };
     }),
     setWindowBounds: this.command("Browser.setWindowBounds", () => ({})),
+    getVersion: this.command("Browser.getVersion", () => ({
+      protocolVersion: "1.3",
+      product: FAKE_PRODUCT,
+      revision: "@0",
+      userAgent: "Mozilla/5.0",
+      jsVersion: "15.5",
+    })),
   };
 
   readonly Page = this.pageDomain("Page");

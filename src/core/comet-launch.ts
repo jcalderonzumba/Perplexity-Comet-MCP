@@ -1,9 +1,10 @@
 // Getting Comet onto its debug port, and never off it. The port lists what
-// the platform can tell (does the debug port answer, does a Comet process
-// run) and can do (launch Comet on a port); it has no way to stop a process,
-// because Comet is the user's browser with the user's windows in it
-// (principle 6). What to do about each answer is decided here, once, for
-// `comet_connect`, for the ask's recovery and for the client's reconnect.
+// the platform can tell (does the debug port answer, where does Comet's
+// remote-debugging switch listen, does a Comet process run) and can do
+// (launch Comet on a port); it has no way to stop a process, because Comet
+// is the user's browser with the user's windows in it (principle 6). What to
+// do about each answer is decided here, once, for `comet_connect`, for the
+// ask's recovery and for the client's reconnect.
 
 import type { BrowserEndpoint } from "./browser-endpoint.js";
 
@@ -15,8 +16,16 @@ export interface FoundComet {
 
 /** What the platform tells and does about Comet. Nothing on it kills. */
 export interface CometLaunch {
+  /** Whether Comet's remote-debugging switch is looked for on this platform. */
+  readonly usesSwitch: boolean;
   /** The Comet answering on the debug port; null when none does. */
   probe(port: number): Promise<FoundComet | null>;
+  /**
+   * The browser socket Comet's remote-debugging switch names, when something
+   * listens on its port; null when there is none, or where `usesSwitch` is
+   * false. Opens no WebSocket, so Comet asks the user nothing.
+   */
+  switchEndpoint(): Promise<BrowserEndpoint | null>;
   /** True when a Comet process runs, whatever port it listens on. */
   isProcessRunning(): Promise<boolean>;
   /**
@@ -28,43 +37,79 @@ export interface CometLaunch {
   startCommand(port: number): string;
 }
 
+/** A Comet that runs without the debug port, and what can be done about it. */
+export interface RunningWithoutPort {
+  readonly kind: "running-without-port";
+  /** The command that starts Comet with the debug port. */
+  readonly command: string;
+  /** Whether turning the remote-debugging switch on would let it connect. */
+  readonly usesSwitch: boolean;
+}
+
+/** A Comet found without a launch: by the flag, or by the switch. */
+export type FoundOnPort =
+  | ({ readonly kind: "answering" } & FoundComet)
+  | { readonly kind: "switch"; readonly endpoint: BrowserEndpoint };
+
 /** Where Comet stands relative to the configured debug port. */
 export type CometOnPort =
-  | ({ readonly kind: "answering" } & FoundComet)
+  | FoundOnPort
   | ({ readonly kind: "launched" } & FoundComet)
-  | { readonly kind: "running-without-port"; readonly command: string };
+  | RunningWithoutPort;
+
+const SWITCH_WAY =
+  "Or, without restarting Comet: open comet://inspect/#remote-debugging in Comet and turn remote debugging on.";
 
 /** Words for a Comet that runs without the debug port, for a reply or an error. */
 export function describeRunningWithoutPort(
   port: number,
-  command: string,
+  comet: Pick<RunningWithoutPort, "command" | "usesSwitch">,
 ): string {
-  return (
+  const restart =
     `Comet is running, but not with the debug port ${port}, and this server never restarts it: ` +
-    `that would close your windows. Quit Comet, then start it with the port:\n${command}`
-  );
+    `that would close your windows. Quit Comet, then start it with the port:\n${comet.command}`;
+  return comet.usesSwitch ? `${restart}\n${SWITCH_WAY}` : restart;
 }
 
 /** A Comet that runs without the debug port; the server leaves it alone. */
 export class CometRunsWithoutPort extends Error {
-  constructor(port: number, command: string) {
-    super(describeRunningWithoutPort(port, command));
+  constructor(port: number, comet: RunningWithoutPort) {
+    super(describeRunningWithoutPort(port, comet));
     this.name = "CometRunsWithoutPort";
   }
 }
 
 /**
- * Finds Comet answering on `port`, or launches it there when no Comet runs.
- * A Comet running without the port is reported, never touched.
+ * Comet answering on `port` with the flag, else through its remote-debugging
+ * switch; null when neither. Launches nothing.
+ */
+export async function findCometOnPort(
+  launch: CometLaunch,
+  port: number,
+): Promise<FoundOnPort | null> {
+  const answering = await launch.probe(port);
+  if (answering !== null) return { kind: "answering", ...answering };
+  const endpoint = await launch.switchEndpoint();
+  return endpoint === null ? null : { kind: "switch", endpoint };
+}
+
+/**
+ * Finds Comet answering on `port` or through its switch, or launches it on
+ * `port` when no Comet runs. A Comet running without either is reported,
+ * never touched.
  */
 export async function ensureCometOnPort(
   launch: CometLaunch,
   port: number,
 ): Promise<CometOnPort> {
-  const answering = await launch.probe(port);
-  if (answering !== null) return { kind: "answering", ...answering };
+  const found = await findCometOnPort(launch, port);
+  if (found !== null) return found;
   if (await launch.isProcessRunning()) {
-    return { kind: "running-without-port", command: launch.startCommand(port) };
+    return {
+      kind: "running-without-port",
+      command: launch.startCommand(port),
+      usesSwitch: launch.usesSwitch,
+    };
   }
   return { kind: "launched", ...(await launch.launch(port)) };
 }
@@ -76,6 +121,6 @@ export async function startCometOnPort(
 ): Promise<void> {
   const comet = await ensureCometOnPort(launch, port);
   if (comet.kind === "running-without-port") {
-    throw new CometRunsWithoutPort(port, comet.command);
+    throw new CometRunsWithoutPort(port, comet);
   }
 }

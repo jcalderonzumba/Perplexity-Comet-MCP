@@ -169,6 +169,11 @@ export class BrowserConnection {
     return connection;
   }
 
+  /** The browser's product and version, as `Browser.getVersion` names it. */
+  async version(): Promise<string> {
+    return (await this.client.Browser.getVersion()).product;
+  }
+
   async targets(): Promise<CDPTarget[]> {
     const { targetInfos } = await this.client.Target.getTargets();
     return targetInfos.map(({ targetId, type, title, url }) => ({

@@ -43,7 +43,7 @@ export type CdpToolsClient = AskPortClient &
   TabClient &
   TabsClient &
   UploadClient &
-  Pick<CometCDPClient, "screenshot" | "disconnect">;
+  Pick<CometCDPClient, "screenshot" | "disconnect" | "browserVersion">;
 
 export interface CdpToolsDeps {
   readonly client: CdpToolsClient;
@@ -82,7 +82,13 @@ export function createCdpToolTable(deps: CdpToolsDeps): ToolTable {
 
   return createToolTable(
     {
-      comet_connect: () => answerConnect({ launch, port, tabs: perplexity }),
+      comet_connect: () =>
+        answerConnect({
+          launch,
+          port,
+          tabs: perplexity,
+          browser: { version: () => client.browserVersion() },
+        }),
       comet_ask: async (args) =>
         describeAskOutcome(await askCore.ask(args), quotePage),
       comet_poll: async () =>

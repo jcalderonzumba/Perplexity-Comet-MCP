@@ -13,7 +13,7 @@ import {
   createCdpToolTable,
 } from "../../src/cdp-tools.js";
 import { TOOL_DEFINITIONS } from "../../src/core/tools.js";
-import { FakeCometLaunch } from "./fakes/fake-comet-launch.js";
+import { endpointOn, FakeCometLaunch } from "./fakes/fake-comet-launch.js";
 
 const CONFIGURED_PORT = 9444;
 
@@ -153,6 +153,25 @@ describe("comet_connect", () => {
 
     expect(launch.launches).toEqual([CONFIGURED_PORT]);
     expect(textOf(reply as never)).toContain("Started Comet");
+  });
+
+  it("names the switch and asks the client for the browser's version when Comet is found through its switch", async () => {
+    const launch = new FakeCometLaunch();
+    launch.switchAt = endpointOn(9333);
+    const table = tableOver(
+      {
+        pageAddress: async () => "https://www.perplexity.ai/search/x",
+        browserVersion: async () => "Chrome/155.0.8059.148",
+      },
+      launch,
+    );
+
+    const reply = await table.call("comet_connect", {});
+
+    expect(textOf(reply as never)).toBe(
+      "Comet is running with its remote-debugging switch on port 9333 (Chrome/155.0.8059.148).\nConnected to Perplexity's main page: the connection was already on it.",
+    );
+    expect(launch.launches).toEqual([]);
   });
 
   it("fails without touching the browser when Comet runs without the port", async () => {
