@@ -104,6 +104,8 @@ claude mcp add -s user comet-bridge -e COMET_PORT=9222 -- \
 claude mcp add -s user comet-bridge -e COMET_PORT=9222 -- perplexity-comet-mcp
 ```
 
+Link a clone you do not develop in: `npm run preflight` deletes `dist/` before it rebuilds, which would stop a server that runs from it. `npm link` also replaces a global install of the npm package of the same name, which is the upstream project.
+
 `claude mcp get comet-bridge` shows what it runs. When nothing answers on that port and no Comet runs, `comet_connect` starts Comet with remote debugging on it. If Comet is already running without the port, `comet_connect` leaves it alone and fails, naming the port and the command that starts Comet with it: quit Comet, run that command, and connect again.
 
 On macOS there is a way that needs no restart: Comet's remote-debugging switch. Open `comet://inspect/#remote-debugging` in Comet and turn remote debugging on; Comet keeps the choice, and from then on the server finds the Comet you open from the Dock, with no flag, when nothing answers on `COMET_PORT`. With the switch, Comet asks you to allow each new debugging connection in a dialog of its own. Click Allow only when you have just asked the server for something: any program on your Mac can make Comet show the same dialog. The server opens one connection and keeps it, so it asks once per server process, and once more only when Comet drops the connection.
