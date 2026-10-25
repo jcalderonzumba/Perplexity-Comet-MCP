@@ -56,6 +56,11 @@ export interface PageSession extends PageDomains {
   detach(): Promise<void>;
 }
 
+/** A browser window's bounds, as `Browser.setWindowBounds` takes them. */
+export type WindowBounds = Parameters<
+  CDP.Client["Browser"]["setWindowBounds"]
+>[0]["bounds"];
+
 /** A protocol member as `chrome-remote-interface` decorates it. */
 type ProtocolMember = ((...args: unknown[]) => unknown) & {
   readonly category?: string;
@@ -178,6 +183,14 @@ export class BrowserConnection {
   async closeTarget(targetId: string): Promise<boolean> {
     const { success } = await this.client.Target.closeTarget({ targetId });
     return success;
+  }
+
+  /** Sets the bounds of the window `targetId` is in, through the browser. */
+  async setWindowBounds(targetId: string, bounds: WindowBounds): Promise<void> {
+    const { windowId } = await this.client.Browser.getWindowForTarget({
+      targetId,
+    });
+    await this.client.Browser.setWindowBounds({ windowId, bounds });
   }
 
   async attach(targetId: string): Promise<PageSession> {

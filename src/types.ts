@@ -5,8 +5,6 @@ export interface CDPTarget {
   type: string;
   title: string;
   url: string;
-  webSocketDebuggerUrl?: string;
-  devtoolsFrontendUrl?: string;
 }
 
 export interface NavigateResult {

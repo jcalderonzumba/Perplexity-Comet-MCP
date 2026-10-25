@@ -4,27 +4,32 @@ import {
   ensureCometOnPort,
   startCometOnPort,
 } from "../../../src/core/comet-launch.js";
-import { FakeCometLaunch } from "../fakes/fake-comet-launch.js";
+import {
+  FAKE_BROWSER_PATH,
+  FakeCometLaunch,
+} from "../fakes/fake-comet-launch.js";
 
 describe("ensureCometOnPort", () => {
-  it("finds Comet answering on the port and launches nothing", async () => {
+  it("finds Comet answering on the port, with its browser socket there, and launches nothing", async () => {
     const launch = new FakeCometLaunch();
     launch.answering = "Comet/140.0";
 
     expect(await ensureCometOnPort(launch, 9222)).toEqual({
       kind: "answering",
       browser: "Comet/140.0",
+      endpoint: { port: 9222, path: FAKE_BROWSER_PATH },
     });
     expect(launch.probes).toEqual([9222]);
     expect(launch.launches).toEqual([]);
   });
 
-  it("launches Comet on the port when nothing answers and no Comet runs", async () => {
+  it("launches Comet on the port when nothing answers and no Comet runs, with its browser socket there", async () => {
     const launch = new FakeCometLaunch();
 
     expect(await ensureCometOnPort(launch, 9222)).toEqual({
       kind: "launched",
       browser: "Comet/141.0",
+      endpoint: { port: 9222, path: FAKE_BROWSER_PATH },
     });
     expect(launch.launches).toEqual([9222]);
   });

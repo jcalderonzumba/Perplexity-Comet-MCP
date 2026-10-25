@@ -167,6 +167,26 @@ describe("the Target domain", () => {
     expect(browser.hasTab("tab-2")).toBe(false);
   });
 
+  it("sets the bounds of a tab's window through the browser's own domain, with no session", async () => {
+    const { connection, socket } = await opened();
+    const bounds = { width: 1440, height: 900, windowState: "normal" } as const;
+
+    await connection.setWindowBounds("tab-2", bounds);
+
+    expect(socket.commands.slice(-2)).toEqual([
+      {
+        method: "Browser.getWindowForTarget",
+        params: { targetId: "tab-2" },
+        sessionId: undefined,
+      },
+      {
+        method: "Browser.setWindowBounds",
+        params: { windowId: socket.windowOf("tab-2"), bounds },
+        sessionId: undefined,
+      },
+    ]);
+  });
+
   it("makes no HTTP request and opens no other socket for any of them", async () => {
     const fetch = vi.spyOn(globalThis, "fetch");
     const { connection } = await opened();

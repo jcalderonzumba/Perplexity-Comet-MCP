@@ -81,7 +81,8 @@ TypeScript (strict, ES2022, NodeNext) compiled by `tsc` to `dist/`, one npm pack
 | `src/http-bridge.ts`, `src/bridge-server.ts` | The HTTP bridge exposing the same tools to remote clients: the entry reads the environment and listens; the server keeps the token, CORS and routes over the same table. Nothing else |
 | `src/core/` | The tool table (`tools.ts`: each tool's definition and handler, and the one dispatch), the reply type (`tool-reply.ts`) and the cores: connect (with the launch port, `comet-launch.ts`), ask, mode, screenshot, tabs, upload |
 | `src/cdp-tools.ts` | The composition: builds the tool table over the CDP client, the Comet module and the UNTRUSTED wrapper, and binds each tool to its core |
-| `src/cdp-client.ts` | CDP connection and reconnect, the tabs' targets, screenshots, attaching a file to an input, Windows and WSL |
+| `src/cdp-client.ts` | The CDP client: the connected tab, reconnect, the tabs' targets, screenshots, attaching a file to an input, the WSL check |
+| `src/browser-connection.ts` | One WebSocket to Comet's browser on `127.0.0.1`: tabs listed, opened and closed through the `Target` domain, each tab driven through a session attached on the same socket |
 | `src/comet-launch.ts`, `src/host-platform.ts` | Finding and launching Comet on its debug port, per platform (macOS and Linux, Windows, WSL) behind the port of `src/core/comet-launch.ts`, which has no way to kill; the host (WSL detection, the fetch that reaches Windows, PowerShell quoting) |
 | `src/cdp-ask-port.ts`, `src/comet-ai.ts` | The ask port composes the status from three page scripts (the stop control, `readLatestAnswer`, `readAnswerStatus`); the Comet module reads the address of the tab the agent is browsing; the ask core decides when an answer is complete (`src/core/answer-watch.ts`), sends prompts (`src/core/ask-send.ts`) and stops answers (`src/core/ask-stop.ts`) |
 | `src/page-scripts.ts` | JavaScript run in the page, as tested functions |

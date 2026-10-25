@@ -1,10 +1,27 @@
 // A fake of the launch port: what answers on the debug port, whether a Comet
 // process runs, and what a launch does. `launches` records every launch, so a
-// test can show that none was made.
+// test can show that none was made. A port that answers names the browser
+// socket at `FAKE_BROWSER_PATH` on that port.
 
-import type { CometLaunch } from "../../../src/core/comet-launch.js";
+import {
+  type BrowserEndpoint,
+  parseBrowserPath,
+} from "../../../src/browser-connection.js";
+import type {
+  CometLaunch,
+  FoundComet,
+} from "../../../src/core/comet-launch.js";
 
 export const START_COMMAND = "comet --remote-debugging-port=";
+
+export const FAKE_BROWSER_PATH =
+  "/devtools/browser/0f1e2d3c-4b5a-6978-8a9b-acbdcedf0102";
+
+function endpointOn(port: number): BrowserEndpoint {
+  const path = parseBrowserPath(FAKE_BROWSER_PATH);
+  if (!path) throw new Error("the fake's browser path does not parse");
+  return { port, path };
+}
 
 export class FakeCometLaunch implements CometLaunch {
   /** The browser version the port answers with; null when nothing answers. */
@@ -17,24 +34,32 @@ export class FakeCometLaunch implements CometLaunch {
   public readonly probes: number[] = [];
   public readonly launches: number[] = [];
 
-  async probe(port: number): Promise<string | null> {
+  async probe(port: number): Promise<FoundComet | null> {
     this.probes.push(port);
-    return this.answering;
+    if (this.answering === null) return null;
+    return { browser: this.answering, endpoint: endpointOn(port) };
   }
 
   async isProcessRunning(): Promise<boolean> {
     return this.processRunning;
   }
 
-  async launch(port: number): Promise<string> {
+  async launch(port: number): Promise<FoundComet> {
     this.launches.push(port);
     if (this.launchFailure) throw this.launchFailure;
     this.answering = this.launchedBrowser;
     this.processRunning = true;
-    return this.launchedBrowser;
+    return { browser: this.launchedBrowser, endpoint: endpointOn(port) };
   }
 
   startCommand(port: number): string {
     return `${START_COMMAND}${port}`;
   }
+}
+
+/** A launch whose port answers already, as with Comet started on it. */
+export function answeringLaunch(): FakeCometLaunch {
+  const launch = new FakeCometLaunch();
+  launch.answering = "Comet/140.0";
+  return launch;
 }

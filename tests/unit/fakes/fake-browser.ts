@@ -29,8 +29,11 @@ export interface FakeTab {
 type Listener = (params: unknown, sessionId?: string) => void;
 type Handler = (params: unknown) => unknown;
 type DomainHandlers = Record<string, Handler | undefined>;
-/** What a tab's page domains answer, by domain and method. */
-export type PageHandlers = Record<string, DomainHandlers | undefined>;
+/**
+ * What a tab's page domains answer: an object holding, by domain name, an
+ * object of handlers by method name, as `FakeCdpConnection` is.
+ */
+export type PageHandlers = object;
 
 /** The page events a session can subscribe to; the rest are commands. */
 const PAGE_EVENTS = new Set(["Page.lifecycleEvent"]);
@@ -49,6 +52,13 @@ export class FakeBrowser {
     { tab: FakeTab; page: PageHandlers }
   >();
   private created = 0;
+
+  /** A browser with one tab, `id`, whose page answers through `page`. */
+  static withTab(id: string, page: PageHandlers): FakeBrowser {
+    const browser = new FakeBrowser();
+    browser.addTab({ id, type: "page", title: "", url: "about:blank" }, page);
+    return browser;
+  }
 
   /** Opens a socket, as `CDP(options)` would. */
   open(options: CDP.Options): FakeBrowserSocket {
@@ -143,6 +153,17 @@ export class FakeBrowserSocket {
     targetDestroyed: this.event("Target.targetDestroyed"),
   };
 
+  readonly Browser = {
+    getWindowForTarget: this.command("Browser.getWindowForTarget", (params) => {
+      const { targetId } = params as { targetId: string };
+      if (!this.browser.hasTab(targetId)) {
+        throw new Error("No target with given id found");
+      }
+      return { windowId: this.windowOf(targetId) };
+    }),
+    setWindowBounds: this.command("Browser.setWindowBounds", () => ({})),
+  };
+
   readonly Page = this.pageDomain("Page");
   readonly Runtime = this.pageDomain("Runtime");
   readonly DOM = this.pageDomain("DOM");
@@ -198,6 +219,11 @@ export class FakeBrowserSocket {
     return [...this.sessions]
       .filter(([, on]) => on === targetId)
       .map(([id]) => id);
+  }
+
+  /** The window `targetId` is in: one window per tab, numbered from 1. */
+  windowOf(targetId: string): number {
+    return this.browser.tabList().findIndex((tab) => tab.id === targetId) + 1;
   }
 
   tabGone(targetId: string): void {
@@ -273,7 +299,11 @@ export class FakeBrowserSocket {
         if (this.closed) throw new Error("WebSocket is not open");
         const targetId = sessionId && this.sessions.get(sessionId);
         if (!targetId) throw new Error(`'${method}' wasn't found`);
-        const handler = this.browser.pageOf(targetId)[domain]?.[name];
+        const page = this.browser.pageOf(targetId) as Record<
+          string,
+          DomainHandlers | undefined
+        >;
+        const handler = page[domain]?.[name];
         return handler ? handler(params) : {};
       },
     );
