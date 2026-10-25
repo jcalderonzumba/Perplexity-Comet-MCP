@@ -52,13 +52,13 @@ type ProtocolMember = ((...args: unknown[]) => unknown) & {
  * `domain` with every command sending `sessionId` and every event listening
  * to `sessionId` only; anything else the library adds is left out, so no
  * path reaches the domain without the session. A command rejects when
- * `lost` does, so one the browser never answers cannot outlive the session;
- * `lost` races first, so it also wins for a session already ended.
+ * `ending` does, so one the browser never answers cannot outlive the
+ * session; `ending` races first, so it also wins for a session already ended.
  */
 function bindToSession<T extends object>(
   domain: T,
   sessionId: string,
-  lost: Promise<never>,
+  ending: Promise<never>,
 ): T {
   return new Proxy(domain, {
     get(target, name) {
@@ -67,7 +67,7 @@ function bindToSession<T extends object>(
       const { category } = member as ProtocolMember;
       if (category === "command") {
         return (params?: unknown) =>
-          Promise.race([lost, member(params, sessionId)]);
+          Promise.race([ending, member(params, sessionId)]);
       }
       if (category === "event") {
         return (listener?: unknown) => member(sessionId, listener);
@@ -87,6 +87,7 @@ class AttachedSession implements PageSession {
   private ended = false;
   private wasLost = false;
   private readonly lostListeners: Array<() => void> = [];
+  private endCommands: () => void = () => {};
 
   constructor(
     client: CDP.Client,
@@ -94,13 +95,13 @@ class AttachedSession implements PageSession {
     readonly targetId: string,
     private readonly end: () => Promise<void>,
   ) {
-    const lost = this.lostSignal();
-    this.Page = bindToSession(client.Page, sessionId, lost);
-    this.Runtime = bindToSession(client.Runtime, sessionId, lost);
-    this.DOM = bindToSession(client.DOM, sessionId, lost);
-    this.Input = bindToSession(client.Input, sessionId, lost);
-    this.Emulation = bindToSession(client.Emulation, sessionId, lost);
-    this.Network = bindToSession(client.Network, sessionId, lost);
+    const ending = this.endingSignal();
+    this.Page = bindToSession(client.Page, sessionId, ending);
+    this.Runtime = bindToSession(client.Runtime, sessionId, ending);
+    this.DOM = bindToSession(client.DOM, sessionId, ending);
+    this.Input = bindToSession(client.Input, sessionId, ending);
+    this.Emulation = bindToSession(client.Emulation, sessionId, ending);
+    this.Network = bindToSession(client.Network, sessionId, ending);
   }
 
   get lost(): boolean {
@@ -115,27 +116,29 @@ class AttachedSession implements PageSession {
     if (this.ended) return;
     this.ended = true;
     this.wasLost = true;
+    this.endCommands();
     for (const listener of this.lostListeners) listener();
   }
 
   async detach(): Promise<void> {
     if (this.ended) return;
     this.ended = true;
+    this.endCommands();
     await this.end();
   }
 
   /**
-   * Rejects when the browser ends the session, with text the client's
-   * reconnect treats as a lost connection; no command waiting is no error.
+   * Rejects when the session ends, by the browser or by `detach`, with text
+   * the client's reconnect treats as a lost connection; no command waiting
+   * is no error.
    */
-  private lostSignal(): Promise<never> {
-    const lost = new Promise<never>((_, reject) => {
-      this.onLost(() =>
-        reject(new Error("Session closed: its tab was detached")),
-      );
+  private endingSignal(): Promise<never> {
+    const ending = new Promise<never>((_, reject) => {
+      this.endCommands = () =>
+        reject(new Error("Session closed: its tab was detached"));
     });
-    lost.catch(() => {});
-    return lost;
+    ending.catch(() => {});
+    return ending;
   }
 }
 

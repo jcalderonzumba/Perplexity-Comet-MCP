@@ -341,6 +341,32 @@ describe("a lost session", () => {
     await expect(pending).rejects.toThrow("Session closed");
   });
 
+  it("rejects a command still pending when the client detaches the session, as a closed session", async () => {
+    browser.addTab(
+      { id: "tab-3", type: "page", title: "", url: "https://a.example/" },
+      { Page: { navigate: () => new Promise(() => {}) } },
+    );
+    const { connection } = await opened();
+    const session = await connection.attach("tab-3");
+    const lost = vi.fn();
+    session.onLost(lost);
+    const pending = session.Page.navigate({ url: "https://b.example/" });
+
+    await session.detach();
+
+    await expect(pending).rejects.toThrow("Session closed");
+    expect(session.lost).toBe(false);
+    expect(lost).not.toHaveBeenCalled();
+  });
+
+  it("rejects a command sent after the client detached the session", async () => {
+    const { connection } = await opened();
+    const session = await connection.attach("tab-1");
+    await session.detach();
+
+    await expect(session.Page.enable()).rejects.toThrow("Session closed");
+  });
+
   it("rejects a command sent after the session was lost", async () => {
     browser.addTab(
       { id: "tab-3", type: "page", title: "", url: "https://a.example/" },
