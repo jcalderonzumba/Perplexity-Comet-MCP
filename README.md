@@ -104,7 +104,7 @@ claude mcp add -s user comet-bridge -e COMET_PORT=9222 -- \
 claude mcp add -s user comet-bridge -e COMET_PORT=9222 -- perplexity-comet-mcp
 ```
 
-Link a clone you do not develop in: `npm run preflight` deletes `dist/` before it rebuilds, which would stop a server that runs from it. `npm link` also replaces a global install of the npm package of the same name, which is the upstream project.
+Run the server from a clone you do not develop in: `npm run preflight` deletes `dist/` before it rebuilds, so a server started meanwhile fails to start. `npm link` also replaces a global install of the npm package of the same name, which is the upstream project.
 
 `claude mcp get comet-bridge` shows what it runs. When nothing answers on that port and no Comet runs, `comet_connect` starts Comet with remote debugging on it. If Comet is already running without the port, `comet_connect` leaves it alone and fails, naming the port and the command that starts Comet with it: quit Comet, run that command, and connect again.
 
