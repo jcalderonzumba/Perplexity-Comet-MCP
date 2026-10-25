@@ -8,7 +8,10 @@
 //     call of `pageScriptExpression` nor a plain string literal, which holds
 //     no input (the client's `1+1` health check, its `window.location.href`
 //     read). A template literal with a substitution and a concatenation are
-//     script text built from a value, and fail.
+//     script text built from a value, and fail, or
+//   - any call names `Runtime.evaluate` as a string (`send("Runtime.evaluate",
+//     …)`, `client["Runtime.evaluate"](…)`), so a generic path cannot carry
+//     an evaluate around the rules above.
 // The two client methods `evaluate` and `safeEvaluate` pass their parameter
 // on to `Runtime.evaluate`: the one place an expression is a bare name, and
 // the calls to them are what the guard checks.
@@ -50,6 +53,11 @@ function scanEvaluates(file: string, source: string): Scan {
         : expressionProblem(node.arguments[0]);
       if (problem) scan.violations.push(`${where(node)}: ${problem}`);
     }
+    if (ts.isCallExpression(node) && namesRuntimeEvaluate(node)) {
+      scan.violations.push(
+        `${where(node)}: a call names Runtime.evaluate as a string, around the guard`,
+      );
+    }
     ts.forEachChild(node, visit);
   };
   visit(sourceFile);
@@ -62,6 +70,22 @@ function isEvaluate(
   return (
     ts.isPropertyAccessExpression(callee) &&
     EVALUATES.includes(callee.name.text)
+  );
+}
+
+/**
+ * Whether `call` names `Runtime.evaluate` as a string, as an argument
+ * (`send("Runtime.evaluate", …)`) or as the key of what it calls
+ * (`client["Runtime.evaluate"](…)`), the paths that would run an evaluate
+ * no other rule reads.
+ */
+function namesRuntimeEvaluate(call: ts.CallExpression): boolean {
+  const isTheName = (node: ts.Node) =>
+    ts.isStringLiteralLike(node) && node.text === "Runtime.evaluate";
+  return (
+    call.arguments.some(isTheName) ||
+    (ts.isElementAccessExpression(call.expression) &&
+      isTheName(call.expression.argumentExpression))
   );
 }
 
@@ -217,6 +241,28 @@ describe("scanEvaluates", () => {
 
     expect(scan(source, CLIENT).violations).toHaveLength(1);
   });
+
+  it.each([
+    ["a send", 'await client.send("Runtime.evaluate", { expression: "1+1" });'],
+    [
+      "a send in the client",
+      'await this.client.send("Runtime.evaluate", { expression: "1+1" });',
+      CLIENT,
+    ],
+    ["any other call", "await relay(`Runtime.evaluate`, options);"],
+    [
+      "a call keyed by it",
+      'await client["Runtime.evaluate"]({ expression: "1+1" });',
+    ],
+  ])(
+    "fails on %s that names Runtime.evaluate as a string",
+    (_case, source, file = "browser-connection.ts") => {
+      const { violations } = scan(source, file);
+
+      expect(violations).toHaveLength(1);
+      expect(violations[0]).toContain("names Runtime.evaluate as a string");
+    },
+  );
 
   it("fails on options it cannot read", () => {
     expect(
