@@ -519,7 +519,7 @@ describe("AskCore.ask: the mode step", () => {
     expect(calls.lastIndexOf("mode:locateModeButton")).toBeLessThan(
       calls.indexOf("selectAskInput"),
     );
-    expect(built.modePage.checked).toBe("Deep research");
+    expect(built.modePage.checked).toBe("Deep Research");
   });
 
   it("runs after the connection is recovered", async () => {
@@ -558,7 +558,7 @@ describe("AskCore.ask: the mode step", () => {
 
     expect(answerOf(outcome)).toBe(LONG_ANSWER);
     expect(outcome.kind === "answered" && outcome.notice.line).toBe(
-      'Mode not applied: this answer may not be in research mode. Cannot switch to research mode: after selecting "Deep research" the menu has <<Search>> checked and the mode button reads <<Search>>',
+      'Mode not applied: this answer may not be in research mode. Cannot switch to research mode: after selecting "Deep Research" the menu has <<Search>> checked and the mode button reads <<Search>>',
     );
     expect(built.port.sentPrompts).toHaveLength(1);
   });

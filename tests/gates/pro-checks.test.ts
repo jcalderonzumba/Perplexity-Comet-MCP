@@ -1087,7 +1087,7 @@ describe("emptyPromptRefused [9.2]", () => {
 const ANSWER =
   "[BEGIN UNTRUSTED PAGE CONTENT nonce=abc]\nRESEARCHED\n[END UNTRUSTED PAGE CONTENT nonce=abc]";
 const NOT_APPLIED =
-  "Mode not applied: this answer may not be in research mode. Cannot switch to research mode: the page shows Search checked after selecting Deep research";
+  "Mode not applied: this answer may not be in research mode. Cannot switch to research mode: the page shows Search checked after selecting Deep Research";
 
 const PASSING = {
   switched: ok("Switched to research mode"),
@@ -1146,7 +1146,7 @@ describe("researchWorkflowHeld [7.4-research-workflow]", () => {
     expect(
       researchWorkflowHeld({
         ...PASSING,
-        read: ok(modeReport("unknown (the mode button reads Deep research)")),
+        read: ok(modeReport("unknown (the mode button reads Deep Research)")),
       }),
     ).toBe(false);
     expect(
@@ -1186,8 +1186,8 @@ describe("researchWorkflowHeld against the server's own replies", () => {
     ).toBe(false);
   });
 
-  it("holds on comet_mode's read of a page in Deep research", async () => {
-    const page = new FakeModePage({ current: "Deep research" });
+  it("holds on comet_mode's read of a page in Deep Research", async () => {
+    const page = new FakeModePage({ current: "Deep Research" });
     const reply = await answerModeTool(undefined, {
       core: new ModeCore(page),
       openPerplexity: async () => {},

@@ -33,7 +33,7 @@ describe("ModeCore.switchMode", () => {
     const result = await core.switchMode("research");
 
     expect(result).toEqual({ ok: true, mode: "research" });
-    expect(page.checked).toBe("Deep research");
+    expect(page.checked).toBe("Deep Research");
     expect(core.rememberedMode).toBe("research");
     expect(page.isMenuOpen).toBe(false);
   });
@@ -46,7 +46,7 @@ describe("ModeCore.switchMode", () => {
     const itemLookups = page.scriptArguments.filter(
       (_, index) => page.scriptsRun[index] === "locateModeMenuItem",
     );
-    expect(itemLookups).toEqual([["Deep research"]]);
+    expect(itemLookups).toEqual([["Deep Research"]]);
   });
 
   it("reads the checked item back by reopening the menu, waiting for the page to settle so no click is wasted", async () => {
@@ -54,7 +54,7 @@ describe("ModeCore.switchMode", () => {
 
     await new ModeCore(page).switchMode("research");
 
-    expect(page.clicks).toEqual(["button", "item:Deep research", "button"]);
+    expect(page.clicks).toEqual(["button", "item:Deep Research", "button"]);
     expect(page.escapes).toBe(1);
   });
 
@@ -77,11 +77,11 @@ describe("ModeCore.switchMode", () => {
     const result = await new ModeCore(page).switchMode("research");
 
     expect(result).toEqual({ ok: true, mode: "research" });
-    expect(page.checked).toBe("Deep research");
+    expect(page.checked).toBe("Deep Research");
   });
 
   it("fails naming the labels present when the menu has no such item, and closes the menu", async () => {
-    const page = new FakeModePage({ labels: ["Search", "Learn step by step"] });
+    const page = new FakeModePage({ labels: ["Search", "Learn Step by Step"] });
     const core = new ModeCore(page);
 
     const failure = failureOf(await core.switchMode("research"));
@@ -89,8 +89,8 @@ describe("ModeCore.switchMode", () => {
     expect(failure).toEqual({
       kind: "item-missing",
       mode: "research",
-      label: "Deep research",
-      labelsPresent: ["Search", "Learn step by step"],
+      label: "Deep Research",
+      labelsPresent: ["Search", "Learn Step by Step"],
     });
     expect(page.isMenuOpen).toBe(false);
     expect(page.escapes).toBe(1);
@@ -108,7 +108,7 @@ describe("ModeCore.switchMode", () => {
     expect(failure).toEqual({
       kind: "read-back-mismatch",
       mode: "research",
-      label: "Deep research",
+      label: "Deep Research",
       checkedLabel: "Search",
       buttonText: "Search",
     });
@@ -125,7 +125,7 @@ describe("ModeCore.switchMode", () => {
 
     expect(failure).toMatchObject({
       kind: "read-back-mismatch",
-      checkedLabel: "Deep research",
+      checkedLabel: "Deep Research",
       buttonText: "Search",
     });
     expect(core.rememberedMode).toBeUndefined();
@@ -202,7 +202,7 @@ describe("ModeCore.switchMode", () => {
     expect(page.clicks.slice(0, 3)).toEqual([
       "button",
       "button",
-      "item:Deep research",
+      "item:Deep Research",
     ]);
   });
 
@@ -212,7 +212,7 @@ describe("ModeCore.switchMode", () => {
     const result = await new ModeCore(page).switchMode("research");
 
     expect(result).toEqual({ ok: true, mode: "research" });
-    expect(page.clicks[0]).toBe("item:Deep research");
+    expect(page.clicks[0]).toBe("item:Deep Research");
     expect(page.isMenuOpen).toBe(false);
   });
 
@@ -247,7 +247,7 @@ describe("ModeCore.switchMode", () => {
 
   it("keeps each core's remembered mode to itself", async () => {
     const first = new ModeCore(new FakeModePage());
-    const second = new ModeCore(new FakeModePage({ current: "Deep research" }));
+    const second = new ModeCore(new FakeModePage({ current: "Deep Research" }));
 
     await first.switchMode("research");
     await second.switchMode("search");
@@ -265,7 +265,7 @@ describe("ModeCore.switchMode with Comet's window behind others", () => {
     const result = await core.switchMode("research");
 
     expect(result).toEqual({ ok: true, mode: "research" });
-    expect(page.checked).toBe("Deep research");
+    expect(page.checked).toBe("Deep Research");
     expect(page.isMenuOpen).toBe(false);
     expect(page.inputEvents.filter((e) => e.startsWith("dropped"))).toEqual([]);
   });
@@ -278,7 +278,7 @@ describe("ModeCore.switchMode with Comet's window behind others", () => {
     expect(page.inputEvents).toEqual([
       "focus:on",
       "click:button",
-      "click:item:Deep research",
+      "click:item:Deep Research",
       "click:button",
       "escape",
       "focus:off",
@@ -348,7 +348,7 @@ describe("ModeCore.switchMode with Comet's window behind others", () => {
     const outcome = await core.ensureMode();
 
     expect(outcome).toEqual({ status: "applied", mode: "research" });
-    expect(page.checked).toBe("Deep research");
+    expect(page.checked).toBe("Deep Research");
   });
 
   it("reads the mode without emulating focus", async () => {
@@ -370,7 +370,7 @@ describe("ModeCore.switchMode with Comet's window behind others", () => {
 
 describe("ModeCore.readMode", () => {
   it("reads the tool mode from the button without opening the menu", async () => {
-    const page = new FakeModePage({ current: "Deep research" });
+    const page = new FakeModePage({ current: "Deep Research" });
     const core = new ModeCore(page);
 
     const research = await core.readMode();
@@ -394,11 +394,11 @@ describe("ModeCore.readMode", () => {
   });
 
   it("returns unknown with the text it saw, and makes no click", async () => {
-    const page = new FakeModePage({ current: "Learn step by step" });
+    const page = new FakeModePage({ current: "Learn Step by Step" });
 
     const reading = await new ModeCore(page).readMode();
 
-    expect(reading).toEqual({ kind: "unknown", text: "Learn step by step" });
+    expect(reading).toEqual({ kind: "unknown", text: "Learn Step by Step" });
     expect(page.clicks).toEqual([]);
   });
 
@@ -457,7 +457,7 @@ describe("ModeCore.ensureMode", () => {
     const outcome = await core.ensureMode();
 
     expect(outcome).toEqual({ status: "applied", mode: "research" });
-    expect(page.checked).toBe("Deep research");
+    expect(page.checked).toBe("Deep Research");
     expect(page.isMenuOpen).toBe(false);
   });
 
@@ -476,7 +476,7 @@ describe("ModeCore.ensureMode", () => {
       failure: {
         kind: "read-back-mismatch",
         mode: "research",
-        label: "Deep research",
+        label: "Deep Research",
         checkedLabel: "Search",
         buttonText: "Search",
       },
@@ -562,13 +562,13 @@ describe("describeModeFailure", () => {
       {
         kind: "item-missing",
         mode: "research",
-        label: "Deep research",
+        label: "Deep Research",
         labelsPresent: ["Search", "Learn"],
       },
       {
         kind: "read-back-mismatch",
         mode: "research",
-        label: "Deep research",
+        label: "Deep Research",
         checkedLabel: "Search",
         buttonText: "Search",
       },
@@ -579,8 +579,8 @@ describe("describeModeFailure", () => {
       failures.map((failure) => describeModeFailure(failure, quote)),
     ).toEqual([
       "Cannot switch to research mode: the mode menu did not open (the mode button reads <<Srch>>)",
-      'Cannot switch to research mode: the mode menu has no "Deep research" item (items present: <<Search, Learn>>)',
-      'Cannot switch to research mode: after selecting "Deep research" the menu has <<Search>> checked and the mode button reads <<Search>>',
+      'Cannot switch to research mode: the mode menu has no "Deep Research" item (items present: <<Search, Learn>>)',
+      'Cannot switch to research mode: after selecting "Deep Research" the menu has <<Search>> checked and the mode button reads <<Search>>',
       "Cannot switch to research mode: the page failed: <<boom>>",
     ]);
   });
@@ -591,14 +591,14 @@ describe("describeModeFailure", () => {
         {
           kind: "read-back-mismatch",
           mode: "research",
-          label: "Deep research",
+          label: "Deep Research",
           checkedLabel: null,
           buttonText: "Search",
         },
         quote,
       ),
     ).toBe(
-      'Cannot switch to research mode: after selecting "Deep research" the menu has no item checked and the mode button reads <<Search>>',
+      'Cannot switch to research mode: after selecting "Deep Research" the menu has no item checked and the mode button reads <<Search>>',
     );
   });
 

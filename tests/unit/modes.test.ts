@@ -24,10 +24,10 @@ describe("MODE_CATALOGUE", () => {
     });
   });
 
-  it("selects the page's Deep research item for research", () => {
+  it("selects the page's Deep Research item for research", () => {
     expect(MODE_CATALOGUE.research).toEqual({
       selectable: true,
-      pageLabel: "Deep research",
+      pageLabel: "Deep Research",
     });
   });
 
@@ -69,11 +69,11 @@ describe("isToolMode", () => {
 describe("toolModeForPageLabel", () => {
   it("maps each selectable mode's page label back to the mode", () => {
     expect(toolModeForPageLabel("Search")).toBe("search");
-    expect(toolModeForPageLabel("Deep research")).toBe("research");
+    expect(toolModeForPageLabel("Deep Research")).toBe("research");
   });
 
   it("returns undefined for a label the catalogue does not know", () => {
-    expect(toolModeForPageLabel("Learn step by step")).toBeUndefined();
+    expect(toolModeForPageLabel("Learn Step by Step")).toBeUndefined();
     expect(toolModeForPageLabel("Research")).toBeUndefined();
     expect(toolModeForPageLabel("")).toBeUndefined();
   });

@@ -23,7 +23,7 @@ export const modeReport = (current: string) =>
     "",
     "Available modes:",
     "  search: Search",
-    "  research: Deep research",
+    "  research: Deep Research",
     "  labs: not available (not offered by Perplexity's current input bar)",
     "  learn: not available (not supported yet)",
     "",

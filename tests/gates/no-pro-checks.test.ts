@@ -131,7 +131,7 @@ describe("reportsMode [7.1] [7.3-reconnect]", () => {
     expect(reportsMode(ok(UNKNOWN_MODE_REPORT))).toBe(false);
     expect(
       reportsMode(
-        ok(modeReport("unknown (the mode button reads Deep research)")),
+        ok(modeReport("unknown (the mode button reads Deep Research)")),
       ),
     ).toBe(false);
   });
@@ -152,10 +152,10 @@ describe("modeReadNote [7.1] [7.3-reconnect]", () => {
     );
 
   it("shows the label an unknown reading quotes, without the wrapper", () => {
-    const note = modeReadNote(unknownLabelReply("Deep research (beta)"));
+    const note = modeReadNote(unknownLabelReply("Deep Research (beta)"));
 
     expect(note).toBe(
-      'Current mode: unknown (the mode button reads "Deep research (beta)")',
+      'Current mode: unknown (the mode button reads "Deep Research (beta)")',
     );
     expect(note).not.toContain("UNTRUSTED");
   });
@@ -167,10 +167,10 @@ describe("modeReadNote [7.1] [7.3-reconnect]", () => {
   });
 
   it("cuts a long label to a readable length", () => {
-    const note = modeReadNote(unknownLabelReply("Deep research ".repeat(20)));
+    const note = modeReadNote(unknownLabelReply("Deep Research ".repeat(20)));
 
     expect(note).toBe(
-      `Current mode: unknown (the mode button reads "${"Deep research ".repeat(20).slice(0, 40)}…")`,
+      `Current mode: unknown (the mode button reads "${"Deep Research ".repeat(20).slice(0, 40)}…")`,
     );
   });
 
@@ -190,12 +190,12 @@ describe("modeReadNote [7.1] [7.3-reconnect]", () => {
 
   it("is the note [7.1] fails with when the mode reads unknown", async () => {
     const outcome = await MODE_REPORTED.probe(async () =>
-      unknownLabelReply("Learn step by step"),
+      unknownLabelReply("Learn Step by Step"),
     );
 
     expect(outcome).toEqual({
       held: false,
-      note: 'Current mode: unknown (the mode button reads "Learn step by step")',
+      note: 'Current mode: unknown (the mode button reads "Learn Step by Step")',
     });
   });
 
@@ -312,7 +312,7 @@ describe("the mode predicates against the server's own comet_mode replies", () =
   });
 
   it("[7.1] holds on the mode the server reads from the page", async () => {
-    const page = new FakeModePage({ current: "Deep research" });
+    const page = new FakeModePage({ current: "Deep Research" });
     expect(reportsMode(await serverReply(undefined, page))).toBe(true);
   });
 

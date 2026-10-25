@@ -33,7 +33,7 @@ const AGENTIC_BROWSING = "plan 12 (Agentic browsing)";
 const LEARN_MODE_NOT_SWITCHED = {
   id: "7.2-learn",
   reason:
-    'Perplexity\'s input bar offers "Learn step by step", and comet_mode does not switch to it yet',
+    'Perplexity\'s input bar offers "Learn Step by Step", and comet_mode does not switch to it yet',
   owningPlan: "plan 11 (Learn mode)",
 };
 

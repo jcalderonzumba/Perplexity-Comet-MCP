@@ -60,7 +60,7 @@ describe("COMET_MODE_TOOL", () => {
 
 describe("answerModeTool without a mode", () => {
   it("reports the mode the page shows, marked in the list of modes", async () => {
-    const { page, tool } = harness({ current: "Deep research" });
+    const { page, tool } = harness({ current: "Deep Research" });
 
     const reply = await answerModeTool(undefined, tool);
 
@@ -72,7 +72,7 @@ describe("answerModeTool without a mode", () => {
         "",
         "Available modes:",
         "  search: Search",
-        "→ research: Deep research",
+        "→ research: Deep Research",
         "  labs: not available (not offered by Perplexity's current input bar)",
         "  learn: not available (not supported yet)",
         "",
@@ -91,13 +91,13 @@ describe("answerModeTool without a mode", () => {
   });
 
   it("reports unknown, quoting what the mode button reads, when the page shows no catalogued mode", async () => {
-    const { tool } = harness({ current: "Learn step by step" });
+    const { tool } = harness({ current: "Learn Step by Step" });
 
     const reply = await answerModeTool(undefined, tool);
 
     expect(reply.isError).toBe(false);
     expect(reply.text).toMatch(
-      /^Current mode: unknown \(the mode button reads <<Learn step by step>>\)\n\nAvailable modes:\n/,
+      /^Current mode: unknown \(the mode button reads <<Learn Step by Step>>\)\n\nAvailable modes:\n/,
     );
     expect(reply.text).not.toContain("→");
   });
@@ -146,7 +146,7 @@ describe("answerModeTool with a mode", () => {
       isError: false,
       text: "Switched to research mode",
     });
-    expect(page.checked).toBe("Deep research");
+    expect(page.checked).toBe("Deep Research");
     expect(tool.core.rememberedMode).toBe("research");
   });
 
@@ -167,7 +167,7 @@ describe("answerModeTool with a mode", () => {
     expect(reply).toEqual({
       kind: "text",
       isError: true,
-      text: 'Cannot switch to research mode: after selecting "Deep research" the menu has <<Search>> checked and the mode button reads <<Search>>',
+      text: 'Cannot switch to research mode: after selecting "Deep Research" the menu has <<Search>> checked and the mode button reads <<Search>>',
     });
     expect(tool.core.rememberedMode).toBeUndefined();
   });
@@ -242,7 +242,7 @@ describe("answerModeTool with the UNTRUSTED wrapper", () => {
 
     expect(reply.isError).toBe(true);
     expect(reply.text).toMatch(
-      /^Cannot switch to research mode: the mode menu has no "Deep research" item/,
+      /^Cannot switch to research mode: the mode menu has no "Deep Research" item/,
     );
     expectNeutralisedAndWrapped(reply.text);
   });

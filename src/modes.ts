@@ -25,7 +25,7 @@ export type ModeEntry = SelectableMode | UnselectableMode;
 
 export const MODE_CATALOGUE: Readonly<Record<ToolMode, ModeEntry>> = {
   search: { selectable: true, pageLabel: "Search" },
-  research: { selectable: true, pageLabel: "Deep research" },
+  research: { selectable: true, pageLabel: "Deep Research" },
   labs: {
     selectable: false,
     reason: "not offered by Perplexity's current input bar",

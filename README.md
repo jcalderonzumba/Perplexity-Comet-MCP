@@ -336,7 +336,7 @@ Returns: the current mode read from the page, or confirmation that the switch ha
 | Mode | What it selects |
 |------|-----------------|
 | search | Search, Perplexity's default |
-| research | Deep research |
+| research | Deep Research |
 | labs | Not available: Perplexity's input bar no longer offers Labs, so the call fails saying so |
 | learn | Not available yet: the call fails saying so |
 
@@ -569,7 +569,7 @@ npm run check                         # before every commit
 Both batteries start the built server (`npm run build` first) and drive your local Comet through it: connect, tabs, screenshots, mode, and for the Pro battery, questions and agentic browsing.
 
 - **No-pro** (`tests/run-no-pro.mjs`): needs Comet signed in and already running with its debug port on the server's port (`COMET_PORT`, 9223 by default); spends no Perplexity Pro queries. `npm run preflight` runs it on every pull request, with a ten-minute ceiling. If your Comet listens on another port, set `COMET_PORT` to it, for example `COMET_PORT=9222 npm run preflight`: the battery checks that port and starts the server on it.
-- **Pro** (`tests/run-all.mjs`): needs Comet signed in to Perplexity Pro and already running with its debug port on the server's port (`COMET_PORT`, 9223 by default), and **spends Pro queries**, one Deep research query among them. It is run by hand when a change touches asking, polling, modes or agentic browsing, and the pull request records the result. Like the no-pro battery, it starts the server on the port it checks and asks that port first: when nothing answers, `[1.2]` fails and no tool is called, and when connect fails, no other check is run or scored. It scores its checks as the no-pro battery does, below, against a known-failures list of its own, and exits non-zero on any failure or unexpected pass.
+- **Pro** (`tests/run-all.mjs`): needs Comet signed in to Perplexity Pro and already running with its debug port on the server's port (`COMET_PORT`, 9223 by default), and **spends Pro queries**, one Deep Research query among them. It is run by hand when a change touches asking, polling, modes or agentic browsing, and the pull request records the result. Like the no-pro battery, it starts the server on the port it checks and asks that port first: when nothing answers, `[1.2]` fails and no tool is called, and when connect fails, no other check is run or scored. It scores its checks as the no-pro battery does, below, against a known-failures list of its own, and exits non-zero on any failure or unexpected pass.
 
 Each battery prints one line per check: its verdict, its id, and what the tool replied.
 
@@ -596,7 +596,7 @@ The Pro battery ends with the same summary line. Its checks hold only on the ans
 
 The Pro battery's known-failures list names the Agentic browsing plan for Comet answering without opening the site a prompt names (`[3.1]`, `[3.2-agent-tab]`, `[3.3-tabs-kept]`, `[6.3]`), and lists the switch to `learn` as the no-pro battery does. `[3.4]` is not on it: its condition, a repository and its star count in the final answer, can hold whether or not the agent opens a tab, and it holds once the ask returns its own turn's answer.
 
-The mode checks hold only on what the server really did. `[7.1]` and `[7.3-reconnect]` pass when `comet_mode` reads a mode from the page, and fail on an error or on `unknown`; `[9.4]`'s follow-up read is judged the same way. `[7.2-research]` and `[7.2-search]` pass on `Switched to <mode> mode`, and `[7.2-labs]` passes on the error saying Perplexity's input bar no longer offers Labs. Today the no-pro battery's known-failures list holds one check, the switch to the `learn` mode: Perplexity's input bar offers "Learn step by step", and `comet_mode` does not switch to it yet.
+The mode checks hold only on what the server really did. `[7.1]` and `[7.3-reconnect]` pass when `comet_mode` reads a mode from the page, and fail on an error or on `unknown`; `[9.4]`'s follow-up read is judged the same way. `[7.2-research]` and `[7.2-search]` pass on `Switched to <mode> mode`, and `[7.2-labs]` passes on the error saying Perplexity's input bar no longer offers Labs. Today the no-pro battery's known-failures list holds one check, the switch to the `learn` mode: Perplexity's input bar offers "Learn Step by Step", and `comet_mode` does not switch to it yet.
 
 ### Gates
 

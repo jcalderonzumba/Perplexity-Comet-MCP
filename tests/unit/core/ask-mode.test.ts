@@ -54,7 +54,7 @@ describe("reapplyModeBeforeAsk", () => {
 
     const notice = await reapplyModeBeforeAsk(tool);
 
-    expect(page.checked).toBe("Deep research");
+    expect(page.checked).toBe("Deep Research");
     expect(page.isMenuOpen).toBe(false);
     expect(withModeNotice(notice, ANSWER)).toBe(ANSWER);
   });
@@ -69,7 +69,7 @@ describe("reapplyModeBeforeAsk", () => {
     const notice = await reapplyModeBeforeAsk(tool);
 
     expect(page.waitedMs - waitedBefore).toBeGreaterThanOrEqual(1_500);
-    expect(page.checked).toBe("Deep research");
+    expect(page.checked).toBe("Deep Research");
     expect(notice.line).toBeNull();
   });
 
@@ -81,7 +81,7 @@ describe("reapplyModeBeforeAsk", () => {
     const notice = await reapplyModeBeforeAsk(tool);
 
     expect(notice.line).toBe(
-      'Mode not applied: this answer may not be in research mode. Cannot switch to research mode: after selecting "Deep research" the menu has <<Search>> checked and the mode button reads <<Search>>',
+      'Mode not applied: this answer may not be in research mode. Cannot switch to research mode: after selecting "Deep Research" the menu has <<Search>> checked and the mode button reads <<Search>>',
     );
     expect(page.isMenuOpen).toBe(false);
   });
