@@ -11,7 +11,7 @@
 import { execSync, spawn } from "node:child_process";
 import { existsSync } from "node:fs";
 import { platform } from "node:os";
-import { type BrowserPath, parseBrowserPath } from "./browser-connection.js";
+import { type BrowserPath, parseBrowserPath } from "./core/browser-endpoint.js";
 import type { CometLaunch, FoundComet } from "./core/comet-launch.js";
 import {
   IS_WINDOWS,

@@ -5,7 +5,7 @@
 // (principle 6). What to do about each answer is decided here, once, for
 // `comet_connect`, for the ask's recovery and for the client's reconnect.
 
-import type { BrowserEndpoint } from "../browser-connection.js";
+import type { BrowserEndpoint } from "./browser-endpoint.js";
 
 /** A Comet that answers: its browser version, and where its browser socket is. */
 export interface FoundComet {

@@ -4,8 +4,8 @@
  * Tabs are listed, opened and closed through the protocol's `Target` domain,
  * and each tab the client drives is a session attached on the same socket,
  * so moving between tabs never opens another one. The address is built here
- * from a port and a path only `parseBrowserPath` makes, always on
- * `127.0.0.1` (principle 4).
+ * from a port and a path only `parseBrowserPath` (`core/browser-endpoint.ts`)
+ * makes, always on `127.0.0.1` (principle 4).
  *
  * A session binds the client's own domain methods to its session id without
  * naming any of them, so every page script still runs from a visible
@@ -13,26 +13,8 @@
  */
 
 import CDP from "chrome-remote-interface";
+import type { BrowserEndpoint } from "./core/browser-endpoint.js";
 import type { CDPTarget } from "./types.js";
-
-declare const parsed: unique symbol;
-
-/** The path of a browser WebSocket, `/devtools/browser/<uuid>`. */
-export type BrowserPath = string & { readonly [parsed]: "browser path" };
-
-const BROWSER_PATH =
-  /^\/devtools\/browser\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
-/** `raw` as a browser path when it is exactly one, else null. */
-export function parseBrowserPath(raw: string): BrowserPath | null {
-  return BROWSER_PATH.test(raw) ? (raw as BrowserPath) : null;
-}
-
-/** Where Comet's browser WebSocket listens on `127.0.0.1`. */
-export interface BrowserEndpoint {
-  readonly port: number;
-  readonly path: BrowserPath;
-}
 
 type PageDomainName =
   | "Page"

@@ -6,7 +6,7 @@
 import {
   type BrowserEndpoint,
   parseBrowserPath,
-} from "../../../src/browser-connection.js";
+} from "../../../src/core/browser-endpoint.js";
 import type {
   CometLaunch,
   FoundComet,

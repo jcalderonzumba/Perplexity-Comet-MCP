@@ -2,12 +2,9 @@
 // Modified for Windows/WSL support
 
 import CDP from "chrome-remote-interface";
-import {
-  BrowserConnection,
-  type BrowserEndpoint,
-  type PageSession,
-} from "./browser-connection.js";
+import { BrowserConnection, type PageSession } from "./browser-connection.js";
 import { systemCometLaunch } from "./comet-launch.js";
+import type { BrowserEndpoint } from "./core/browser-endpoint.js";
 import {
   type CometLaunch,
   CometRunsWithoutPort,

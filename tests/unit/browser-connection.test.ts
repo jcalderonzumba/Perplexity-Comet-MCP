@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { BrowserConnection } from "../../src/browser-connection.js";
 import {
-  BrowserConnection,
   type BrowserEndpoint,
   parseBrowserPath,
-} from "../../src/browser-connection.js";
+} from "../../src/core/browser-endpoint.js";
 import { FakeBrowser, type FakeBrowserSocket } from "./fakes/fake-browser.js";
 
 // `BrowserConnection.open` opens its socket through `chrome-remote-interface`;
@@ -58,35 +58,6 @@ async function opened(): Promise<{
   if (!socket) throw new Error("no socket was opened");
   return { connection, socket };
 }
-
-describe("parseBrowserPath", () => {
-  it.each([
-    ["a lowercase id", BROWSER_PATH],
-    ["an uppercase id", `/devtools/browser/${UUID.toUpperCase()}`],
-  ])("accepts a browser path with %s", (_case, raw) => {
-    expect(parseBrowserPath(raw)).toBe(raw);
-  });
-
-  it.each([
-    ["a page path", `/devtools/page/${UUID}`],
-    ["a full ws:// URL", `ws://127.0.0.1:9222${BROWSER_PATH}`],
-    ["a path climbing with ..", `/devtools/browser/../page/${UUID}`],
-    ["a path with .. after the id", `${BROWSER_PATH}/..`],
-    ["a query", `${BROWSER_PATH}?x=1`],
-    ["a fragment", `${BROWSER_PATH}#x`],
-    ["a trailing slash", `${BROWSER_PATH}/`],
-    ["a trailing newline", `${BROWSER_PATH}\n`],
-    ["a short id", "/devtools/browser/0f1e2d3c-4b5a-6978-8a9b-acbdcedf010"],
-    ["a non-hex id", "/devtools/browser/0f1e2d3c-4b5a-6978-8a9b-acbdcedf010g"],
-    [
-      "an id without its dashes",
-      "/devtools/browser/0f1e2d3c4b5a69788a9bacbdcedf0102",
-    ],
-    ["the empty string", ""],
-  ])("rejects %s", (_case, raw) => {
-    expect(parseBrowserPath(raw)).toBeNull();
-  });
-});
 
 describe("BrowserConnection.open", () => {
   it("opens exactly one socket, to the browser path on 127.0.0.1, with the local protocol", async () => {
