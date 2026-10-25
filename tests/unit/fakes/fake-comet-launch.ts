@@ -1,12 +1,13 @@
-// A fake of the launch port: what answers on the debug port, whether a Comet
-// process runs, and what a launch does. `launches` records every launch, so a
-// test can show that none was made. A port that answers names the browser
-// socket at `FAKE_BROWSER_PATH` on that port.
+// A fake of the launch port: what answers on the debug port, where the
+// remote-debugging switch's socket listens, whether a Comet process runs, and
+// what a launch does. `launches` records every launch, so a test can show
+// that none was made. A port that answers names the browser socket at
+// `FAKE_BROWSER_PATH` on that port.
 
 import {
   type BrowserEndpoint,
   parseBrowserPath,
-} from "../../../src/browser-connection.js";
+} from "../../../src/core/browser-endpoint.js";
 import type {
   CometLaunch,
   FoundComet,
@@ -17,21 +18,27 @@ export const START_COMMAND = "comet --remote-debugging-port=";
 export const FAKE_BROWSER_PATH =
   "/devtools/browser/0f1e2d3c-4b5a-6978-8a9b-acbdcedf0102";
 
-function endpointOn(port: number): BrowserEndpoint {
+/** The browser socket at `FAKE_BROWSER_PATH` on `port`. */
+export function endpointOn(port: number): BrowserEndpoint {
   const path = parseBrowserPath(FAKE_BROWSER_PATH);
   if (!path) throw new Error("the fake's browser path does not parse");
   return { port, path };
 }
 
 export class FakeCometLaunch implements CometLaunch {
+  public usesSwitch = true;
   /** The browser version the port answers with; null when nothing answers. */
   public answering: string | null = null;
+  /** The switch's endpoint, listening; null when there is none. */
+  public switchAt: BrowserEndpoint | null = null;
   public processRunning = false;
   /** Set to make the launch fail, as a Comet that never answers does. */
   public launchFailure: Error | undefined;
   /** The browser version the port answers with once launched. */
   public launchedBrowser = "Comet/141.0";
   public readonly probes: number[] = [];
+  public switchReads = 0;
+  public processChecks = 0;
   public readonly launches: number[] = [];
 
   async probe(port: number): Promise<FoundComet | null> {
@@ -40,7 +47,13 @@ export class FakeCometLaunch implements CometLaunch {
     return { browser: this.answering, endpoint: endpointOn(port) };
   }
 
+  async switchEndpoint(): Promise<BrowserEndpoint | null> {
+    this.switchReads++;
+    return this.switchAt;
+  }
+
   async isProcessRunning(): Promise<boolean> {
+    this.processChecks++;
     return this.processRunning;
   }
 

@@ -3,15 +3,20 @@
 
 import CDP from "chrome-remote-interface";
 import {
+  AllowDialog,
   BrowserConnection,
-  type BrowserEndpoint,
   type PageSession,
 } from "./browser-connection.js";
 import { systemCometLaunch } from "./comet-launch.js";
 import {
   type CometLaunch,
+  type CometOnPort,
   CometRunsWithoutPort,
   ensureCometOnPort,
+  type FoundOnPort,
+  findCometOnPort,
+  RemoteDebuggingNotAllowed,
+  type RunningWithoutPort,
 } from "./core/comet-launch.js";
 import { isBrowsingTab } from "./core/tabs.js";
 import { errorMessage } from "./error-message.js";
@@ -416,6 +421,9 @@ function reconnectTarget(targets: readonly CDPTarget[]): CDPTarget | undefined {
   );
 }
 
+/** A Comet the client can open its socket to: found, or launched. */
+type ReachedComet = Exclude<CometOnPort, RunningWithoutPort>;
+
 /** The size the connected tab's window is given, for a consistent layout. */
 const WINDOW_SIZE = { width: 1440, height: 900 } as const;
 
@@ -424,6 +432,10 @@ export class CometCDPClient {
   private connection: BrowserConnection | null = null;
   /** The opening of `connection`, which every caller meanwhile shares. */
   private opening: Promise<BrowserConnection> | null = null;
+  /** Comet's dialog for a socket through its switch, and the user's answer. */
+  private readonly dialog = new AllowDialog((connection) =>
+    this.adopt(connection),
+  );
   /** The connected tab, attached on `connection`. */
   private session: PageSession | null = null;
   /**
@@ -597,7 +609,9 @@ export class CometCDPClient {
     // Pre-operation health check (uses cache for efficiency)
     try {
       await this.preOperationCheck();
-    } catch {
+    } catch (error) {
+      // Comet's dialog stands in the way: no retry gets past it.
+      if (error instanceof RemoteDebuggingNotAllowed) throw error;
       // If pre-check fails, try to proceed anyway
     }
 
@@ -651,11 +665,15 @@ export class CometCDPClient {
           await this.ensureSingleReconnect();
           return await operation();
         } catch (reconnectError) {
+          if (reconnectError instanceof RemoteDebuggingNotAllowed) {
+            throw reconnectError;
+          }
           // If reconnect fails, try fresh start
           if (this.reconnectAttempts < this.maxReconnectAttempts) {
             try {
-              await this.ensureCometRunning();
+              const comet = await this.ensureCometRunning();
               await new Promise((r) => setTimeout(r, 1500));
+              await this.browserConnection(comet);
               if ((await this.connectToReconnectTarget()) !== null) {
                 return await operation();
               }
@@ -672,12 +690,12 @@ export class CometCDPClient {
   }
 
   /**
-   * Comet answering on the configured port: found there, or launched when no
-   * Comet runs; its browser socket is where to connect. A Comet running
-   * without the port is reported, never restarted (principle 6): it holds
-   * the user's windows.
+   * Comet answering on the configured port or through its remote-debugging
+   * switch, or launched on the port when no Comet runs: where to connect,
+   * and how. A Comet running without either is reported, never restarted
+   * (principle 6): it holds the user's windows.
    */
-  private async ensureCometRunning(): Promise<BrowserEndpoint> {
+  private async ensureCometRunning(): Promise<ReachedComet> {
     const port = this.state.port;
     let comet: Awaited<ReturnType<typeof ensureCometOnPort>>;
     try {
@@ -689,12 +707,12 @@ export class CometCDPClient {
       );
     }
     if (comet.kind === "running-without-port") {
-      throw new CometRunsWithoutPort(port, comet.command);
+      throw new CometRunsWithoutPort(port, comet);
     }
     if (comet.kind === "launched") {
       await new Promise((resolve) => setTimeout(resolve, 2000));
     }
-    return comet.endpoint;
+    return comet;
   }
 
   /**
@@ -766,40 +784,66 @@ export class CometCDPClient {
     return (await this.browserConnection()).targets();
   }
 
+  /** The browser's version, asked over the browser connection. */
+  async browserVersion(): Promise<string> {
+    return (await this.browserConnection()).version();
+  }
+
+  /**
+   * Forgets Comet's refusal of remote debugging, so the next socket through
+   * its switch asks the user again: `comet_connect`, and nothing else.
+   */
+  askAgain(): void {
+    this.dialog.askAgain();
+  }
+
   /**
    * The browser connection: the one held, else the one being opened, else a
-   * new one on `endpoint`, or on the socket the configured port names. Only
-   * this opens a socket, and never a second while one is opening.
+   * new one to `comet`, or to the Comet found on the configured port or
+   * through its switch. Only this opens a socket, and never a second while
+   * one is opening, or pending on Comet's dialog.
    */
-  private browserConnection(
-    endpoint?: BrowserEndpoint,
-  ): Promise<BrowserConnection> {
+  private browserConnection(comet?: ReachedComet): Promise<BrowserConnection> {
     if (this.connection) return Promise.resolve(this.connection);
-    this.opening ??= this.openConnection(endpoint).finally(() => {
+    this.opening ??= this.openConnection(comet).finally(() => {
       this.opening = null;
     });
     return this.opening;
   }
 
+  /**
+   * Opens the socket. Through the switch, Comet asks the user first, so the
+   * dialog bounds the wait and remembers a refusal; through the flag, the
+   * socket opens as it always has.
+   */
   private async openConnection(
-    known?: BrowserEndpoint,
+    known?: ReachedComet,
   ): Promise<BrowserConnection> {
-    const endpoint = known ?? (await this.answeringEndpoint());
+    const comet = known ?? (await this.foundComet());
     // On WSL, check if we can connect directly (mirrored networking required)
-    const port = await getWSLConnectPort(endpoint.port);
-    const connection = await BrowserConnection.open({ ...endpoint, port });
+    const port = await getWSLConnectPort(comet.endpoint.port);
+    const endpoint = { ...comet.endpoint, port };
+    if (comet.kind === "switch") return this.dialog.open(endpoint);
+    return this.adopt(await BrowserConnection.open(endpoint));
+  }
+
+  /** Holds `connection` as the client's one socket. */
+  private adopt(connection: BrowserConnection): BrowserConnection {
     connection.onClose(() => this.connectionDropped(connection));
     this.connection = connection;
     return connection;
   }
 
-  /** The browser socket of the Comet answering on the configured port. */
-  private async answeringEndpoint(): Promise<BrowserEndpoint> {
+  /**
+   * The Comet answering on the configured port, or through its switch.
+   * Launches nothing: only a reconnect does.
+   */
+  private async foundComet(): Promise<FoundOnPort> {
     const port = this.state.port;
-    const comet = await this.launch.probe(port);
+    const comet = await findCometOnPort(this.launch, port);
     if (!comet)
       throw new Error(`Comet does not answer on the debug port ${port}`);
-    return comet.endpoint;
+    return comet;
   }
 
   /**
@@ -931,11 +975,15 @@ export class CometCDPClient {
     return session;
   }
 
-  /** Closes the browser socket: the servers' shutdown, and only that. */
+  /**
+   * Closes the browser socket, and a socket still pending on Comet's dialog
+   * as soon as it opens: the servers' shutdown, and only that.
+   */
   async disconnect(): Promise<void> {
     const connection = this.connection;
     this.forgetSession();
     this.connection = null;
+    this.dialog.abandon();
     await connection?.close();
   }
 

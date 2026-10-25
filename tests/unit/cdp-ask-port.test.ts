@@ -476,7 +476,7 @@ describe("createCdpAskCore", () => {
 
     expect(outcome).toMatchObject({
       kind: "failed",
-      message: `Failed to establish connection to Comet browser: ${describeRunningWithoutPort(9555, launch.startCommand(9555))}`,
+      message: `Failed to establish connection to Comet browser: ${describeRunningWithoutPort(9555, { command: launch.startCommand(9555), usesSwitch: launch.usesSwitch })}`,
     });
     expect(launch.launches).toEqual([]);
     expect(client.calls).toEqual(["preOperationCheck"]);

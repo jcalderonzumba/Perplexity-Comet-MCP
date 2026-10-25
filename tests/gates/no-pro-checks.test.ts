@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { ALLOW_DIALOG_BOUND_MS } from "../../src/browser-connection.js";
 import { ModeCore } from "../../src/core/mode.js";
 import { answerModeTool } from "../../src/core/mode-tool.js";
 import { wrapUntrustedPageContent } from "../../src/untrusted.js";
@@ -9,6 +10,7 @@ import {
   summaryLine,
 } from "../lib/battery-score.mjs";
 import {
+  connectCheck,
   connected,
   type DebugPort,
   hasScreenshot,
@@ -347,6 +349,17 @@ const SILENT: DebugPort = { port: 9223, answers: async () => false };
 
 const byId = (checks: readonly ScoredCheck[], id: string) =>
   checks.find((check) => check.id === id);
+
+describe("connectCheck [1.2]", () => {
+  it("gives connect 30 s plus the server's bound on Comet's allow dialog", async () => {
+    const limits: number[] = [];
+    await connectCheck(LISTENING).probe(async (_tool, _args, timeoutMs) => {
+      limits.push(timeoutMs);
+      return ok("Connected");
+    });
+    expect(limits).toEqual([30_000 + ALLOW_DIALOG_BOUND_MS]);
+  });
+});
 
 describe("runNoProBattery and the page's visibility", () => {
   /** A debug port whose page reads `state`, or fails to be read. */

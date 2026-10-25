@@ -35,6 +35,9 @@ type DomainHandlers = Record<string, Handler | undefined>;
  */
 export type PageHandlers = object;
 
+/** The product `Browser.getVersion` names. */
+export const FAKE_PRODUCT = "Chrome/155.0.8059.148";
+
 /** The page events a session can subscribe to; the rest are commands. */
 const PAGE_EVENTS = new Set(["Page.lifecycleEvent"]);
 
@@ -45,8 +48,45 @@ function withCategory<T extends object>(
   return Object.assign(member, { category });
 }
 
+/**
+ * Comet's allow-remote-debugging dialog for one socket: the socket opens on
+ * `allow()`, fails on `deny()`, and waits for ever until one of them.
+ */
+export class FakeDialog {
+  readonly answer: Promise<FakeBrowserSocket>;
+  private settle: { allow(): void; deny(): void } = {
+    allow: () => {},
+    deny: () => {},
+  };
+
+  constructor(readonly socket: FakeBrowserSocket) {
+    this.answer = new Promise((resolve, reject) => {
+      this.settle = {
+        allow: () => resolve(socket),
+        deny: () => {
+          socket.closed = true;
+          reject(new Error("WebSocket error before open"));
+        },
+      };
+    });
+  }
+
+  allow(): void {
+    this.settle.allow();
+  }
+
+  deny(): void {
+    this.settle.deny();
+  }
+}
+
 export class FakeBrowser {
+  /** Every socket opened, the ones still waiting on a dialog included. */
   readonly sockets: FakeBrowserSocket[] = [];
+  /** Set to make each new socket wait on a dialog, as the switch does. */
+  asking = false;
+  /** The dialog of each socket opened while `asking`, in order. */
+  readonly dialogs: FakeDialog[] = [];
   private readonly tabs = new Map<
     string,
     { tab: FakeTab; page: PageHandlers }
@@ -60,11 +100,17 @@ export class FakeBrowser {
     return browser;
   }
 
-  /** Opens a socket, as `CDP(options)` would. */
-  open(options: CDP.Options): FakeBrowserSocket {
+  /**
+   * Opens a socket, as `CDP(options)` would: at once, or once its dialog is
+   * answered while the browser is `asking`.
+   */
+  open(options: CDP.Options): FakeBrowserSocket | Promise<FakeBrowserSocket> {
     const socket = new FakeBrowserSocket(this, options);
     this.sockets.push(socket);
-    return socket;
+    if (!this.asking) return socket;
+    const dialog = new FakeDialog(socket);
+    this.dialogs.push(dialog);
+    return dialog.answer;
   }
 
   /** Adds a tab whose page domains answer through `page`. */
@@ -162,6 +208,13 @@ export class FakeBrowserSocket {
       return { windowId: this.windowOf(targetId) };
     }),
     setWindowBounds: this.command("Browser.setWindowBounds", () => ({})),
+    getVersion: this.command("Browser.getVersion", () => ({
+      protocolVersion: "1.3",
+      product: FAKE_PRODUCT,
+      revision: "@0",
+      userAgent: "Mozilla/5.0",
+      jsVersion: "15.5",
+    })),
   };
 
   readonly Page = this.pageDomain("Page");

@@ -1,10 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { CometCDPClient } from "../../src/cdp-client.js";
 import type { BrowserTarget } from "../../src/core/perplexity-tab.js";
-import { FakeBrowser } from "./fakes/fake-browser.js";
+import { FAKE_PRODUCT, FakeBrowser } from "./fakes/fake-browser.js";
 import { FakeCdpConnection } from "./fakes/fake-cdp-connection.js";
 import {
   answeringLaunch,
+  endpointOn,
   FAKE_BROWSER_PATH,
   type FakeCometLaunch,
 } from "./fakes/fake-comet-launch.js";
@@ -140,6 +141,33 @@ describe("CometCDPClient on one browser connection", () => {
     expect(await client.closeTab("gone")).toBe(false);
   });
 
+  it("asks the browser its version over the same socket", async () => {
+    await client.connect(MAIN_TAB.id);
+
+    expect(await client.browserVersion()).toBe(FAKE_PRODUCT);
+    expect(firstSocket().commands.at(-1)).toMatchObject({
+      method: "Browser.getVersion",
+      sessionId: undefined,
+    });
+    expect(browser.sockets).toHaveLength(1);
+  });
+
+  it("opens its socket through Comet's remote-debugging switch when the port does not answer, and launches nothing", async () => {
+    launch.answering = null;
+    launch.switchAt = endpointOn(9333);
+    launch.processRunning = true;
+
+    await client.listTargets();
+
+    expect(browser.sockets).toHaveLength(1);
+    expect(firstSocket().options).toEqual({
+      target: `ws://127.0.0.1:9333${FAKE_BROWSER_PATH}`,
+      local: true,
+    });
+    expect(launch.processChecks).toBe(0);
+    expect(launch.launches).toEqual([]);
+  });
+
   it("fails naming the port when Comet does not answer there, and opens no socket", async () => {
     launch.answering = null;
 
@@ -171,6 +199,43 @@ describe("CometCDPClient when the connected tab closes", () => {
 });
 
 describe("CometCDPClient when Comet drops the socket", () => {
+  it("reconnects through the switch on a socket of its own, never through the flag alone", async () => {
+    vi.useFakeTimers();
+    launch.answering = null;
+    launch.switchAt = endpointOn(9333);
+    await client.connect(MAIN_TAB.id);
+
+    firstSocket().drop();
+    const address = client.withAutoReconnect(() => client.pageAddress());
+    await vi.advanceTimersByTimeAsync(5000);
+
+    await expect(address).resolves.toBe(MAIN_TAB.url);
+    expect(browser.sockets).toHaveLength(2);
+    expect(browser.sockets[1]?.options).toEqual(firstSocket().options);
+  });
+
+  it("opens the last resort's socket where its own finding put it, without finding Comet again", async () => {
+    vi.useFakeTimers();
+    await client.connect(MAIN_TAB.id);
+    // Two opens fail, so the reconnect before the operation and the one
+    // after its failure both fail, and only the last resort is left.
+    let refusals = 2;
+    cdp.browser = {
+      open: (options) => {
+        if (refusals-- > 0) throw new Error("ECONNREFUSED");
+        return browser.open(options as never);
+      },
+    };
+    const probesBefore = launch.probes.length;
+
+    firstSocket().drop();
+    const address = client.withAutoReconnect(() => client.pageAddress());
+    await vi.advanceTimersByTimeAsync(10000);
+
+    await expect(address).resolves.toBe(MAIN_TAB.url);
+    expect(launch.probes.length - probesBefore).toBe(3);
+  });
+
   it("opens exactly one new socket for three operations at once", async () => {
     vi.useFakeTimers();
     await client.connect(MAIN_TAB.id);

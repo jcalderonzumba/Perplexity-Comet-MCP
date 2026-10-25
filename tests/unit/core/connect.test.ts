@@ -4,7 +4,7 @@ import {
   PerplexityTab,
   type TabMove,
 } from "../../../src/core/perplexity-tab.js";
-import { FakeCometLaunch } from "../fakes/fake-comet-launch.js";
+import { endpointOn, FakeCometLaunch } from "../fakes/fake-comet-launch.js";
 import {
   FakeTabPort,
   LOOKALIKE_TAB,
@@ -25,6 +25,21 @@ function tabsThatMove(move: TabMove) {
   };
 }
 
+/** The browser behind the connection, recording each time it is asked. */
+function browserOf(version: string) {
+  const asked: string[] = [];
+  return {
+    asked,
+    version: async () => {
+      asked.push("version");
+      return version;
+    },
+  };
+}
+
+/** The client's memory of Comet's dialog, which these tests leave alone. */
+const debugging = { askAgain: () => {} };
+
 const STAYED_LINE =
   "Connected to Perplexity's main page: the connection was already on it.";
 const MOVED_LINE =
@@ -37,8 +52,15 @@ describe("answerConnect", () => {
     const launch = new FakeCometLaunch();
     launch.answering = "Comet/140.0";
     const tabs = tabsThatMove("stayed");
+    const browser = browserOf("unused");
 
-    const reply = await answerConnect({ launch, port: 9222, tabs });
+    const reply = await answerConnect({
+      launch,
+      port: 9222,
+      tabs,
+      browser,
+      debugging,
+    });
 
     expect(reply).toEqual({
       kind: "text",
@@ -46,13 +68,45 @@ describe("answerConnect", () => {
       isError: false,
     });
     expect(launch.launches).toEqual([]);
+    expect(browser.asked).toEqual([]);
+  });
+
+  it("names the switch and the file's port, with the version the connection gives, when Comet is found through its switch", async () => {
+    const launch = new FakeCometLaunch();
+    launch.switchAt = endpointOn(9333);
+    launch.processRunning = true;
+    const tabs = tabsThatMove("moved");
+    const browser = browserOf("Chrome/155.0.8059.148");
+
+    const reply = await answerConnect({
+      launch,
+      port: 9222,
+      tabs,
+      browser,
+      debugging,
+    });
+
+    expect(reply).toEqual({
+      kind: "text",
+      text: `Comet is running with its remote-debugging switch on port 9333 (Chrome/155.0.8059.148).\n${MOVED_LINE}`,
+      isError: false,
+    });
+    expect(launch.launches).toEqual([]);
+    expect(browser.asked).toEqual(["version"]);
+    expect(tabs.calls).toEqual(["bringToMainPage"]);
   });
 
   it("launches Comet on the configured port when none runs, and says so", async () => {
     const launch = new FakeCometLaunch();
     const tabs = tabsThatMove("stayed");
 
-    const reply = await answerConnect({ launch, port: 9555, tabs });
+    const reply = await answerConnect({
+      launch,
+      port: 9555,
+      tabs,
+      browser: browserOf("unused"),
+      debugging,
+    });
 
     expect(launch.launches).toEqual([9555]);
     expect(reply).toEqual({
@@ -67,13 +121,22 @@ describe("answerConnect", () => {
     launch.processRunning = true;
     const tabs = tabsThatMove("stayed");
 
-    const reply = await answerConnect({ launch, port: 9222, tabs });
+    const reply = await answerConnect({
+      launch,
+      port: 9222,
+      tabs,
+      browser: browserOf("unused"),
+      debugging,
+    });
 
     expect(reply.kind).toBe("text");
     if (reply.kind !== "text") return;
     expect(reply.isError).toBe(true);
     expect(reply.text).toContain("not with the debug port 9222");
     expect(reply.text).toContain("comet --remote-debugging-port=9222");
+    expect(reply.text).toContain(
+      "Or, without restarting Comet: open comet://inspect/#remote-debugging in Comet and turn remote debugging on.",
+    );
     expect(launch.launches).toEqual([]);
     expect(tabs.calls).toEqual([]);
   });
@@ -83,7 +146,13 @@ describe("answerConnect", () => {
     launch.launchFailure = new Error("Comet did not answer within 20s");
     const tabs = tabsThatMove("stayed");
 
-    const reply = await answerConnect({ launch, port: 9222, tabs });
+    const reply = await answerConnect({
+      launch,
+      port: 9222,
+      tabs,
+      browser: browserOf("unused"),
+      debugging,
+    });
 
     expect(reply.kind).toBe("text");
     if (reply.kind !== "text") return;
@@ -94,6 +163,28 @@ describe("answerConnect", () => {
     expect(tabs.calls).toEqual([]);
   });
 
+  it("asks again through Comet's dialog before anything else, so a refusal remembered is forgotten", async () => {
+    const launch = new FakeCometLaunch();
+    launch.switchAt = endpointOn(9333);
+    const tabs = tabsThatMove("stayed");
+    const seenAtAskAgain: number[] = [];
+
+    await answerConnect({
+      launch,
+      port: 9222,
+      tabs,
+      browser: browserOf("unused"),
+      debugging: {
+        askAgain: () => {
+          seenAtAskAgain.push(launch.probes.length, tabs.calls.length);
+        },
+      },
+    });
+
+    expect(seenAtAskAgain).toEqual([0, 0]);
+    expect(tabs.calls).toEqual(["bringToMainPage"]);
+  });
+
   it("carries a word the no-pro battery reads: connected, started or running", async () => {
     const launch = new FakeCometLaunch();
     launch.answering = "Comet/140.0";
@@ -102,6 +193,8 @@ describe("answerConnect", () => {
       launch,
       port: 9222,
       tabs: tabsThatMove("stayed"),
+      browser: browserOf("unused"),
+      debugging,
     });
 
     expect(JSON.stringify(reply)).toMatch(/connected|started|running/i);
@@ -113,7 +206,17 @@ describe("answerConnect's tab choice", () => {
     const launch = new FakeCometLaunch();
     launch.answering = "Comet/140.0";
     const tabs = new PerplexityTab(port);
-    return { tabs, run: () => answerConnect({ launch, port: 9222, tabs }) };
+    return {
+      tabs,
+      run: () =>
+        answerConnect({
+          launch,
+          port: 9222,
+          tabs,
+          browser: browserOf("unused"),
+          debugging,
+        }),
+    };
   }
 
   function lastLine(reply: Awaited<ReturnType<typeof answerConnect>>): string {

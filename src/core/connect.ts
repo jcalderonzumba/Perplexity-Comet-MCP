@@ -1,11 +1,14 @@
-// The `comet_connect` tool: get Comet onto the configured debug port, then
-// put the connection on Perplexity. Comet is launched only when none runs;
-// a Comet running without the port is reported with the command that starts
-// it right, never restarted (principle 6, D29). The reply names the port.
+// The `comet_connect` tool: find Comet on the configured debug port or
+// through its remote-debugging switch, else launch it on the port, then put
+// the connection on Perplexity. Comet is launched only when none runs; a
+// Comet running without either is reported with the command that starts it
+// right, never restarted (principle 6, D29). The reply names how it
+// connected: the flag on its port, or the switch on its file's port.
 
 import { errorMessage } from "../error-message.js";
 import {
   type CometLaunch,
+  type CometOnPort,
   describeRunningWithoutPort,
   ensureCometOnPort,
 } from "./comet-launch.js";
@@ -21,33 +24,53 @@ export interface ConnectTabs {
   bringToMainPage(): Promise<TabMove>;
 }
 
+/** The browser at the other end of the connection. */
+export interface ConnectedBrowser {
+  /** Its version, asked over the connection. */
+  version(): Promise<string>;
+}
+
+/** The client's memory of Comet's allow-remote-debugging dialog. */
+export interface RemoteDebuggingDialog {
+  /** Forgets a refusal, so the next socket through the switch asks again. */
+  askAgain(): void;
+}
+
 export interface ConnectDeps {
   readonly launch: CometLaunch;
   /** The configured debug port. */
   readonly port: number;
   readonly tabs: ConnectTabs;
+  readonly browser: ConnectedBrowser;
+  readonly debugging: RemoteDebuggingDialog;
 }
 
-/** Answers `comet_connect`. */
+type ConnectedComet = Exclude<CometOnPort, { kind: "running-without-port" }>;
+
+/**
+ * Answers `comet_connect`. It always asks again: it is the one call that
+ * may put Comet's dialog back on the user's screen after a refusal.
+ */
 export async function answerConnect({
   launch,
   port,
   tabs,
+  browser,
+  debugging,
 }: ConnectDeps): Promise<ToolReply> {
-  let stateLine: string;
+  debugging.askAgain();
+  let comet: ConnectedComet;
   try {
-    const comet = await ensureCometOnPort(launch, port);
-    if (comet.kind === "running-without-port") {
-      return errorReply(describeRunningWithoutPort(port, comet.command));
+    const found = await ensureCometOnPort(launch, port);
+    if (found.kind === "running-without-port") {
+      return errorReply(describeRunningWithoutPort(port, found));
     }
-    stateLine =
-      comet.kind === "answering"
-        ? running(port, comet.browser)
-        : started(port, comet.browser);
+    comet = found;
   } catch (failure) {
     return errorReply(launchFailed(port, launch, failure));
   }
-  return textReply(`${stateLine}\n${TAB_LINES[await tabs.bringToMainPage()]}`);
+  const tabLine = TAB_LINES[await tabs.bringToMainPage()];
+  return textReply(`${await stateLine(comet, port, browser)}\n${tabLine}`);
 }
 
 const TAB_LINES: Record<TabMove, string> = {
@@ -58,12 +81,23 @@ const TAB_LINES: Record<TabMove, string> = {
   opened: "Connected to Perplexity's main page: opened it in a new tab.",
 };
 
-function running(port: number, browser: string): string {
-  return `Comet is running with the debug port ${port} (${browser}).`;
-}
-
-function started(port: number, browser: string): string {
-  return `Started Comet with the debug port ${port} (${browser}).`;
+/**
+ * How Comet was reached. The switch's file names no version, so it is asked
+ * over the connection the tab choice has opened.
+ */
+async function stateLine(
+  comet: ConnectedComet,
+  port: number,
+  browser: ConnectedBrowser,
+): Promise<string> {
+  switch (comet.kind) {
+    case "answering":
+      return `Comet is running with the debug port ${port} (${comet.browser}).`;
+    case "launched":
+      return `Started Comet with the debug port ${port} (${comet.browser}).`;
+    case "switch":
+      return `Comet is running with its remote-debugging switch on port ${comet.endpoint.port} (${await browser.version()}).`;
+  }
 }
 
 function launchFailed(

@@ -4,7 +4,8 @@
  * Development), scores each check against the Pro battery's own known
  * failures, and exits non-zero when the battery fails. Spends Perplexity Pro
  * queries. Comet must already answer on the server's port (COMET_PORT, 9223
- * by default): otherwise no tool is called.
+ * by default), or, on macOS, through its remote-debugging switch: otherwise
+ * no tool is called.
  * Usage: npm run test:live:pro
  */
 

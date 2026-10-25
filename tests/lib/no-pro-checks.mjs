@@ -12,6 +12,7 @@ import {
   runCheck,
   scoreCheck,
 } from "./battery-score.mjs";
+import { ALLOW_DIALOG_BOUND_MS } from "./server-under-test.mjs";
 
 /** @typedef {import("./battery-score.mjs").ProbeOutcome} ProbeOutcome */
 /** @typedef {import("./battery-score.mjs").ScoredCheck} ScoredCheck */
@@ -28,9 +29,10 @@ import {
 /** @typedef {{ id: string, probe: (callTool: CallTool) => Promise<ProbeOutcome> }} NoProCheck */
 
 /**
- * The debug port the server under test uses, whether Comet answers on it,
- * and, when the battery can ask, the `document.visibilityState` of Comet's
- * main Perplexity page (undefined when there is none).
+ * The debug port the server under test uses, whether Comet answers on it or
+ * through its remote-debugging switch, and, when the battery can ask, the
+ * `document.visibilityState` of Comet's main Perplexity page (undefined when
+ * there is none).
  * @typedef {{ port: number, answers: () => Promise<boolean>, pageVisibility?: () => Promise<string | undefined> }} DebugPort
  */
 
@@ -230,17 +232,29 @@ function modeSwitch(mode) {
 }
 
 /**
- * [1.2]: Comet already answers on the server's debug port, and connect
- * succeeds. Without the port, no tool is called: connect would launch Comet.
- * Both batteries start with it.
+ * Connect's limit: its own 30 s, plus the time the server waits for the user
+ * to answer Comet's allow dialog when it connects through the switch.
+ */
+const CONNECT_CALL_MS = 30_000 + ALLOW_DIALOG_BOUND_MS;
+
+/**
+ * [1.2]: Comet already answers on the server's debug port, or through its
+ * remote-debugging switch, and connect succeeds. Without either, no tool is
+ * called: connect would launch Comet. Both batteries start with it.
  * @param {DebugPort} debugPort
  * @returns {NoProCheck}
  */
 export function connectCheck(debugPort) {
-  const connect = singleCall("1.2", "comet_connect", {}, 30000, (reply) => ({
-    held: connected(reply),
-    note: excerpt(reply, 80),
-  }));
+  const connect = singleCall(
+    "1.2",
+    "comet_connect",
+    {},
+    CONNECT_CALL_MS,
+    (reply) => ({
+      held: connected(reply),
+      note: excerpt(reply, 80),
+    }),
+  );
   return {
     id: connect.id,
     probe: async (callTool) =>

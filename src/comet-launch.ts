@@ -1,8 +1,10 @@
-// Launching Comet with its debug port, per platform: macOS and Linux run the
-// Comet binary, Windows runs comet.exe, and WSL starts comet.exe on the
-// Windows side through PowerShell. This is the code that meets the operating
-// system, so everything it needs of the host comes in through `LaunchHost`
-// and each platform's branch is tested with a stub of it.
+// Finding and launching Comet with its debug port, per platform: macOS and
+// Linux run the Comet binary, Windows runs comet.exe, and WSL starts
+// comet.exe on the Windows side through PowerShell. On macOS, a Comet with
+// its remote-debugging switch on is found through the `DevToolsActivePort`
+// file it writes in its profile directory. This is the code that meets the
+// operating system, so everything it needs of the host comes in through
+// `LaunchHost` and each platform's branch is tested with a stub of it.
 //
 // It implements `CometLaunch` (`core/comet-launch.ts`), which has no way to
 // stop a process: Comet is the user's browser, and nothing here or anywhere
@@ -10,8 +12,16 @@
 
 import { execSync, spawn } from "node:child_process";
 import { existsSync } from "node:fs";
-import { platform } from "node:os";
-import { type BrowserPath, parseBrowserPath } from "./browser-connection.js";
+import { lstat, readFile } from "node:fs/promises";
+import { connect } from "node:net";
+import { homedir, platform } from "node:os";
+import { join } from "node:path";
+import {
+  type BrowserEndpoint,
+  type BrowserPath,
+  parseBrowserPath,
+  parseDevToolsActivePort,
+} from "./core/browser-endpoint.js";
 import type { CometLaunch, FoundComet } from "./core/comet-launch.js";
 import {
   IS_WINDOWS,
@@ -41,6 +51,15 @@ export interface LaunchHost {
   /** The Windows user's %LOCALAPPDATA%, read from WSL; undefined if unreadable. */
   windowsLocalAppData(): string | undefined;
   wait(ms: number): Promise<void>;
+  /** Whether Comet's remote-debugging switch is looked for here: macOS only. */
+  readonly usesSwitch: boolean;
+  /**
+   * The text of Comet's `DevToolsActivePort`; null when there is none to
+   * read, and on every platform but macOS. Never reaches a reply or a log.
+   */
+  readDevToolsActivePort(): Promise<string | null>;
+  /** Whether something accepts a TCP connection on `127.0.0.1:<port>`. */
+  listensOnLoopback(port: number): Promise<boolean>;
 }
 
 /** How long a launched Comet is given to answer on its port. */
@@ -74,6 +93,10 @@ export function createCometLaunch(host: LaunchHost): CometLaunch {
 class PlatformCometLaunch implements CometLaunch {
   constructor(private readonly host: LaunchHost) {}
 
+  get usesSwitch(): boolean {
+    return this.host.usesSwitch;
+  }
+
   async probe(port: number): Promise<FoundComet | null> {
     try {
       const response = await this.host.fetch(
@@ -84,6 +107,13 @@ class PlatformCometLaunch implements CometLaunch {
     } catch {
       return null;
     }
+  }
+
+  async switchEndpoint(): Promise<BrowserEndpoint | null> {
+    const text = await this.host.readDevToolsActivePort();
+    const endpoint = text === null ? null : parseDevToolsActivePort(text);
+    if (endpoint === null) return null;
+    return (await this.host.listensOnLoopback(endpoint.port)) ? endpoint : null;
   }
 
   async isProcessRunning(): Promise<boolean> {
@@ -244,6 +274,76 @@ function spawnDetached(command: string, args: string[]): Promise<void> {
   });
 }
 
+/** The part of the filesystem `readDevToolsActivePort` reads through. */
+export interface ActivePortFiles {
+  lstat(path: string): Promise<{ isFile(): boolean; size: number }>;
+  readFile(path: string): Promise<Buffer>;
+}
+
+/** Larger than any `DevToolsActivePort` Comet writes. */
+const ACTIVE_PORT_MAX_BYTES = 1024;
+
+/**
+ * Where Comet writes `DevToolsActivePort` with its remote-debugging switch
+ * on, on the one platform the switch is used on: macOS. Null elsewhere.
+ */
+export function devToolsActivePortPath(
+  os: NodeJS.Platform,
+  wsl: boolean,
+  home: string,
+): string | null {
+  if (os !== "darwin" || wsl) return null;
+  return join(
+    home,
+    "Library",
+    "Application Support",
+    "Comet",
+    "DevToolsActivePort",
+  );
+}
+
+/**
+ * The text of the file at `path`, read-only; null when there is no path, or
+ * the file is absent, unreadable, not a regular file (a symlink included)
+ * or larger than 1 KiB.
+ */
+export async function readDevToolsActivePort(
+  path: string | null,
+  files: ActivePortFiles = { lstat, readFile },
+): Promise<string | null> {
+  if (path === null) return null;
+  try {
+    const entry = await files.lstat(path);
+    if (!entry.isFile() || entry.size > ACTIVE_PORT_MAX_BYTES) return null;
+    const content = await files.readFile(path);
+    if (content.byteLength > ACTIVE_PORT_MAX_BYTES) return null;
+    return content.toString("utf8");
+  } catch {
+    return null;
+  }
+}
+
+/** How long a TCP connection to the switch's port is given. */
+const LOOPBACK_CONNECT_MS = 1000;
+
+/**
+ * Whether something accepts a TCP connection on `127.0.0.1:<port>`: a plain
+ * connect, closed at once, with no WebSocket, so Comet asks the user nothing.
+ */
+export function listensOnLoopback(port: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const socket = connect({ host: "127.0.0.1", port });
+    const settle = (listening: boolean) => {
+      socket.destroy();
+      resolve(listening);
+    };
+    socket.setTimeout(LOOPBACK_CONNECT_MS);
+    socket.once("connect", () => settle(true));
+    socket.once("error", () => settle(false));
+    socket.once("timeout", () => settle(false));
+  });
+}
+
 function windowsLocalAppData(): string | undefined {
   try {
     return execSync("cmd.exe /c echo %LOCALAPPDATA%", { encoding: "utf8" })
@@ -254,6 +354,8 @@ function windowsLocalAppData(): string | undefined {
   }
 }
 
+const activePortPath = devToolsActivePortPath(platform(), IS_WSL, homedir());
+
 /** The launch on the machine this server runs on. */
 export const systemCometLaunch: CometLaunch = createCometLaunch({
   platform: detectPlatform(),
@@ -263,4 +365,7 @@ export const systemCometLaunch: CometLaunch = createCometLaunch({
   spawnDetached,
   windowsLocalAppData,
   wait: (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+  usesSwitch: activePortPath !== null,
+  readDevToolsActivePort: () => readDevToolsActivePort(activePortPath),
+  listensOnLoopback,
 });
