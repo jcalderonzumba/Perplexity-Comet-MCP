@@ -9,6 +9,7 @@
 
 import { errorMessage } from "../error-message.js";
 import { PERPLEXITY_HOME } from "../perplexity-pages.js";
+import { RemoteDebuggingNotAllowed } from "./comet-launch.js";
 import {
   type BrowserTarget,
   isMainPageTarget,
@@ -66,7 +67,11 @@ export class AskTab {
     try {
       await this.port.preOperationCheck();
       return { connected: true };
-    } catch {
+    } catch (error) {
+      // Comet's dialog waits for the user: a recovery would only wait again.
+      if (error instanceof RemoteDebuggingNotAllowed) {
+        return { connected: false, cause: error.message };
+      }
       // The connection is gone: start Comet, or find it, and reconnect.
     }
     try {

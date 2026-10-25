@@ -214,6 +214,7 @@ describe("the launch's remote-debugging switch", () => {
       port: 9222,
       tabs: { bringToMainPage: async () => "stayed" },
       browser: { version: async () => "unused" },
+      debugging: { askAgain: () => {} },
     });
 
     expect(reply).toMatchObject({ kind: "text", isError: true });

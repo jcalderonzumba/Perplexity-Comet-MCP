@@ -103,7 +103,7 @@ claude mcp add -s user comet-bridge -e COMET_PORT=9222 -- \
 
 `claude mcp get comet-bridge` shows what it runs. When nothing answers on that port and no Comet runs, `comet_connect` starts Comet with remote debugging on it. If Comet is already running without the port, `comet_connect` leaves it alone and fails, naming the port and the command that starts Comet with it: quit Comet, run that command, and connect again.
 
-On macOS there is a way that needs no restart: Comet's remote-debugging switch. Open `comet://inspect/#remote-debugging` in Comet and turn remote debugging on; Comet keeps the choice, and from then on the server finds the Comet you open from the Dock, with no flag, when nothing answers on `COMET_PORT`. With the switch, Comet asks you to allow each new debugging connection in a dialog of its own: click Allow when you have just asked the server for something.
+On macOS there is a way that needs no restart: Comet's remote-debugging switch. Open `comet://inspect/#remote-debugging` in Comet and turn remote debugging on; Comet keeps the choice, and from then on the server finds the Comet you open from the Dock, with no flag, when nothing answers on `COMET_PORT`. With the switch, Comet asks you to allow each new debugging connection in a dialog of its own. Click Allow only when you have just asked the server for something: any program on your Mac can make Comet show the same dialog. The server opens one connection and keeps it, so it asks once per server process, and once more only when Comet drops the connection.
 
 To move a pinned `comet-bridge` to a newer commit, run this from a clone of this repository:
 
@@ -169,6 +169,14 @@ Or, without restarting Comet: open comet://inspect/#remote-debugging in Comet an
 
 On Windows, Linux and WSL the last line is left out: the server looks for the switch on macOS only.
 
+**Comet's dialog, with the switch.** A call that needs the connection waits up to 30 seconds for you to answer Comet's dialog, under the 60-second default request timeout of a client built on the MCP TypeScript SDK, so you get the server's words, not a client timeout:
+
+- **Allow:** the call goes on.
+- **Deny:** the call fails with `Comet refused remote debugging: its dialog was answered Deny. Call comet_connect to ask again, then click Allow in Comet.` The server remembers it: until `comet_connect`, every tool that needs Comet fails with those words, and none of them opens a connection, so no dialog comes back however often an agent retries. `comet_connect` always asks again.
+- **No answer within 30 seconds:** the call fails with `Comet is asking to allow remote debugging: click Allow in Comet's dialog, then call the tool again.` The server keeps that connection waiting rather than closing it, since Comet leaves its dialog on screen either way, and opens no other while it waits: a later Allow on that same dialog lets the next call through, and a later Deny counts as a refusal.
+
+With the flag, none of this applies: Comet shows no dialog.
+
 ---
 
 ### comet_ask
@@ -196,7 +204,7 @@ When `comet_stop` stops the task while the ask waits for its answer, or a newer 
 
 The timeout counts from the moment the ask starts waiting: for an answer still in progress that the server did not start, then for its own, and the time spent on the first is taken from the second. When it runs out before Comet has finished, the result is not the answer and says so: its first line reads `The answer may be incomplete: this ask's <timeout> ms ran out before Comet finished answering.`, then come the page's status, the partial answer so far (or `No answer text yet.`) and the steps seen, all page text wrapped, and a last line saying the task is still active, so `comet_poll` can follow the answer until it is complete, or `comet_stop` cancel it. Over the HTTP bridge this is a successful call (`success: true`) whose `content` carries that text.
 
-The arguments are checked before anything reaches the browser. An empty prompt is refused, and so are a `prompt` or `context` that is not text, a `timeout` that is not a positive number of milliseconds (text, a negative number), and a `newChat` that is not `true` or `false`; an absent or zero `timeout` means the default, and a numeric string its number. A refusal, or an ask that fails, is an error result starting `Error:` (`isError` over stdio, `success: false` over the HTTP bridge). When the connection to Comet is lost, the ask starts Comet, or finds it running, on the debug port `COMET_PORT` names, and reconnects. When it cannot, the error says why after `Failed to establish connection to Comet browser:`; for a Comet running without the debug port, that is the port and the command that starts Comet with it.
+The arguments are checked before anything reaches the browser. An empty prompt is refused, and so are a `prompt` or `context` that is not text, a `timeout` that is not a positive number of milliseconds (text, a negative number), and a `newChat` that is not `true` or `false`; an absent or zero `timeout` means the default, and a numeric string its number. A refusal, or an ask that fails, is an error result starting `Error:` (`isError` over stdio, `success: false` over the HTTP bridge). When the connection to Comet is lost, the ask starts Comet, or finds it running, on the debug port `COMET_PORT` names, and reconnects. When it cannot, the error says why after `Failed to establish connection to Comet browser:`; for a Comet running without the debug port, that is the port and the command that starts Comet with it, and with Comet's remote-debugging switch, a refused or unanswered dialog's words (see `comet_connect`), with no second try.
 
 Comet's window does not need to be in front, or to have focus: an MCP client normally drives it from behind other windows. The prompt is typed and submitted with the browser's own input, sent through the DevTools protocol rather than made up in page script. The ask selects Perplexity's input bar, inserts the prompt there, and reads the field back to check it holds the prompt; then it presses Enter, and when Enter has not sent the prompt within a few seconds, it clicks the input bar's Submit button. A prompt counts as sent once the field empties or the page shows a new turn of the thread, its question, which Perplexity shows at once. The browser takes the inserted text in a tab that is hidden, one not selected in its window, but drops key presses and clicks there, and may do the same for the selected tab of a window behind others; so for the submit alone the ask has the browser treat the tab as focused and visible (the DevTools protocol's focus emulation), and turns that off again once the prompt is sent or the submit has failed; Comet's window is never raised or brought to the front. The text, the key press, the click and the focus emulation are sent only while the browser reports the tab on `https://www.perplexity.ai`. When a step fails, the ask stops before waiting for an answer, and its error names the step: `The prompt was not sent: the input bar was not found on the page`, `The prompt was not sent: the text was not taken, …` (the field reads back empty, or holds other text), or `The prompt was not sent: the submit was not taken, …`. A `comet_poll` after such a failure, or after an ask that could not reach Comet at all, reports `Status: IDLE` and says the last task's prompt was not sent, whatever the page shows.
 
@@ -434,7 +442,7 @@ File uploaded successfully: /home/user/doc.pdf
 | `index.ts`, `stdio-server.ts` | The stdio MCP server: it lists the tool table's tools and answers each call through the table |
 | `http-bridge.ts`, `bridge-server.ts` | The HTTP bridge: the token, CORS and routes over the same table (`GET /tools` lists each tool's description and input schema; `GET /health` reports the package's version) |
 | `cdp-tools.ts` | Builds the tool table over the CDP client: what each tool does when it is called |
-| `cdp-client.ts`, `browser-connection.ts` | The Chrome DevTools Protocol client: one WebSocket to Comet's browser, the tab it drives attached as a session on it, tabs listed, opened and closed through the protocol, and reconnection |
+| `cdp-client.ts`, `browser-connection.ts` | The Chrome DevTools Protocol client: one WebSocket to Comet's browser, the tab it drives attached as a session on it, tabs listed, opened and closed through the protocol, and reconnection, and, through Comet's remote-debugging switch, the wait for its allow dialog and the refusal it remembers |
 | `comet-launch.ts`, `host-platform.ts` | Finding and launching Comet on its debug port on macOS, Linux, Windows and WSL, finding it through its remote-debugging switch's `DevToolsActivePort` file on macOS, and what the host is (WSL detection, the fetch that reaches Windows from WSL). Nothing in the server can stop or restart Comet |
 | `core/` | The tool core both servers share: the tool table (`core/tools.ts`) and the one reply type (`core/tool-reply.ts`), `comet_connect` (`core/connect.ts` over the launch port in `core/comet-launch.ts`, with where Comet's browser socket is, and the parsers that say so, in `core/browser-endpoint.ts`), `comet_screenshot`, `comet_ask`, `comet_poll` and `comet_stop`, with typing and submitting the prompt in `core/ask-send.ts`, when an answer is complete and the ask's own in `core/answer-watch.ts`, stopping it in `core/ask-stop.ts`, and the tab they use in `core/ask-tab.ts` and `core/perplexity-tab.ts`, `comet_mode`, `comet_tabs` (`core/tabs.ts`: which tabs there are, and closing only by the record of the tabs the server opened), and `comet_upload` (`core/upload.ts`: the checks in one order, then a file attached through the protocol) |
 | `perplexity-pages.ts` | Perplexity's origin and home page, the one rule that says which tab is Perplexity's main page, and which pages are Perplexity's site |
@@ -477,6 +485,18 @@ export COMET_PATH=/custom/path/to/Comet.app/Contents/MacOS/Comet
 4. Otherwise run `comet_connect`, which starts Comet with the port when none is running
 
 A `DevToolsActivePort` file Comet left behind when it quit, or one that is not Comet's, is ignored: the server connects only to `127.0.0.1`, on a port and a browser path it checks, and falls back to the rules above.
+
+---
+
+**Problem:** `Comet is asking to allow remote debugging: click Allow in Comet's dialog, then call the tool again.`
+
+**Solution:** Comet, opened with its remote-debugging switch on, is showing its dialog and nobody answered it within 30 seconds. Click Allow in Comet, then call the tool again; the server is still waiting on that dialog and opens no other.
+
+---
+
+**Problem:** `Comet refused remote debugging: its dialog was answered Deny. Call comet_connect to ask again, then click Allow in Comet.`
+
+**Solution:** Comet's dialog was answered Deny, and the server opens no connection through the switch until you ask again. Run `comet_connect`, then click Allow in the dialog Comet shows.
 
 ---
 

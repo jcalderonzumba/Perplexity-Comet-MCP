@@ -84,6 +84,8 @@ export class FakeAskPort extends FakeTabPort implements AskPort {
   public readonly inputBar = new FakeInputBar();
 
   public preCheckFails = false;
+  /** What the connection check throws when it fails. */
+  public preCheckFailure: Error = new Error("WebSocket is not open");
   public recoveryFails = false;
   public navigationFails = false;
   /** Runs on every navigation, as a real one resets the page's mode. */
@@ -117,7 +119,7 @@ export class FakeAskPort extends FakeTabPort implements AskPort {
 
   async preOperationCheck(): Promise<void> {
     this.calls.push("preOperationCheck");
-    if (this.preCheckFails) throw new Error("WebSocket is not open");
+    if (this.preCheckFails) throw this.preCheckFailure;
   }
 
   async startComet(port: number): Promise<string> {

@@ -80,6 +80,31 @@ export class CometRunsWithoutPort extends Error {
 }
 
 /**
+ * Comet's dialog stands between the server and its remote-debugging switch:
+ * the user refused it, or has not answered it yet.
+ */
+export class RemoteDebuggingNotAllowed extends Error {
+  private constructor(message: string) {
+    super(message);
+    this.name = "RemoteDebuggingNotAllowed";
+  }
+
+  /** Remembered until `comet_connect` asks again. */
+  static refused(): RemoteDebuggingNotAllowed {
+    return new RemoteDebuggingNotAllowed(
+      "Comet refused remote debugging: its dialog was answered Deny. Call comet_connect to ask again, then click Allow in Comet.",
+    );
+  }
+
+  /** The dialog is still on screen, its socket kept pending. */
+  static asking(): RemoteDebuggingNotAllowed {
+    return new RemoteDebuggingNotAllowed(
+      "Comet is asking to allow remote debugging: click Allow in Comet's dialog, then call the tool again.",
+    );
+  }
+}
+
+/**
  * Comet answering on `port` with the flag, else through its remote-debugging
  * switch; null when neither. Launches nothing.
  */

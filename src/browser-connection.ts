@@ -10,10 +10,14 @@
  * A session binds the client's own domain methods to its session id without
  * naming any of them, so every page script still runs from a visible
  * `Runtime.evaluate` call site in `src/cdp-client.ts` (boundary 3).
+ *
+ * Through Comet's remote-debugging switch, Comet asks the user to allow each
+ * new socket: `AllowDialog` bounds that wait and remembers a refusal.
  */
 
 import CDP from "chrome-remote-interface";
 import type { BrowserEndpoint } from "./core/browser-endpoint.js";
+import { RemoteDebuggingNotAllowed } from "./core/comet-launch.js";
 import type { CDPTarget } from "./types.js";
 
 type PageDomainName =
@@ -235,4 +239,98 @@ export class BrowserConnection {
     this.sessions.get(sessionId)?.markLost();
     this.sessions.delete(sessionId);
   }
+}
+
+/**
+ * How long a call waits for the user to answer Comet's allow dialog: under
+ * the MCP TypeScript SDK's 60 s default request timeout, so the user gets
+ * the server's words rather than the client's timeout.
+ */
+export const ALLOW_DIALOG_BOUND_MS = 30_000;
+
+/**
+ * Comet's allow-remote-debugging dialog, which every socket opened through
+ * its switch puts on the user's screen. Deny fails the socket at once, and
+ * the refusal is remembered until `askAgain`. A dialog nobody answers never
+ * answers, so a call waits up to the bound, and the socket stays pending for
+ * the calls after it: closing it would leave the dialog on screen, and a new
+ * socket would open a second one. No call opens a socket while one is
+ * pending; whatever the user answers later is recorded, whether or not a
+ * call is waiting.
+ */
+export class AllowDialog {
+  private refused = false;
+  private pending: Promise<BrowserConnection> | null = null;
+
+  /** `allowed` takes each connection the user allows. */
+  constructor(
+    private readonly allowed: (connection: BrowserConnection) => void,
+  ) {}
+
+  /** Forgets a refusal, so the next socket asks the user again. */
+  askAgain(): void {
+    this.refused = false;
+  }
+
+  /**
+   * The connection to `endpoint` once the user allows it, through the
+   * socket pending if there is one, else a new one; waits up to the bound.
+   */
+  open(endpoint: BrowserEndpoint): Promise<BrowserConnection> {
+    if (this.refused) {
+      return Promise.reject(RemoteDebuggingNotAllowed.refused());
+    }
+    this.pending ??= this.ask(endpoint);
+    return withinBound(this.pending);
+  }
+
+  /** Leaves the socket pending: closed as soon as it opens, and forgotten. */
+  abandon(): void {
+    this.pending = null;
+  }
+
+  private ask(endpoint: BrowserEndpoint): Promise<BrowserConnection> {
+    const answer: Promise<BrowserConnection> = BrowserConnection.open(
+      endpoint,
+    ).then(
+      (connection) => this.answeredAllow(answer, connection),
+      () => this.answeredDeny(answer),
+    );
+    return answer;
+  }
+
+  private answeredAllow(
+    answer: Promise<BrowserConnection>,
+    connection: BrowserConnection,
+  ): BrowserConnection {
+    if (this.pending !== answer) {
+      connection.close().catch(() => {});
+      throw new Error("The server closed its connection to Comet");
+    }
+    this.pending = null;
+    this.allowed(connection);
+    return connection;
+  }
+
+  private answeredDeny(answer: Promise<BrowserConnection>): never {
+    if (this.pending === answer) {
+      this.pending = null;
+      this.refused = true;
+    }
+    throw RemoteDebuggingNotAllowed.refused();
+  }
+}
+
+/** `answer`, or the dialog's waiting words once the bound has passed. */
+function withinBound(
+  answer: Promise<BrowserConnection>,
+): Promise<BrowserConnection> {
+  let timer: NodeJS.Timeout | undefined;
+  const bound = new Promise<never>((_, reject) => {
+    timer = setTimeout(
+      () => reject(RemoteDebuggingNotAllowed.asking()),
+      ALLOW_DIALOG_BOUND_MS,
+    );
+  });
+  return Promise.race([answer, bound]).finally(() => clearTimeout(timer));
 }

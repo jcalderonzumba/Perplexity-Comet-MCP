@@ -85,6 +85,7 @@ describe("createCdpToolTable's tab record", () => {
     launch.answering = "Comet/140.0";
     const table = createCdpToolTable({
       client: {
+        askAgain: () => {},
         pageAddress: async () => "https://news.example/today",
         listTargets: async () => [],
         connect: async () => "ok",

@@ -30,23 +30,35 @@ export interface ConnectedBrowser {
   version(): Promise<string>;
 }
 
+/** The client's memory of Comet's allow-remote-debugging dialog. */
+export interface RemoteDebuggingDialog {
+  /** Forgets a refusal, so the next socket through the switch asks again. */
+  askAgain(): void;
+}
+
 export interface ConnectDeps {
   readonly launch: CometLaunch;
   /** The configured debug port. */
   readonly port: number;
   readonly tabs: ConnectTabs;
   readonly browser: ConnectedBrowser;
+  readonly debugging: RemoteDebuggingDialog;
 }
 
 type ConnectedComet = Exclude<CometOnPort, { kind: "running-without-port" }>;
 
-/** Answers `comet_connect`. */
+/**
+ * Answers `comet_connect`. It always asks again: it is the one call that
+ * may put Comet's dialog back on the user's screen after a refusal.
+ */
 export async function answerConnect({
   launch,
   port,
   tabs,
   browser,
+  debugging,
 }: ConnectDeps): Promise<ToolReply> {
+  debugging.askAgain();
   let comet: ConnectedComet;
   try {
     const found = await ensureCometOnPort(launch, port);

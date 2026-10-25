@@ -4,6 +4,7 @@ import {
   describeRunningWithoutPort,
   ensureCometOnPort,
   findCometOnPort,
+  RemoteDebuggingNotAllowed,
   startCometOnPort,
 } from "../../../src/core/comet-launch.js";
 import {
@@ -166,5 +167,19 @@ describe("startCometOnPort", () => {
     expect(failure.message).toContain("comet --remote-debugging-port=9222");
     expect(failure.message).toContain(SWITCH_LINE);
     expect(launch.launches).toEqual([]);
+  });
+});
+
+describe("RemoteDebuggingNotAllowed", () => {
+  it("words a refused dialog with the way to ask again", () => {
+    expect(RemoteDebuggingNotAllowed.refused().message).toBe(
+      "Comet refused remote debugging: its dialog was answered Deny. Call comet_connect to ask again, then click Allow in Comet.",
+    );
+  });
+
+  it("words a dialog still waiting with what to click", () => {
+    expect(RemoteDebuggingNotAllowed.asking().message).toBe(
+      "Comet is asking to allow remote debugging: click Allow in Comet's dialog, then call the tool again.",
+    );
   });
 });

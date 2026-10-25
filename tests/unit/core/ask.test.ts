@@ -10,6 +10,7 @@ import {
 } from "../../../src/core/ask.js";
 import { ASK_DEFAULT_TIMEOUT_MS } from "../../../src/core/ask-input.js";
 import { TASK_STALE_AFTER_MS } from "../../../src/core/ask-task.js";
+import { RemoteDebuggingNotAllowed } from "../../../src/core/comet-launch.js";
 import { ModeCore } from "../../../src/core/mode.js";
 import { PerplexityTab } from "../../../src/core/perplexity-tab.js";
 import type { PageArgument } from "../../../src/page-scripts.js";
@@ -497,6 +498,29 @@ describe("AskCore.ask: the tab it asks in", () => {
     });
     expect(port.sentPrompts).toEqual([]);
   });
+
+  it.each([
+    ["refused", RemoteDebuggingNotAllowed.refused()],
+    ["still waiting", RemoteDebuggingNotAllowed.asking()],
+  ])(
+    "fails with Comet's dialog words, trying no recovery, when its dialog is %s",
+    async (_, failure) => {
+      const { port, core } = answering(STREAMED_THEN_COMPLETED);
+      port.preCheckFails = true;
+      port.preCheckFailure = failure;
+
+      const outcome = await core.ask({ prompt: "q" });
+
+      expect(outcome).toEqual({
+        kind: "failed",
+        message: `Failed to establish connection to Comet browser: ${failure.message}`,
+        notice: { line: null },
+      });
+      expect(port.calls).not.toContain("startComet");
+      expect(port.connectedTo).toEqual([]);
+      expect(port.sentPrompts).toEqual([]);
+    },
+  );
 });
 
 describe("AskCore.ask: the mode step", () => {
@@ -1678,7 +1702,7 @@ describe("src/core/ask.ts and its siblings", () => {
 
       for (const imported of imports) {
         expect(imported).toMatch(
-          /^(\.\/(ask|answer-watch|ask-input|ask-previous|ask-send|ask-stop|ask-task|ask-reply|ask-mode|ask-tab|perplexity-tab|mode|mode-tool|page-script-failed|thread-turn|tool-reply|focus-emulation|screenshot|tools)\.js|\.\.\/(page-scripts|modes|perplexity-pages|error-message)\.js|node:crypto)$/,
+          /^(\.\/(ask|answer-watch|ask-input|ask-previous|ask-send|ask-stop|ask-task|ask-reply|ask-mode|ask-tab|comet-launch|perplexity-tab|mode|mode-tool|page-script-failed|thread-turn|tool-reply|focus-emulation|screenshot|tools)\.js|\.\.\/(page-scripts|modes|perplexity-pages|error-message)\.js|node:crypto)$/,
         );
       }
     },

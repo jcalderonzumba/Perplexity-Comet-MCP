@@ -53,11 +53,14 @@ function answeringLaunch(): FakeCometLaunch {
   return launch;
 }
 
+/** The table over a client with `methods`; it forgets no refusal unless told. */
 function tableOver(
   methods: Record<string, unknown>,
   launch: FakeCometLaunch = answeringLaunch(),
 ) {
-  return createCdpToolTable(deps(clientWith(methods), launch));
+  return createCdpToolTable(
+    deps(clientWith({ askAgain: () => {}, ...methods }), launch),
+  );
 }
 
 function textOf(reply: { kind: string } & Record<string, unknown>): string {
@@ -172,6 +175,18 @@ describe("comet_connect", () => {
       "Comet is running with its remote-debugging switch on port 9333 (Chrome/155.0.8059.148).\nConnected to Perplexity's main page: the connection was already on it.",
     );
     expect(launch.launches).toEqual([]);
+  });
+
+  it("has the client ask again through Comet's dialog", async () => {
+    const askAgain = vi.fn();
+    const table = tableOver({
+      askAgain,
+      pageAddress: async () => "https://www.perplexity.ai/search/x",
+    });
+
+    await table.call("comet_connect", {});
+
+    expect(askAgain).toHaveBeenCalledOnce();
   });
 
   it("fails without touching the browser when Comet runs without the port", async () => {
