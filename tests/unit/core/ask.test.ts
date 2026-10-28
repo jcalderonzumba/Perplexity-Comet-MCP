@@ -360,7 +360,7 @@ describe("AskCore.ask: the tab it asks in", () => {
   it("asks a follow-up in the main Perplexity tab it is connected to, without navigating", async () => {
     const { port, core } = openOn(MAIN_TAB, SIDECAR_TAB);
 
-    const outcome = await core.ask({ prompt: "q" });
+    const outcome = await core.ask({ prompt: "q", newChat: false });
 
     expect(port.connectedTo).toEqual([]);
     expect(port.navigations).toEqual([]);
@@ -371,7 +371,7 @@ describe("AskCore.ask: the tab it asks in", () => {
   it("moves a follow-up from the sidecar to the main tab, and types there", async () => {
     const { port, core } = openOn(SIDECAR_TAB, MAIN_TAB);
 
-    const outcome = await core.ask({ prompt: "q" });
+    const outcome = await core.ask({ prompt: "q", newChat: false });
 
     expect(port.connectedTo).toEqual([MAIN_TAB.id]);
     expect(port.navigations).toEqual([]);
@@ -430,7 +430,7 @@ describe("AskCore.ask: the tab it asks in", () => {
   it("asks in a thread whose address names a sidecar, rather than in the sidecar", async () => {
     const { port, core } = openOn(SIDECAR_TAB, SIDECAR_NAMED_THREAD);
 
-    await core.ask({ prompt: "q" });
+    await core.ask({ prompt: "q", newChat: false });
 
     expect(port.connectedTo).toEqual([SIDECAR_NAMED_THREAD.id]);
     expect(port.typedIn).toEqual([SIDECAR_NAMED_THREAD.url]);
@@ -620,7 +620,11 @@ describe("AskCore.ask: when the answer is complete", () => {
       reading("Paris", { status: "completed" }),
     ]);
 
-    const outcome = await core.ask({ prompt: "q", timeout: 60000 });
+    const outcome = await core.ask({
+      prompt: "q",
+      newChat: false,
+      timeout: 60000,
+    });
 
     expect(answerOf(outcome)).toBe("Paris");
     expect(port.polls).toBe(2);
@@ -690,7 +694,11 @@ describe("AskCore.ask: never the previous turn's answer", () => {
       reading("Paris", { status: "completed", latestTurn: 4 }),
     ]);
 
-    const outcome = await core.ask({ prompt: "q", timeout: 60000 });
+    const outcome = await core.ask({
+      prompt: "q",
+      newChat: false,
+      timeout: 60000,
+    });
 
     expect(answerOf(outcome)).toBe("Paris");
     expect(port.waitedMs).toBeLessThan(5000);
@@ -705,7 +713,11 @@ describe("AskCore.ask: never the previous turn's answer", () => {
       }),
     ]);
 
-    const outcome = await core.ask({ prompt: "q", timeout: 12000 });
+    const outcome = await core.ask({
+      prompt: "q",
+      newChat: false,
+      timeout: 12000,
+    });
 
     expect(outcome.kind).toBe("timed-out");
     expect(outcome.kind === "timed-out" && outcome.progress.partialAnswer).toBe(
@@ -724,7 +736,11 @@ describe("AskCore.ask: never the previous turn's answer", () => {
     // Before sending, the previous turn still read as working: no response.
     built.port.before = reading("", { latestTurn: 3, proseCount: 3 });
 
-    const outcome = await built.core.ask({ prompt: "q", timeout: 12000 });
+    const outcome = await built.core.ask({
+      prompt: "q",
+      newChat: false,
+      timeout: 12000,
+    });
 
     expect(outcome.kind).toBe("timed-out");
   });
@@ -735,7 +751,7 @@ describe("AskCore.ask: never the previous turn's answer", () => {
       reading(LONG_ANSWER, { status: "completed", latestTurn: 4 }),
     ]);
 
-    const outcome = await core.ask({ prompt: "q" });
+    const outcome = await core.ask({ prompt: "q", newChat: false });
 
     expect(answerOf(outcome)).toBe(LONG_ANSWER);
   });
@@ -778,7 +794,7 @@ describe("AskCore.ask: the ask's own turn, marked by its question's block", () =
       reading(LONG_ANSWER, { status: "completed", latestTurn: 4 }),
     ]);
 
-    const outcome = await core.ask({ prompt: "q" });
+    const outcome = await core.ask({ prompt: "q", newChat: false });
 
     expect(answerOf(outcome)).toBe(LONG_ANSWER);
   });
@@ -786,7 +802,11 @@ describe("AskCore.ask: the ask's own turn, marked by its question's block", () =
   it("never returns the previous turn's completed answer when the page keeps showing it and never the ask's question", async () => {
     const { core } = scrolledUpAt([PREVIOUS_TURN_SHOWN]);
 
-    const outcome = await core.ask({ prompt: "q", timeout: 12000 });
+    const outcome = await core.ask({
+      prompt: "q",
+      newChat: false,
+      timeout: 12000,
+    });
 
     expect(outcome.kind).toBe("timed-out");
     expect(outcome.kind === "timed-out" && outcome.progress.partialAnswer).toBe(
@@ -805,7 +825,11 @@ describe("AskCore.ask: the ask's own turn, marked by its question's block", () =
     // Turn 3 is on the page before sending, holding the same question.
     port.before = reading("", { latestTurn: 3 });
 
-    const outcome = await core.ask({ prompt: "q", timeout: 12000 });
+    const outcome = await core.ask({
+      prompt: "q",
+      newChat: false,
+      timeout: 12000,
+    });
 
     expect(outcome.kind).toBe("timed-out");
   });
@@ -820,7 +844,7 @@ describe("AskCore.ask: the ask's own turn, marked by its question's block", () =
       reading(LONG_ANSWER, { status: "completed", latestTurn: 2 }),
     ]);
 
-    const outcome = await core.ask({ prompt: "q" });
+    const outcome = await core.ask({ prompt: "q", newChat: false });
 
     expect(answerOf(outcome)).toBe(LONG_ANSWER);
   });
@@ -835,16 +859,16 @@ describe("AskCore.ask: the ask's own turn, marked by its question's block", () =
       }),
     ]);
 
-    const outcome = await core.ask({ prompt: "q" });
+    const outcome = await core.ask({ prompt: "q", newChat: false });
 
     expect(answerOf(outcome)).toBe(LONG_ANSWER);
   });
 
   it("follows the same turn in comet_poll", async () => {
     const { port, core } = scrolledUpAt([PREVIOUS_TURN_SHOWN]);
-    expect((await core.ask({ prompt: "q", timeout: 3000 })).kind).toBe(
-      "timed-out",
-    );
+    expect(
+      (await core.ask({ prompt: "q", newChat: false, timeout: 3000 })).kind,
+    ).toBe("timed-out");
     port.after.push(PREVIOUS_TURN_SHOWN);
 
     const working = await core.poll();
@@ -866,7 +890,7 @@ describe("AskCore.ask: the ask's own turn, marked by its question's block", () =
       reading(LONG_ANSWER, { status: "completed", latestTurn: 4 }),
     ]);
 
-    await core.ask({ prompt: "- what is\n the capital?" });
+    await core.ask({ prompt: "- what is\n the capital?", newChat: false });
 
     expect(port.questionsRead).toEqual(["what is the capital?"]);
   });
@@ -907,7 +931,11 @@ describe("AskCore.ask: on a page that shows no turn", () => {
       }),
     ]);
 
-    const outcome = await core.ask({ prompt: "q", timeout: 12000 });
+    const outcome = await core.ask({
+      prompt: "q",
+      newChat: false,
+      timeout: 12000,
+    });
 
     expect(outcome.kind).toBe("timed-out");
   });
@@ -921,7 +949,7 @@ describe("AskCore.ask: on a page that shows no turn", () => {
       }),
     ]);
 
-    const outcome = await core.ask({ prompt: "q" });
+    const outcome = await core.ask({ prompt: "q", newChat: false });
 
     expect(answerOf(outcome)).toBe(LONG_ANSWER);
   });
@@ -939,7 +967,11 @@ describe("AskCore.ask: on a page that shows no turn", () => {
       },
     ]);
 
-    const outcome = await core.ask({ prompt: "q", timeout: 6000 });
+    const outcome = await core.ask({
+      prompt: "q",
+      newChat: false,
+      timeout: 6000,
+    });
 
     expect(outcome.kind).toBe("timed-out");
   });
@@ -976,7 +1008,7 @@ describe("AskCore.ask: when time runs out", () => {
   it("returns within a poll of its time", async () => {
     const { port, core } = answering(STREAMING);
 
-    await core.ask({ prompt: "q", timeout: 3000 });
+    await core.ask({ prompt: "q", newChat: false, timeout: 3000 });
 
     expect(port.waitedMs).toBeGreaterThanOrEqual(3000);
     expect(port.waitedMs).toBeLessThan(3000 + ASK_TIMING.pollMs);
@@ -1482,7 +1514,7 @@ describe("AskCore.ask: while Comet is still answering the previous question", ()
   it("stops this server's own answer before typing, says so, and returns the new answer", async () => {
     const { port, core } = await afterATimedOutAsk();
 
-    const outcome = await core.ask({ prompt: "q" });
+    const outcome = await core.ask({ prompt: "q", newChat: false });
 
     expect(outcome).toMatchObject({
       kind: "answered",
@@ -1504,7 +1536,7 @@ describe("AskCore.ask: while Comet is still answering the previous question", ()
     built.modePage.navigateTo("Search");
     built.modePage.selectionTakes = false;
 
-    const outcome = await built.core.ask({ prompt: "q" });
+    const outcome = await built.core.ask({ prompt: "q", newChat: false });
 
     expect(outcome.kind).toBe("answered");
     const line = outcome.kind === "answered" ? (outcome.notice.line ?? "") : "";
@@ -1518,7 +1550,7 @@ describe("AskCore.ask: while Comet is still answering the previous question", ()
     const { port, core } = await afterATimedOutAsk();
     port.inputBar.takesStopClick = false;
 
-    const outcome = await core.ask({ prompt: "q" });
+    const outcome = await core.ask({ prompt: "q", newChat: false });
 
     expect(outcome).toMatchObject({
       kind: "failed",
@@ -1539,7 +1571,11 @@ describe("AskCore.ask: while Comet is still answering the previous question", ()
       reading("Paris", { status: "completed", latestTurn: 4 }),
     ];
 
-    const outcome = await core.ask({ prompt: "q", timeout: 60000 });
+    const outcome = await core.ask({
+      prompt: "q",
+      newChat: false,
+      timeout: 60000,
+    });
 
     expect(answerOf(outcome)).toBe("Paris");
     expect(outcome.kind === "answered" && outcome.notice.line).toBeNull();
@@ -1555,7 +1591,11 @@ describe("AskCore.ask: while Comet is still answering the previous question", ()
     port.answeringUntilMs = 6000;
     port.after = [reading("Rome was", { latestTurn: 0 })];
 
-    const outcome = await core.ask({ prompt: "q", timeout: 9000 });
+    const outcome = await core.ask({
+      prompt: "q",
+      newChat: false,
+      timeout: 9000,
+    });
 
     expect(outcome.kind).toBe("timed-out");
     expect(outcome.kind === "timed-out" && outcome.timeoutMs).toBe(9000);
@@ -1566,7 +1606,11 @@ describe("AskCore.ask: while Comet is still answering the previous question", ()
     const { port, core } = rig();
     port.inputBar.answering = true;
 
-    const outcome = await core.ask({ prompt: "q", timeout: 9000 });
+    const outcome = await core.ask({
+      prompt: "q",
+      newChat: false,
+      timeout: 9000,
+    });
 
     expect(outcome).toMatchObject({ kind: "failed" });
     const message = outcome.kind === "failed" ? outcome.message : "";
@@ -1590,7 +1634,11 @@ describe("AskCore.ask: while Comet is still answering the previous question", ()
     port.inputBar.answering = true;
     port.nextAsk(reading("", { latestTurn: 1 }), []);
 
-    const outcome = await core.ask({ prompt: "q", timeout: 3000 });
+    const outcome = await core.ask({
+      prompt: "q",
+      newChat: false,
+      timeout: 3000,
+    });
 
     expect(outcome.kind).toBe("failed");
     expect(port.inputBar.clicks).toEqual([]);
@@ -1607,7 +1655,11 @@ describe("AskCore.ask: while Comet is still answering the previous question", ()
       await stop;
     };
 
-    const outcome = await core.ask({ prompt: "q", timeout: 60000 });
+    const outcome = await core.ask({
+      prompt: "q",
+      newChat: false,
+      timeout: 60000,
+    });
 
     expect(await stop).toEqual({ kind: "stopped" });
     expect(outcome).toEqual({
@@ -1626,10 +1678,14 @@ describe("AskCore.ask: while Comet is still answering the previous question", ()
     port.after = [reading("Paris", { status: "completed", latestTurn: 0 })];
     let newer: Promise<AskOutcome> | undefined;
     port.onWait = () => {
-      newer ??= core.ask({ prompt: "newer", timeout: 60000 });
+      newer ??= core.ask({ prompt: "newer", newChat: false, timeout: 60000 });
     };
 
-    const older = await core.ask({ prompt: "older", timeout: 60000 });
+    const older = await core.ask({
+      prompt: "older",
+      newChat: false,
+      timeout: 60000,
+    });
 
     expect(older.kind).toBe("stopped-before-sending");
     expect(answerOf(await (newer as Promise<AskOutcome>))).toBe("Paris");
@@ -1647,7 +1703,11 @@ describe("AskCore.ask: while Comet is still answering the previous question", ()
       newerTask ??= core.task.start("a newer prompt");
     };
 
-    const outcome = await core.ask({ prompt: "q", timeout: 60000 });
+    const outcome = await core.ask({
+      prompt: "q",
+      newChat: false,
+      timeout: 60000,
+    });
 
     expect(outcome.kind).toBe("stopped-before-sending");
     expect(port.calls).not.toContain("insertText");

@@ -737,6 +737,7 @@ const FOLLOW_UP = {
     const followUp = await ask(callTool, ANSWER, {
       prompt:
         "What number did I ask you to remember? Reply with the number only.",
+      newChat: false,
     });
     return {
       held: followUpAnswered({ first, followUp }),
@@ -914,10 +915,15 @@ function afterConnect(wait, debugPort) {
     FOLLOW_UP,
     contextResetCheck(debugPort),
     TIMEOUT_STATED,
+    // [2.5] follows [2.4] on purpose: its prompt is sent while that essay may still stream.
     askCheck(
       "2.5",
       ANSWER,
-      { prompt: CONTEXT_PROMPT, context: "Project name: Artemis" },
+      {
+        prompt: CONTEXT_PROMPT,
+        context: "Project name: Artemis",
+        newChat: false,
+      },
       (reply) => answerNamesWithoutEcho(reply, "Artemis", CONTEXT_PROMPT),
     ),
     askCheck(

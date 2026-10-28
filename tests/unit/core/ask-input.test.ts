@@ -82,9 +82,9 @@ describe("readAskRequest: the timeout", () => {
 });
 
 describe("readAskRequest: newChat", () => {
-  it("is false when absent", () => {
-    expect(requestOf({ prompt: "q" }).newChat).toBe(false);
-    expect(requestOf({ prompt: "q", newChat: null }).newChat).toBe(false);
+  it("is true when absent, so a bare ask starts a new conversation", () => {
+    expect(requestOf({ prompt: "q" }).newChat).toBe(true);
+    expect(requestOf({ prompt: "q", newChat: null }).newChat).toBe(true);
   });
 
   it("keeps a boolean", () => {

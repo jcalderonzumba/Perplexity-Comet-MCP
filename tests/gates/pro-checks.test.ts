@@ -454,7 +454,11 @@ describe("the ask predicates against the stdio server's own comet_ask replies", 
 
     const reply = toStdioResult(
       describeAskOutcome(
-        await core.ask({ prompt, context: "Project name: Artemis" }),
+        await core.ask({
+          prompt,
+          context: "Project name: Artemis",
+          newChat: false,
+        }),
         wrapUntrustedPageContent,
       ),
     );
@@ -1331,6 +1335,7 @@ const CALLS = {
   recall: ask(
     "What number did I ask you to remember? Reply with the number only.",
     ANSWER_ASK,
+    { newChat: false },
   ),
   rememberAgain: ask("Remember the number 9473.", ANSWER_ASK, {
     newChat: true,
@@ -1341,6 +1346,7 @@ const CALLS = {
   essay: ask("Write a 10000 word essay on the history of Rome.", 3000),
   context: ask("What is the project name?", ANSWER_ASK, {
     context: "Project name: Artemis",
+    newChat: false,
   }),
   paragraphs: ask(
     "Write three short paragraphs about the sea. Start the first with the word ALPHA, the second with the word BRAVO and the third with the word CHARLIE.",
