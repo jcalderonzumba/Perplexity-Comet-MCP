@@ -188,7 +188,7 @@ Send a prompt to Comet and wait for the complete response. Automatically trigger
 ```
 Parameters:
   - prompt (required): Question or task for Comet
-  - newChat (optional): Start fresh conversation (default: false)
+  - newChat (optional): Start fresh conversation (default: true); set false for a follow-up in the open conversation
   - context (optional): Text placed before the prompt, such as file contents
   - timeout (optional): Max wait time in ms (default: 120000)
 
@@ -514,7 +514,7 @@ comet_ask prompt="..." timeout=180000
 
 **Problem:** `comet_ask` fails with `The prompt was not sent: …`
 
-**Explanation:** The ask checks each step of sending the prompt, and the error names the one that failed. Comet does not need to be in front: the prompt is typed and submitted with the browser's own input, which works while Comet's window is behind others. `Comet was still answering a question this server did not ask` means an answer the server did not start, perhaps one of yours, was still running when the ask's timeout ran out, and the ask never stops such an answer: wait for it, or stop it with `comet_stop`, then ask again. The input bar not found usually means the tab is not on Perplexity's search page; run `comet_ask` with `newChat: true` to start from Perplexity's home page. The text or the submit not taken means Perplexity's page did not accept the input. A Perplexity tab behind another tab in its window drops key presses and clicks, and a window behind others may do the same, so the ask has the browser treat the tab as focused while it presses Enter or clicks Submit. Take a `comet_screenshot` to see the page, then ask again.
+**Explanation:** The ask checks each step of sending the prompt, and the error names the one that failed. Comet does not need to be in front: the prompt is typed and submitted with the browser's own input, which works while Comet's window is behind others. `Comet was still answering a question this server did not ask` means an answer the server did not start, perhaps one of yours, was still running when the ask's timeout ran out, and the ask never stops such an answer: wait for it, or stop it with `comet_stop`, then ask again. The input bar not found usually means the tab is not on Perplexity's search page; a bare `comet_ask` opens Perplexity's home page, which shows the input bar, while `newChat: false` asks in the thread already open. The text or the submit not taken means Perplexity's page did not accept the input. A Perplexity tab behind another tab in its window drops key presses and clicks, and a window behind others may do the same, so the ask has the browser treat the tab as focused while it presses Enter or clicks Submit. Take a `comet_screenshot` to see the page, then ask again.
 
 ---
 

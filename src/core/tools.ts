@@ -50,7 +50,8 @@ export const TOOL_DEFINITIONS: readonly ToolDefinition[] = [
         },
         newChat: {
           type: "boolean",
-          description: "Start a fresh conversation (default: false)",
+          description:
+            "Start a fresh conversation (default: true); false asks a follow-up in the conversation already open",
         },
         timeout: {
           type: "number",

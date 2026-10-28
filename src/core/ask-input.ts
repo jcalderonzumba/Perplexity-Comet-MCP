@@ -48,7 +48,8 @@ export function readAskRequest(
     request: {
       prompt: prompt as string,
       context: isAbsent(context) ? undefined : (context as string),
-      newChat: newChat === true,
+      // A bare ask starts a new conversation; a follow-up passes false.
+      newChat: newChat !== false,
       timeoutMs,
     },
   };
