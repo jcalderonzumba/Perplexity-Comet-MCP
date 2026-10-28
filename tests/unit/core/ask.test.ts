@@ -794,7 +794,7 @@ describe("AskCore.ask: the ask's own turn, marked by its question's block", () =
       reading(LONG_ANSWER, { status: "completed", latestTurn: 4 }),
     ]);
 
-    const outcome = await core.ask({ prompt: "q" });
+    const outcome = await core.ask({ prompt: "q", newChat: false });
 
     expect(answerOf(outcome)).toBe(LONG_ANSWER);
   });
@@ -802,7 +802,11 @@ describe("AskCore.ask: the ask's own turn, marked by its question's block", () =
   it("never returns the previous turn's completed answer when the page keeps showing it and never the ask's question", async () => {
     const { core } = scrolledUpAt([PREVIOUS_TURN_SHOWN]);
 
-    const outcome = await core.ask({ prompt: "q", timeout: 12000 });
+    const outcome = await core.ask({
+      prompt: "q",
+      newChat: false,
+      timeout: 12000,
+    });
 
     expect(outcome.kind).toBe("timed-out");
     expect(outcome.kind === "timed-out" && outcome.progress.partialAnswer).toBe(
@@ -821,7 +825,11 @@ describe("AskCore.ask: the ask's own turn, marked by its question's block", () =
     // Turn 3 is on the page before sending, holding the same question.
     port.before = reading("", { latestTurn: 3 });
 
-    const outcome = await core.ask({ prompt: "q", timeout: 12000 });
+    const outcome = await core.ask({
+      prompt: "q",
+      newChat: false,
+      timeout: 12000,
+    });
 
     expect(outcome.kind).toBe("timed-out");
   });
@@ -836,7 +844,7 @@ describe("AskCore.ask: the ask's own turn, marked by its question's block", () =
       reading(LONG_ANSWER, { status: "completed", latestTurn: 2 }),
     ]);
 
-    const outcome = await core.ask({ prompt: "q" });
+    const outcome = await core.ask({ prompt: "q", newChat: false });
 
     expect(answerOf(outcome)).toBe(LONG_ANSWER);
   });
@@ -851,16 +859,16 @@ describe("AskCore.ask: the ask's own turn, marked by its question's block", () =
       }),
     ]);
 
-    const outcome = await core.ask({ prompt: "q" });
+    const outcome = await core.ask({ prompt: "q", newChat: false });
 
     expect(answerOf(outcome)).toBe(LONG_ANSWER);
   });
 
   it("follows the same turn in comet_poll", async () => {
     const { port, core } = scrolledUpAt([PREVIOUS_TURN_SHOWN]);
-    expect((await core.ask({ prompt: "q", timeout: 3000 })).kind).toBe(
-      "timed-out",
-    );
+    expect(
+      (await core.ask({ prompt: "q", newChat: false, timeout: 3000 })).kind,
+    ).toBe("timed-out");
     port.after.push(PREVIOUS_TURN_SHOWN);
 
     const working = await core.poll();
@@ -882,7 +890,7 @@ describe("AskCore.ask: the ask's own turn, marked by its question's block", () =
       reading(LONG_ANSWER, { status: "completed", latestTurn: 4 }),
     ]);
 
-    await core.ask({ prompt: "- what is\n the capital?" });
+    await core.ask({ prompt: "- what is\n the capital?", newChat: false });
 
     expect(port.questionsRead).toEqual(["what is the capital?"]);
   });
@@ -923,7 +931,11 @@ describe("AskCore.ask: on a page that shows no turn", () => {
       }),
     ]);
 
-    const outcome = await core.ask({ prompt: "q", timeout: 12000 });
+    const outcome = await core.ask({
+      prompt: "q",
+      newChat: false,
+      timeout: 12000,
+    });
 
     expect(outcome.kind).toBe("timed-out");
   });
@@ -937,7 +949,7 @@ describe("AskCore.ask: on a page that shows no turn", () => {
       }),
     ]);
 
-    const outcome = await core.ask({ prompt: "q" });
+    const outcome = await core.ask({ prompt: "q", newChat: false });
 
     expect(answerOf(outcome)).toBe(LONG_ANSWER);
   });
@@ -955,7 +967,11 @@ describe("AskCore.ask: on a page that shows no turn", () => {
       },
     ]);
 
-    const outcome = await core.ask({ prompt: "q", timeout: 6000 });
+    const outcome = await core.ask({
+      prompt: "q",
+      newChat: false,
+      timeout: 6000,
+    });
 
     expect(outcome.kind).toBe("timed-out");
   });
